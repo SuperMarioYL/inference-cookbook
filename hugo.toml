@@ -51,6 +51,13 @@ enableEmoji = true
     enable = true
     theme = "neutral"
 
+  # 数学公式渲染 - 使用 MathJax（比 KaTeX 更稳定）
+  [params.katex]
+    enable = false
+
+  [params.math]
+    enable = true
+
   # 文档侧边栏配置
   [params.ui]
     # 启用面包屑导航
@@ -173,3 +180,6 @@ enableEmoji = true
 [security]
   [security.funcs]
     getenv = ["^HUGO_", "^CI$"]
+  [security.http]
+    methods = ["(?i)GET|POST"]
+    urls = [".*"]

@@ -145,11 +145,19 @@ enableEmoji = true
     pre = "<i class='fas fa-external-link-alt'></i>"
 
 # ===============================
-# 输出格式
+# 输出格式（包含 sitemap 用于 SEO）
 # ===============================
 [outputs]
-  home = ["HTML"]
-  section = ["HTML", "print"]
+  home = ["HTML", "RSS"]
+  section = ["HTML", "print", "RSS"]
+
+# ===============================
+# Sitemap 配置
+# ===============================
+[sitemap]
+  changeFreq = "weekly"
+  filename = "sitemap.xml"
+  priority = 0.5
 
 # ===============================
 # 模块配置（Docsy 需要）

@@ -1,0 +1,105 @@
+{{/*
+  Custom docs navigation that properly handles nested sections with weight ordering.
+  This overrides the default @thulite/doks-core navigation.
+*/}}
+
+{{- $docsSection := site.GetPage "docs" -}}
+{{- $allPages := slice -}}
+
+{{/* Recursively collect all regular pages under docs, sorted by weight */}}
+{{- define "collectPages" -}}
+  {{- $result := .result -}}
+  {{- $section := .section -}}
+  {{- range $section.Sections.ByWeight -}}
+    {{- $result = partial "collectPagesHelper" (dict "result" $result "section" .) -}}
+  {{- end -}}
+  {{- range $section.RegularPages.ByWeight -}}
+    {{- $result = $result | append . -}}
+  {{- end -}}
+  {{- return $result -}}
+{{- end -}}
+
+{{- define "collectPagesHelper" -}}
+  {{- $result := .result -}}
+  {{- $section := .section -}}
+  {{- range $section.Sections.ByWeight -}}
+    {{- $result = partial "collectPagesHelper" (dict "result" $result "section" .) -}}
+  {{- end -}}
+  {{- range $section.RegularPages.ByWeight -}}
+    {{- $result = $result | append . -}}
+  {{- end -}}
+  {{- return $result -}}
+{{- end -}}
+
+{{/* Build flat list of all doc pages in correct order */}}
+{{- if $docsSection -}}
+  {{- range $docsSection.Sections.ByWeight -}}
+    {{- range .RegularPages.ByWeight -}}
+      {{- $allPages = $allPages | append . -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+
+{{/* Find current page index and determine prev/next */}}
+{{- $currentIndex := -1 -}}
+{{- range $i, $p := $allPages -}}
+  {{- if eq $p.RelPermalink $.RelPermalink -}}
+    {{- $currentIndex = $i -}}
+  {{- end -}}
+{{- end -}}
+
+{{- $prevPage := false -}}
+{{- $nextPage := false -}}
+
+{{- if ge $currentIndex 0 -}}
+  {{- if gt $currentIndex 0 -}}
+    {{- $prevPage = index $allPages (sub $currentIndex 1) -}}
+  {{- end -}}
+  {{- if lt $currentIndex (sub (len $allPages) 1) -}}
+    {{- $nextPage = index $allPages (add $currentIndex 1) -}}
+  {{- end -}}
+{{- end -}}
+
+{{ if or $prevPage $nextPage -}}
+<div class="page-nav d-flex flex-column flex-sm-row">
+	{{ with $prevPage -}}
+		<div class="card w-100">
+			<div class="card-body d-flex">
+				<div class="d-flex flex-column justify-content-center">
+					<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-arrow-left" width="20" height="20" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+						<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+						<path d="M5 12l14 0"></path>
+						<path d="M5 12l6 6"></path>
+						<path d="M5 12l6 -6"></path>
+				 	</svg>
+				</div>
+				<div class="d-flex flex-column">
+					<div class="text-body-secondary">{{ i18n "chapter_previous" }}</div>
+					<a href="{{ .RelPermalink }}" class="stretched-link text-reset text-decoration-none">{{ .Title }}</a>
+				</div>
+			</div>
+		</div>
+	{{ end -}}
+	{{ if and $prevPage $nextPage -}}
+		<div class="m-2"></div>
+	{{ end -}}
+	{{ with $nextPage -}}
+		<div class="card text-end w-100">
+			<div class="card-body d-flex justify-content-end">
+				<div class="d-flex flex-column">
+					<div class="text-body-secondary">{{ i18n "chapter_next" }}</div>
+					<a href="{{ .RelPermalink }}" class="stretched-link text-reset text-decoration-none">{{ .Title }}</a>
+				</div>
+				<div class="d-flex flex-column justify-content-center">
+					<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-arrow-right" width="20" height="20" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+						<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+						<path d="M5 12l14 0"></path>
+						<path d="M13 18l6 -6"></path>
+						<path d="M13 6l6 6"></path>
+					</svg>
+				</div>
+			</div>
+		</div>
+	{{ end -}}
+</div>
+{{ end -}}

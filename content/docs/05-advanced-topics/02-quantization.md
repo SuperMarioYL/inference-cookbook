@@ -32,12 +32,12 @@ weight: 2
 
 ```mermaid
 graph LR
-    subgraph FP16 计算
+    subgraph fp16_compute["FP16 计算"]
         A1[权重 FP16] --> B1[矩阵乘法]
         B1 --> C1[输出 FP16]
     end
 
-    subgraph INT8 计算
+    subgraph int8_compute["INT8 计算"]
         A2[权重 INT8] --> B2[整数矩阵乘法]
         B2 --> C2[反量化]
         C2 --> D2[输出 FP16]
@@ -71,14 +71,14 @@ graph LR
 
 ```mermaid
 graph TD
-    subgraph 对称量化
+    subgraph symmetric["对称量化"]
         A1["-127 到 127"] --> B1["zero_point = 0"]
-        B1 --> C1["x = q × scale"]
+        B1 --> C1["x = q x scale"]
     end
 
-    subgraph 非对称量化
-        A2["-128 到 127"] --> B2["zero_point ≠ 0"]
-        B2 --> C2["x = q × scale + zero_point"]
+    subgraph asymmetric["非对称量化"]
+        A2["-128 到 127"] --> B2["zero_point != 0"]
+        B2 --> C2["x = q x scale + zero_point"]
     end
 ```
 
@@ -237,14 +237,14 @@ class Fp8Config(QuantizationConfig):
 
 ```mermaid
 flowchart TD
-    subgraph 动态量化
+    subgraph dynamic_quant["动态量化"]
         A1[输入激活] --> B1[计算 min/max]
         B1 --> C1[动态计算 scale]
         C1 --> D1[量化为 FP8]
         D1 --> E1[计算]
     end
 
-    subgraph 静态量化
+    subgraph static_quant["静态量化"]
         A2[校准数据集] --> B2[收集激活统计]
         B2 --> C2[预计算 scale]
         C2 --> D2[存储 scale]
@@ -502,16 +502,16 @@ llm = LLM(
 
 ```mermaid
 graph LR
-    subgraph 高精度
+    subgraph high_precision["高精度"]
         A[FP16] --> B[2x 压缩]
     end
 
-    subgraph 中等精度
+    subgraph medium_precision["中等精度"]
         C[FP8] --> D[4x 压缩]
         E[INT8] --> F[4x 压缩]
     end
 
-    subgraph 低精度
+    subgraph low_precision["低精度"]
         G[INT4] --> H[8x 压缩]
         I[INT3] --> J[10.7x 压缩]
         K[INT2] --> L[16x 压缩]

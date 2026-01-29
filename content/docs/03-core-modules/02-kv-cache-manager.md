@@ -15,17 +15,17 @@ KVCacheManager 是 vLLM 内存管理的核心组件，它连接了调度器（Sc
 
 ```mermaid
 graph TD
-    subgraph 调度层
+    subgraph scheduling_layer["调度层"]
         Scheduler[Scheduler<br/>调度器]
     end
 
-    subgraph 内存管理层
+    subgraph memory_layer["内存管理层"]
         KVM[KVCacheManager<br/>KV Cache 管理器]
         Coord[KVCacheCoordinator<br/>协调器]
         BP[BlockPool<br/>内存块池]
     end
 
-    subgraph 执行层
+    subgraph execution_layer["执行层"]
         Runner[GPUModelRunner<br/>模型执行器]
     end
 
@@ -442,17 +442,17 @@ def compute_block_hash(token_ids: list[int], block_size: int) -> BlockHash:
 
 ```mermaid
 flowchart TD
-    subgraph 请求1[请求 1: "Hello, how are you?"]
+    subgraph request1["请求 1 - Hello, how are you?"]
         R1B1[Block 1<br/>hash: abc123]
         R1B2[Block 2<br/>hash: def456]
     end
 
-    subgraph 请求2[请求 2: "Hello, how is weather?"]
+    subgraph request2["请求 2 - Hello, how is weather?"]
         R2B1[Block 1<br/>hash: abc123]
         R2B2[Block 2<br/>hash: ghi789]
     end
 
-    subgraph 缓存[Block Hash Cache]
+    subgraph cache["Block Hash Cache"]
         C1[abc123 → Block #5]
         C2[def456 → Block #8]
     end

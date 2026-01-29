@@ -13,12 +13,12 @@ weight: 4
 
 ```mermaid
 graph LR
-    subgraph 模型推理
+    subgraph model_inference["模型推理"]
         Input[输入 tokens] --> Forward[前向传播]
         Forward --> Logits[logits]
     end
 
-    subgraph 采样
+    subgraph sampling["采样"]
         Logits --> Processor[Logits 处理]
         Processor --> Sample[采样策略]
         Sample --> Token[下一个 token]
@@ -152,7 +152,7 @@ flowchart TD
 
     D --> E[apply_logits_processors]
 
-    subgraph Logits 处理
+    subgraph logits_processing["Logits 处理"]
         E --> E1[Allowed Token IDs]
         E1 --> E2[Bad Words]
         E2 --> E3[Min Tokens]
@@ -162,7 +162,7 @@ flowchart TD
 
     E5 --> F[sample]
 
-    subgraph 采样
+    subgraph sampling["采样"]
         F --> F1{all_greedy?}
         F1 -->|是| F2[argmax]
         F1 -->|否| F3[apply_temperature]
@@ -229,7 +229,7 @@ softmax → [0.36, 0.22, 0.17, 0.14]  # 分布更均匀
 
 ```mermaid
 graph LR
-    subgraph "温度效果"
+    subgraph temp_effect["温度效果"]
         Low["temp < 1<br/>更确定"]
         Normal["temp = 1<br/>原始分布"]
         High["temp > 1<br/>更随机"]

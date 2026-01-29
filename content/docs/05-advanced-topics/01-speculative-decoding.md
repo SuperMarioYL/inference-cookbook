@@ -34,7 +34,7 @@ Token 1 → Model Forward → Token 2 → Model Forward → Token 3 → ...
 
 ```mermaid
 flowchart LR
-    subgraph 传统方法
+    subgraph traditional["传统方法"]
         A1[Token 1] --> B1[Model]
         B1 --> C1[Token 2]
         C1 --> D1[Model]
@@ -43,12 +43,12 @@ flowchart LR
         F1 --> G1[Token 4]
     end
 
-    subgraph 投机解码
+    subgraph speculative["投机解码"]
         A2[Token 1] --> B2[Draft Model]
-        B2 --> C2[Draft: 2,3,4]
+        B2 --> C2["Draft: 2,3,4"]
         C2 --> D2[Target Model<br/>并行验证]
-        D2 --> E2[接受: 2,3<br/>拒绝: 4]
-        E2 --> F2[输出: 2,3,4']
+        D2 --> E2["接受: 2,3<br/>拒绝: 4"]
+        E2 --> F2["输出: 2,3,4'"]
     end
 ```
 
@@ -411,14 +411,14 @@ EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) 利用 Tar
 
 ```mermaid
 graph TD
-    subgraph Target Model
+    subgraph target_model["Target Model"]
         T1[Input Token] --> T2[Transformer Layers]
         T2 --> T3[Hidden States]
         T3 --> T4[LM Head]
         T4 --> T5[Output Token]
     end
 
-    subgraph EAGLE Head
+    subgraph eagle_head["EAGLE Head"]
         T3 --> E1[Feature Projection]
         T5 --> E2[Token Embedding]
         E1 --> E3[+]

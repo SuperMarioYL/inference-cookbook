@@ -25,32 +25,32 @@ vLLM 采用分层架构设计，从上到下分为四层：
 
 ```mermaid
 graph TD
-    subgraph 用户接口层
-        A1[Python API<br/>LLM 类]
-        A2[CLI<br/>vllm serve]
-        A3[OpenAI API<br/>HTTP Server]
+    subgraph user_interface["用户接口层"]
+        A1["Python API<br/>LLM 类"]
+        A2["CLI<br/>vllm serve"]
+        A3["OpenAI API<br/>HTTP Server"]
         A4[gRPC Server]
     end
 
-    subgraph 引擎层
-        B1[LLMEngine<br/>同步引擎]
-        B2[AsyncLLM<br/>异步引擎]
-        B3[InputProcessor<br/>输入处理]
-        B4[OutputProcessor<br/>输出处理]
+    subgraph engine_layer["引擎层"]
+        B1["LLMEngine<br/>同步引擎"]
+        B2["AsyncLLM<br/>异步引擎"]
+        B3["InputProcessor<br/>输入处理"]
+        B4["OutputProcessor<br/>输出处理"]
     end
 
-    subgraph 核心层
-        C1[EngineCore<br/>核心逻辑]
-        C2[Scheduler<br/>调度器]
-        C3[KVCacheManager<br/>缓存管理]
-        C4[BlockPool<br/>内存块池]
+    subgraph core_layer["核心层"]
+        C1["EngineCore<br/>核心逻辑"]
+        C2["Scheduler<br/>调度器"]
+        C3["KVCacheManager<br/>缓存管理"]
+        C4["BlockPool<br/>内存块池"]
     end
 
-    subgraph 执行层
-        D1[ModelExecutor<br/>执行器]
-        D2[GPUModelRunner<br/>模型运行器]
-        D3[Worker<br/>工作进程]
-        D4[Attention Backend<br/>注意力后端]
+    subgraph execution_layer["执行层"]
+        D1["ModelExecutor<br/>执行器"]
+        D2["GPUModelRunner<br/>模型运行器"]
+        D3["Worker<br/>工作进程"]
+        D4["Attention Backend<br/>注意力后端"]
     end
 
     A1 --> B1
@@ -97,29 +97,29 @@ graph TD
 
 ```mermaid
 flowchart TB
-    subgraph 用户请求
-        U[用户] -->|generate/chat| API[API 入口]
+    subgraph user_request["用户请求"]
+        U["用户"] -->|generate/chat| API["API 入口"]
     end
 
-    subgraph 引擎处理
-        API --> IP[InputProcessor<br/>Tokenization<br/>Prompt 处理]
-        IP --> EC[EngineCore<br/>核心逻辑]
-        EC --> OP[OutputProcessor<br/>Detokenization<br/>结果封装]
+    subgraph engine_process["引擎处理"]
+        API --> IP["InputProcessor<br/>Tokenization<br/>Prompt 处理"]
+        IP --> EC["EngineCore<br/>核心逻辑"]
+        EC --> OP["OutputProcessor<br/>Detokenization<br/>结果封装"]
         OP --> U
     end
 
-    subgraph 核心调度
-        EC <--> SCH[Scheduler<br/>请求调度<br/>资源分配]
-        SCH <--> KVM[KVCacheManager<br/>缓存分配<br/>前缀缓存]
-        KVM <--> BP[BlockPool<br/>块管理<br/>LRU 驱逐]
+    subgraph core_scheduling["核心调度"]
+        EC <--> SCH["Scheduler<br/>请求调度<br/>资源分配"]
+        SCH <--> KVM["KVCacheManager<br/>缓存分配<br/>前缀缓存"]
+        KVM <--> BP["BlockPool<br/>块管理<br/>LRU 驱逐"]
     end
 
-    subgraph 模型执行
-        EC <--> EX[ModelExecutor<br/>执行协调]
-        EX --> MR[GPUModelRunner<br/>输入准备<br/>模型前向]
-        MR --> W[Worker<br/>GPU 计算]
-        W --> ATT[Attention<br/>PagedAttention]
-        W --> SAM[Sampler<br/>Token 采样]
+    subgraph model_execution["模型执行"]
+        EC <--> EX["ModelExecutor<br/>执行协调"]
+        EX --> MR["GPUModelRunner<br/>输入准备<br/>模型前向"]
+        MR --> W["Worker<br/>GPU 计算"]
+        W --> ATT["Attention<br/>PagedAttention"]
+        W --> SAM["Sampler<br/>Token 采样"]
     end
 
     style EC fill:#c8e6c9
@@ -290,17 +290,17 @@ classDiagram
 
 ```mermaid
 flowchart TD
-    A[开始 step] --> B[Scheduler.schedule<br/>决定哪些请求执行]
-    B --> C{有请求需要执行?}
-    C -->|否| D[返回空输出]
-    C -->|是| E[ModelExecutor.execute_model<br/>执行前向传播]
-    E --> F[获取 logits]
-    F --> G[Scheduler.get_grammar_bitmask<br/>获取语法约束]
-    G --> H[ModelExecutor.sample_tokens<br/>采样生成 token]
-    H --> I[Scheduler.update_from_output<br/>更新请求状态]
-    I --> J[检查完成条件]
-    J --> K[构建 EngineCoreOutputs]
-    K --> L[返回输出]
+    A["开始 step"] --> B["Scheduler.schedule<br/>决定哪些请求执行"]
+    B --> C{"有请求需要执行?"}
+    C -->|否| D["返回空输出"]
+    C -->|是| E["ModelExecutor.execute_model<br/>执行前向传播"]
+    E --> F["获取 logits"]
+    F --> G["Scheduler.get_grammar_bitmask<br/>获取语法约束"]
+    G --> H["ModelExecutor.sample_tokens<br/>采样生成 token"]
+    H --> I["Scheduler.update_from_output<br/>更新请求状态"]
+    I --> J["检查完成条件"]
+    J --> K["构建 EngineCoreOutputs"]
+    K --> L["返回输出"]
 
     style B fill:#bbdefb
     style E fill:#c8e6c9
@@ -406,19 +406,19 @@ GPUModelRunner 负责准备输入数据并执行模型前向传播：
 
 ```mermaid
 flowchart TD
-    subgraph GPUModelRunner.execute_model
-        A[接收 SchedulerOutput] --> B[准备输入 Tensors<br/>input_ids, positions]
-        B --> C[构建 AttentionMetadata<br/>block_tables, slot_mapping]
-        C --> D[模型前向传播<br/>model.forward]
-        D --> E[获取 hidden_states]
-        E --> F[LM Head 计算<br/>获取 logits]
-        F --> G[返回 logits]
+    subgraph execute_model["GPUModelRunner.execute_model"]
+        A["接收 SchedulerOutput"] --> B["准备输入 Tensors<br/>input_ids, positions"]
+        B --> C["构建 AttentionMetadata<br/>block_tables, slot_mapping"]
+        C --> D["模型前向传播<br/>model.forward"]
+        D --> E["获取 hidden_states"]
+        E --> F["LM Head 计算<br/>获取 logits"]
+        F --> G["返回 logits"]
     end
 
-    subgraph GPUModelRunner.sample_tokens
-        H[接收 logits] --> I[应用采样参数<br/>temperature, top_p]
-        I --> J[Sampler.forward<br/>采样逻辑]
-        J --> K[返回 sampled_token_ids]
+    subgraph sample_tokens["GPUModelRunner.sample_tokens"]
+        H["接收 logits"] --> I["应用采样参数<br/>temperature, top_p"]
+        I --> J["Sampler.forward<br/>采样逻辑"]
+        J --> K["返回 sampled_token_ids"]
     end
 
     G --> H

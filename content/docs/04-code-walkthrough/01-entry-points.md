@@ -15,12 +15,12 @@ vLLM 提供两种主要的使用方式：
 
 ```mermaid
 graph TD
-    subgraph 离线推理
+    subgraph offline["离线推理"]
         LLM[LLM 类]
         Gen[generate/encode/...]
     end
 
-    subgraph 在线服务
+    subgraph online["在线服务"]
         Server[API Server]
         Async[AsyncLLMEngine]
     end

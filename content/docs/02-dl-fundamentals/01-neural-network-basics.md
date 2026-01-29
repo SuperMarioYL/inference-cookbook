@@ -34,18 +34,18 @@ weight: 1
 
 ```mermaid
 graph LR
-    subgraph 输入
+    subgraph inputs["输入"]
         X1[x₁]
         X2[x₂]
         X3[x₃]
     end
 
-    subgraph 神经元
+    subgraph neuron["神经元"]
         W1[w₁] --> SUM((Σ))
         W2[w₂] --> SUM
         W3[w₃] --> SUM
-        B[b<br/>偏置] --> SUM
-        SUM --> ACT[激活函数<br/>f]
+        B["b<br/>偏置"] --> SUM
+        SUM --> ACT["激活函数<br/>f"]
     end
 
     X1 --> W1
@@ -162,15 +162,15 @@ SiLU(x) = x · σ(x) = x / (1 + e^(-x))
 
 ```mermaid
 graph LR
-    subgraph 激活函数特性对比
-        R[ReLU] --> R1[简单高效]
-        R --> R2[可能死神经元]
+    subgraph activation_compare["激活函数特性对比"]
+        R[ReLU] --> R1["简单高效"]
+        R --> R2["可能死神经元"]
 
-        G[GELU] --> G1[平滑非线性]
-        G --> G2[Transformer 首选]
+        G[GELU] --> G1["平滑非线性"]
+        G --> G2["Transformer 首选"]
 
-        S[SiLU] --> S1[平滑非单调]
-        S --> S2[LLaMA 使用]
+        S[SiLU] --> S1["平滑非单调"]
+        S --> S2["LLaMA 使用"]
     end
 ```
 
@@ -190,11 +190,11 @@ graph LR
 
 ```mermaid
 graph TD
-    subgraph 张量的维度
-        S[标量 Scalar<br/>0维<br/>例: 3.14]
-        V[向量 Vector<br/>1维<br/>例: [1, 2, 3]]
-        M[矩阵 Matrix<br/>2维<br/>例: [[1,2], [3,4]]]
-        T[张量 Tensor<br/>N维<br/>例: 3D, 4D, ...]
+    subgraph tensor_dims["张量的维度"]
+        S["标量 Scalar<br/>0维<br/>例: 3.14"]
+        V["向量 Vector<br/>1维<br/>例: [1, 2, 3]"]
+        M["矩阵 Matrix<br/>2维<br/>例: [[1,2], [3,4]]"]
+        T["张量 Tensor<br/>N维<br/>例: 3D, 4D, ..."]
     end
 
     S --> V --> M --> T
@@ -332,25 +332,25 @@ batch_C = torch.bmm(batch_A, batch_B) # [batch, M, N] = [32, 64, 256]
 
 ```mermaid
 graph TB
-    subgraph CPU
-        C1[核心 1]
-        C2[核心 2]
-        C3[核心 3]
-        C4[核心 4]
+    subgraph cpu["CPU"]
+        C1["核心 1"]
+        C2["核心 2"]
+        C3["核心 3"]
+        C4["核心 4"]
         C5[...]
-        C6[核心 16]
+        C6["核心 16"]
     end
 
-    subgraph GPU
-        G1[核心 1]
-        G2[核心 2]
+    subgraph gpu["GPU"]
+        G1["核心 1"]
+        G2["核心 2"]
         G3[...]
-        G4[核心 10000+]
+        G4["核心 10000+"]
     end
 
-    subgraph 特点对比
-        CP[CPU: 少量强核心<br/>适合复杂顺序任务]
-        GP[GPU: 大量弱核心<br/>适合简单并行任务]
+    subgraph compare["特点对比"]
+        CP["CPU: 少量强核心<br/>适合复杂顺序任务"]
+        GP["GPU: 大量弱核心<br/>适合简单并行任务"]
     end
 
     style G1 fill:#c8e6c9
@@ -408,25 +408,25 @@ print(f"加速比: {cpu_time/gpu_time:.1f}x")
 
 ```mermaid
 graph LR
-    subgraph 输入层
+    subgraph input_layer["输入层"]
         I1((x₁))
         I2((x₂))
         I3((x₃))
     end
 
-    subgraph 隐藏层1
+    subgraph hidden_layer1["隐藏层1"]
         H11((h₁))
         H12((h₂))
         H13((h₃))
         H14((h₄))
     end
 
-    subgraph 隐藏层2
+    subgraph hidden_layer2["隐藏层2"]
         H21((h₁))
         H22((h₂))
     end
 
-    subgraph 输出层
+    subgraph output_layer["输出层"]
         O1((y₁))
         O2((y₂))
     end
@@ -519,8 +519,8 @@ P(w₁, w₂, ..., wₙ) = P(w₁) × P(w₂|w₁) × P(w₃|w₁,w₂) × ... �
 
 ```mermaid
 graph LR
-    I[输入: 'The cat sat on the'] --> LM[语言模型]
-    LM --> O[输出概率分布:<br/>mat: 0.3<br/>floor: 0.2<br/>roof: 0.15<br/>...]
+    I["输入: 'The cat sat on the'"] --> LM["语言模型"]
+    LM --> O["输出概率分布:<br/>mat: 0.3<br/>floor: 0.2<br/>roof: 0.15<br/>..."]
 ```
 
 ### 6.2 Token 和词表
@@ -550,11 +550,11 @@ Embedding 将离散的 token ID 转换为连续的向量：
 
 ```mermaid
 graph LR
-    T[Token ID: 15496] --> E[Embedding 层<br/>查表]
-    E --> V[向量: [0.1, -0.2, 0.5, ...]]
+    T["Token ID: 15496"] --> E["Embedding 层<br/>查表"]
+    E --> V["向量: [0.1, -0.2, 0.5, ...]"]
 
-    subgraph Embedding 矩阵
-        EM[矩阵大小: vocab_size × hidden_dim<br/>例: 32000 × 4096]
+    subgraph embedding_matrix["Embedding 矩阵"]
+        EM["矩阵大小: vocab_size × hidden_dim<br/>例: 32000 × 4096"]
     end
 
     style V fill:#c8e6c9
@@ -582,19 +582,19 @@ vectors = embedding(token_ids)  # [3, 4096]
 
 ```mermaid
 graph LR
-    subgraph 前向传播
-        I[输入 X] --> M[模型] --> O[输出 Y]
+    subgraph forward["前向传播"]
+        I["输入 X"] --> M["模型"] --> O["输出 Y"]
     end
 
-    subgraph 损失计算
-        O --> L[Loss 函数]
-        T[真实标签] --> L
-        L --> LV[Loss 值]
+    subgraph loss_calc["损失计算"]
+        O --> L["Loss 函数"]
+        T["真实标签"] --> L
+        L --> LV["Loss 值"]
     end
 
-    subgraph 反向传播
-        LV --> G[计算梯度]
-        G --> U[更新参数]
+    subgraph backward["反向传播"]
+        LV --> G["计算梯度"]
+        G --> U["更新参数"]
         U --> M
     end
 ```
@@ -609,7 +609,7 @@ graph LR
 
 ```mermaid
 graph LR
-    I[输入 X] --> M[模型<br/>权重固定] --> O[输出 Y]
+    I["输入 X"] --> M["模型<br/>权重固定"] --> O["输出 Y"]
 
     style M fill:#c8e6c9
 ```

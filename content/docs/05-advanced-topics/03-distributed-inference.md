@@ -76,12 +76,12 @@ graph TD
 
 ```mermaid
 graph LR
-    subgraph 单卡计算
+    subgraph single_gpu["单卡计算"]
         A1[输入 X] --> B1[完整权重 W]
         B1 --> C1[输出 Y = XW]
     end
 
-    subgraph 2卡张量并行
+    subgraph two_gpu_tp["2卡张量并行"]
         A2[输入 X] --> B2[权重 W1<br/>GPU 0]
         A2 --> B3[权重 W2<br/>GPU 1]
         B2 --> C2[Y1 = XW1]
@@ -96,12 +96,12 @@ graph LR
 
 ```mermaid
 graph TD
-    subgraph 列并行 Column Parallel
+    subgraph column_parallel["列并行 Column Parallel"]
         W1["W = [W1 | W2]"] --> C1["输出 = [XW1 | XW2]"]
         C1 --> R1["需要 AllGather"]
     end
 
-    subgraph 行并行 Row Parallel
+    subgraph row_parallel["行并行 Row Parallel"]
         W2["W = [W1]<br/>    [W2]"] --> C2["输出 = XW1 + XW2"]
         C2 --> R2["需要 AllReduce"]
     end
@@ -283,9 +283,9 @@ llm = LLM(
 
 ```mermaid
 graph TD
-    subgraph 请求分发
-        R[请求队列] --> R1[请求 1,2,3]
-        R --> R2[请求 4,5,6]
+    subgraph request_dispatch["请求分发"]
+        R[请求队列] --> R1["请求 1,2,3"]
+        R --> R2["请求 4,5,6"]
     end
 
     subgraph GPU 0
@@ -498,15 +498,15 @@ vLLM 支持将 Prefill 和 Decode 阶段分离到不同节点：
 
 ```mermaid
 graph LR
-    subgraph Prefill 节点
+    subgraph prefill_node["Prefill 节点"]
         P1[GPU 0-3<br/>计算密集]
     end
 
-    subgraph Decode 节点
+    subgraph decode_node["Decode 节点"]
         D1[GPU 0-3<br/>内存密集]
     end
 
-    subgraph KV Transfer
+    subgraph kv_transfer["KV Transfer"]
         T[KV Cache 传输]
     end
 

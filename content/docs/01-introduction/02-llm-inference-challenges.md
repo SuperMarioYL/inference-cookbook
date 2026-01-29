@@ -109,24 +109,24 @@ KV Cache 显存 = 2 × num_layers × hidden_dim × seq_len × batch_size × byte
 
 ```mermaid
 flowchart TD
-    subgraph 初始状态
-        A1[用户输入: 'Hello, how are you?'<br/>5 tokens]
-        A2[KV Cache: 5 × 每token大小]
+    subgraph init_state["初始状态"]
+        A1["用户输入: 'Hello, how are you?'<br/>5 tokens"]
+        A2["KV Cache: 5 × 每token大小"]
     end
 
-    subgraph 生成第1个token
-        B1[模型输出: 'I'<br/>新增 1 token]
-        B2[KV Cache: 6 × 每token大小]
+    subgraph gen_token1["生成第1个token"]
+        B1["模型输出: 'I'<br/>新增 1 token"]
+        B2["KV Cache: 6 × 每token大小"]
     end
 
-    subgraph 生成第2个token
-        C1[模型输出: 'am'<br/>新增 1 token]
-        C2[KV Cache: 7 × 每token大小]
+    subgraph gen_token2["生成第2个token"]
+        C1["模型输出: 'am'<br/>新增 1 token"]
+        C2["KV Cache: 7 × 每token大小"]
     end
 
-    subgraph 生成第N个token
-        D1[模型输出: '...'<br/>新增 1 token]
-        D2[KV Cache: (5+N) × 每token大小]
+    subgraph gen_tokenN["生成第N个token"]
+        D1["模型输出: '...'<br/>新增 1 token"]
+        D2["KV Cache: (5+N) × 每token大小"]
     end
 
     A1 --> A2
@@ -240,19 +240,19 @@ LLM 推理分为两个截然不同的阶段：
 
 ```mermaid
 graph LR
-    subgraph Prefill 阶段
-        P1[输入 Prompt<br/>N 个 tokens]
-        P2[并行计算<br/>所有 tokens 的 Attention]
-        P3[初始化 KV Cache]
-        P4[输出第一个 token]
+    subgraph prefill["Prefill 阶段"]
+        P1["输入 Prompt<br/>N 个 tokens"]
+        P2["并行计算<br/>所有 tokens 的 Attention"]
+        P3["初始化 KV Cache"]
+        P4["输出第一个 token"]
         P1 --> P2 --> P3 --> P4
     end
 
-    subgraph Decode 阶段
-        D1[单个新 token]
-        D2[增量计算<br/>Attention]
-        D3[更新 KV Cache]
-        D4[输出下一个 token]
+    subgraph decode["Decode 阶段"]
+        D1["单个新 token"]
+        D2["增量计算<br/>Attention"]
+        D3["更新 KV Cache"]
+        D4["输出下一个 token"]
         D1 --> D2 --> D3 --> D4
         D4 -.->|循环直到结束| D1
     end
@@ -286,16 +286,16 @@ graph LR
 
 ```mermaid
 graph TB
-    subgraph Prefill 阶段
-        P1[处理 512 个 tokens]
-        P2[一次性计算 512×512 的 Attention 矩阵]
-        P3[计算密度高<br/>GPU 利用率高]
+    subgraph prefill["Prefill 阶段"]
+        P1["处理 512 个 tokens"]
+        P2["一次性计算 512×512 的 Attention 矩阵"]
+        P3["计算密度高<br/>GPU 利用率高"]
     end
 
-    subgraph Decode 阶段
-        D1[处理 1 个 token]
-        D2[计算 1×513 的 Attention 向量]
-        D3[计算密度低<br/>GPU 利用率低]
+    subgraph decode["Decode 阶段"]
+        D1["处理 1 个 token"]
+        D2["计算 1×513 的 Attention 向量"]
+        D3["计算密度低<br/>GPU 利用率低"]
     end
 
     style P3 fill:#c8e6c9
@@ -353,17 +353,17 @@ graph TB
 
 ```mermaid
 graph TB
-    subgraph 单请求处理
-        S1[读取模型权重 14GB]
-        S2[处理 1 个 token]
-        S3[计算效率低]
+    subgraph single_request["单请求处理"]
+        S1["读取模型权重 14GB"]
+        S2["处理 1 个 token"]
+        S3["计算效率低"]
         S1 --> S2 --> S3
     end
 
-    subgraph 批处理 32 个请求
-        B1[读取模型权重 14GB]
-        B2[同时处理 32 个 tokens]
-        B3[计算效率提高 32 倍]
+    subgraph batch_32["批处理 32 个请求"]
+        B1["读取模型权重 14GB"]
+        B2["同时处理 32 个 tokens"]
+        B3["计算效率提高 32 倍"]
         B1 --> B2 --> B3
     end
 
@@ -558,20 +558,20 @@ sequenceDiagram
 
 ```mermaid
 graph LR
-    subgraph 权衡关系
-        A[增加批处理大小]
-        B[提高吞吐量]
-        C[增加单请求延迟]
-        D[增加 TTFT]
+    subgraph tradeoff["权衡关系"]
+        A["增加批处理大小"]
+        B["提高吞吐量"]
+        C["增加单请求延迟"]
+        D["增加 TTFT"]
 
         A --> B
         A --> C
         A --> D
     end
 
-    subgraph 优化目标
-        E[高吞吐量<br/>服务更多用户]
-        F[低延迟<br/>更好体验]
+    subgraph optimization["优化目标"]
+        E["高吞吐量<br/>服务更多用户"]
+        F["低延迟<br/>更好体验"]
     end
 
     B --> E
@@ -598,34 +598,34 @@ graph LR
 
 ```mermaid
 graph TB
-    subgraph 显存挑战
-        M1[KV Cache 动态增长]
-        M2[显存碎片化]
-        M3[预分配浪费]
+    subgraph memory_challenge["显存挑战"]
+        M1["KV Cache 动态增长"]
+        M2["显存碎片化"]
+        M3["预分配浪费"]
         M1 --> M2
         M2 --> M3
     end
 
-    subgraph 计算挑战
-        C1[Prefill 计算密集]
-        C2[Decode 内存密集]
-        C3[GPU 利用率波动]
+    subgraph compute_challenge["计算挑战"]
+        C1["Prefill 计算密集"]
+        C2["Decode 内存密集"]
+        C3["GPU 利用率波动"]
         C1 --> C3
         C2 --> C3
     end
 
-    subgraph 批处理挑战
-        B1[请求动态到达]
-        B2[长度异构]
-        B3[静态批处理低效]
+    subgraph batch_challenge["批处理挑战"]
+        B1["请求动态到达"]
+        B2["长度异构"]
+        B3["静态批处理低效"]
         B1 --> B3
         B2 --> B3
     end
 
-    subgraph vLLM 解决方案
+    subgraph vllm_solution["vLLM 解决方案"]
         V1[PagedAttention]
         V2[Continuous Batching]
-        V3[高效调度器]
+        V3["高效调度器"]
     end
 
     M3 --> V1

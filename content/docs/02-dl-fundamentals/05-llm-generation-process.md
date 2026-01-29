@@ -90,19 +90,19 @@ print(tokenizer.convert_ids_to_tokens(tokens))
 
 ```mermaid
 flowchart TD
-    subgraph Prefill 并行处理
-        I[输入: token_ids<br/>[1, 15043, 29892, 920, 526, 366]]
-        E[Embedding Layer<br/>并行查表]
-        PE[Position Encoding<br/>添加位置信息]
+    subgraph prefill_parallel["Prefill 并行处理"]
+        I["输入: token_ids<br/>[1, 15043, 29892, 920, 526, 366]"]
+        E["Embedding Layer<br/>并行查表"]
+        PE["Position Encoding<br/>添加位置信息"]
 
-        subgraph Transformer Layers
+        subgraph transformer_layers["Transformer Layers"]
             L1[Layer 1]
             L2[Layer 2]
             LN[Layer N]
         end
 
         LH[LM Head]
-        O[Logits<br/>[seq_len, vocab_size]]
+        O["Logits<br/>[seq_len, vocab_size]"]
 
         I --> E --> PE --> L1 --> L2 --> LN --> LH --> O
     end
@@ -174,14 +174,14 @@ Decode 阶段每次只处理一个新 token：
 
 ```mermaid
 flowchart LR
-    subgraph Decode 增量计算
-        NT[新 token]
+    subgraph decode_incremental["Decode 增量计算"]
+        NT["新 token"]
         E[Embedding]
-        Q[计算 Q_new]
-        KV[计算 K_new, V_new]
-        Cache[(读取 KV Cache)]
-        ATT[Attention<br/>Q_new × [K_cache; K_new]ᵀ]
-        Update[更新 KV Cache]
+        Q["计算 Q_new"]
+        KV["计算 K_new, V_new"]
+        Cache[("读取 KV Cache")]
+        ATT["Attention<br/>Q_new x [K_cache; K_new]"]
+        Update["更新 KV Cache"]
         FFN[FFN]
         LM[LM Head]
         O[Logits]
@@ -311,10 +311,10 @@ def apply_temperature(logits, temperature):
 
 ```mermaid
 graph LR
-    subgraph Temperature 效果
-        T1[T=0.1<br/>非常尖锐<br/>几乎是 Greedy]
-        T2[T=1.0<br/>原始分布]
-        T3[T=2.0<br/>更平滑<br/>更随机]
+    subgraph temperature_effect["Temperature 效果"]
+        T1["T=0.1<br/>非常尖锐<br/>几乎是 Greedy"]
+        T2["T=1.0<br/>原始分布"]
+        T3["T=2.0<br/>更平滑<br/>更随机"]
     end
 ```
 
@@ -390,15 +390,15 @@ def top_p_sampling(logits, p):
 
 ```mermaid
 graph TD
-    subgraph 采样策略选择
-        G[Greedy<br/>确定性、可能重复]
-        TK[Top-k<br/>固定数量的候选]
-        TP[Top-p<br/>动态数量的候选]
-        T[Temperature<br/>控制随机程度]
+    subgraph sampling_strategy["采样策略选择"]
+        G["Greedy<br/>确定性、可能重复"]
+        TK["Top-k<br/>固定数量的候选"]
+        TP["Top-p<br/>动态数量的候选"]
+        T["Temperature<br/>控制随机程度"]
 
-        G --> |适合| F[事实问答]
-        TK --> |适合| C1[通用对话]
-        TP --> |适合| C2[创意写作]
+        G --> |适合| F["事实问答"]
+        TK --> |适合| C1["通用对话"]
+        TP --> |适合| C2["创意写作"]
         T --> |配合| TK
         T --> |配合| TP
     end
@@ -459,18 +459,18 @@ class SamplingParams:
 
 ```mermaid
 graph LR
-    subgraph Prefill
-        P1[处理 N 个 tokens]
-        P2[计算量: O(N² × d)]
-        P3[内存访问: O(N × d)]
-        P4[计算密度: 高]
+    subgraph prefill_stage["Prefill"]
+        P1["处理 N 个 tokens"]
+        P2["计算量: O(N² × d)"]
+        P3["内存访问: O(N × d)"]
+        P4["计算密度: 高"]
     end
 
-    subgraph Decode
-        D1[处理 1 个 token]
-        D2[计算量: O(N × d)]
-        D3[内存访问: O(N × d)]
-        D4[计算密度: 低]
+    subgraph decode_stage["Decode"]
+        D1["处理 1 个 token"]
+        D2["计算量: O(N × d)"]
+        D3["内存访问: O(N × d)"]
+        D4["计算密度: 低"]
     end
 ```
 

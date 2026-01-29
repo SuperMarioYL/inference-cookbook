@@ -51,28 +51,28 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    subgraph Step 1: 处理 'Hello'
-        A1[Hello] --> K1[计算 K₁]
-        A1 --> V1[计算 V₁]
-        A1 --> Q1[计算 Q₁]
+    subgraph step1["Step 1 - 处理 'Hello'"]
+        A1[Hello] --> K1["计算 K₁"]
+        A1 --> V1["计算 V₁"]
+        A1 --> Q1["计算 Q₁"]
     end
 
-    subgraph Step 2: 处理 'Hello World'
-        B1[Hello] --> K1_2[重新计算 K₁]
-        B1 --> V1_2[重新计算 V₁]
-        B2[World] --> K2[计算 K₂]
-        B2 --> V2[计算 V₂]
-        B2 --> Q2[计算 Q₂]
+    subgraph step2["Step 2 - 处理 'Hello World'"]
+        B1[Hello] --> K1_2["重新计算 K₁"]
+        B1 --> V1_2["重新计算 V₁"]
+        B2[World] --> K2["计算 K₂"]
+        B2 --> V2["计算 V₂"]
+        B2 --> Q2["计算 Q₂"]
     end
 
-    subgraph Step 3: 处理 'Hello World !'
-        C1[Hello] --> K1_3[再次计算 K₁]
-        C1 --> V1_3[再次计算 V₁]
-        C2[World] --> K2_3[再次计算 K₂]
-        C2 --> V2_3[再次计算 V₂]
-        C3[!] --> K3[计算 K₃]
-        C3 --> V3[计算 V₃]
-        C3 --> Q3[计算 Q₃]
+    subgraph step3["Step 3 - 处理 'Hello World !'"]
+        C1[Hello] --> K1_3["再次计算 K₁"]
+        C1 --> V1_3["再次计算 V₁"]
+        C2[World] --> K2_3["再次计算 K₂"]
+        C2 --> V2_3["再次计算 V₂"]
+        C3[!] --> K3["计算 K₃"]
+        C3 --> V3["计算 V₃"]
+        C3 --> Q3["计算 Q₃"]
     end
 
     style K1_2 fill:#ffcdd2
@@ -109,26 +109,26 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    subgraph 使用 KV Cache
-        subgraph Step 1
-            S1A[Hello] --> S1K[计算 K₁]
-            S1A --> S1V[计算 V₁]
-            S1K --> Cache1[(缓存 K₁)]
+    subgraph use_kv_cache["使用 KV Cache"]
+        subgraph cache_step1["Step 1"]
+            S1A[Hello] --> S1K["计算 K₁"]
+            S1A --> S1V["计算 V₁"]
+            S1K --> Cache1[("缓存 K₁")]
             S1V --> Cache1
         end
 
-        subgraph Step 2
-            Cache1 --> Use1[使用缓存的 K₁, V₁]
-            S2A[World] --> S2K[计算 K₂]
-            S2A --> S2V[计算 V₂]
-            S2K --> Cache2[(缓存 K₁, K₂)]
+        subgraph cache_step2["Step 2"]
+            Cache1 --> Use1["使用缓存的 K₁, V₁"]
+            S2A[World] --> S2K["计算 K₂"]
+            S2A --> S2V["计算 V₂"]
+            S2K --> Cache2[("缓存 K₁, K₂")]
             S2V --> Cache2
         end
 
-        subgraph Step 3
-            Cache2 --> Use2[使用缓存的 K₁, K₂, V₁, V₂]
-            S3A[!] --> S3K[计算 K₃]
-            S3A --> S3V[计算 V₃]
+        subgraph cache_step3["Step 3"]
+            Cache2 --> Use2["使用缓存的 K₁, K₂, V₁, V₂"]
+            S3A[!] --> S3K["计算 K₃"]
+            S3A --> S3V["计算 V₃"]
         end
     end
 
@@ -156,22 +156,22 @@ flowchart TD
 
 ```mermaid
 graph TD
-    subgraph 无 KV Cache
-        A1[Token 1] --> C1[计算全部 K,V]
-        A2[Token 1,2] --> C2[计算全部 K,V]
-        A3[Token 1,2,3] --> C3[计算全部 K,V]
-        A4[Token 1,2,3,4] --> C4[计算全部 K,V]
+    subgraph no_kv_cache["无 KV Cache"]
+        A1[Token 1] --> C1["计算全部 K,V"]
+        A2["Token 1,2"] --> C2["计算全部 K,V"]
+        A3["Token 1,2,3"] --> C3["计算全部 K,V"]
+        A4["Token 1,2,3,4"] --> C4["计算全部 K,V"]
         style A1 fill:#ffcdd2
         style A2 fill:#ffcdd2
         style A3 fill:#ffcdd2
         style A4 fill:#ffcdd2
     end
 
-    subgraph 有 KV Cache
-        B1[Token 1] --> D1[计算 K₁,V₁ + 缓存]
-        B2[Token 2] --> D2[计算 K₂,V₂ + 读缓存]
-        B3[Token 3] --> D3[计算 K₃,V₃ + 读缓存]
-        B4[Token 4] --> D4[计算 K₄,V₄ + 读缓存]
+    subgraph with_kv_cache["有 KV Cache"]
+        B1[Token 1] --> D1["计算 K₁,V₁ + 缓存"]
+        B2[Token 2] --> D2["计算 K₂,V₂ + 读缓存"]
+        B3[Token 3] --> D3["计算 K₃,V₃ + 读缓存"]
+        B4[Token 4] --> D4["计算 K₄,V₄ + 读缓存"]
         D1 --> Cache[(KV Cache)]
         D2 --> Cache
         D3 --> Cache
@@ -343,11 +343,11 @@ KV Cache 的大小随着生成过程动态增长：
 
 ```mermaid
 graph LR
-    subgraph 生成过程
-        S1[Step 1<br/>KV: 10 tokens]
-        S2[Step 2<br/>KV: 11 tokens]
-        S3[Step 3<br/>KV: 12 tokens]
-        SN[Step N<br/>KV: N+10 tokens]
+    subgraph gen_process["生成过程"]
+        S1["Step 1<br/>KV: 10 tokens"]
+        S2["Step 2<br/>KV: 11 tokens"]
+        S3["Step 3<br/>KV: 12 tokens"]
+        SN["Step N<br/>KV: N+10 tokens"]
         S1 --> S2 --> S3 --> SN
     end
 ```
@@ -366,10 +366,10 @@ graph LR
 
 ```mermaid
 graph TB
-    subgraph 预分配的浪费
-        Alloc[预分配 2GB]
-        Used[实际使用 50MB]
-        Waste[浪费 1.95GB]
+    subgraph prealloc_waste["预分配的浪费"]
+        Alloc["预分配 2GB"]
+        Used["实际使用 50MB"]
+        Waste["浪费 1.95GB"]
         Alloc --> Used
         Alloc --> Waste
     end
@@ -416,10 +416,10 @@ PagedAttention 的解决方案（下一部分详细介绍）：
 
 ```mermaid
 flowchart LR
-    subgraph Prefill
-        I[输入: 'Hello, how are you?'<br/>5 tokens]
-        C[并行计算 K₁...K₅, V₁...V₅]
-        S[存入 KV Cache]
+    subgraph prefill_stage["Prefill"]
+        I["输入: 'Hello, how are you?'<br/>5 tokens"]
+        C["并行计算 K₁...K₅, V₁...V₅"]
+        S["存入 KV Cache"]
         I --> C --> S
     end
 ```
@@ -435,13 +435,13 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    subgraph Decode 循环
-        R[读取 KV Cache]
-        N[新 token]
-        C[计算 K_new, V_new]
-        A[Attention: Q_new × [K_cache; K_new]]
-        U[更新 KV Cache]
-        O[输出 token]
+    subgraph decode_loop["Decode 循环"]
+        R["读取 KV Cache"]
+        N["新 token"]
+        C["计算 K_new, V_new"]
+        A["Attention: Q_new x [K_cache; K_new]"]
+        U["更新 KV Cache"]
+        O["输出 token"]
 
         R --> A
         N --> C --> A

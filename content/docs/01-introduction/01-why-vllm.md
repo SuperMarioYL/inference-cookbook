@@ -52,13 +52,13 @@ KV Cache 大小 = 2 × 层数 × 隐藏维度 × 序列长度 × 精度字节数
 
 ```mermaid
 graph TB
-    subgraph 传统方案的显存分配
+    subgraph traditional_memory["传统方案的显存分配"]
         direction TB
-        M1[请求 A<br/>预分配 2GB<br/>实际使用 100MB]
-        M2[请求 B<br/>预分配 2GB<br/>实际使用 500MB]
-        M3[请求 C<br/>预分配 2GB<br/>实际使用 200MB]
-        M4[碎片空间<br/>无法利用]
-        M5[空闲空间<br/>不足 2GB<br/>无法接受新请求]
+        M1["请求 A<br/>预分配 2GB<br/>实际使用 100MB"]
+        M2["请求 B<br/>预分配 2GB<br/>实际使用 500MB"]
+        M3["请求 C<br/>预分配 2GB<br/>实际使用 200MB"]
+        M4["碎片空间<br/>无法利用"]
+        M5["空闲空间<br/>不足 2GB<br/>无法接受新请求"]
     end
 
     style M1 fill:#ffcdd2
@@ -83,22 +83,22 @@ graph TB
 
 ```mermaid
 flowchart LR
-    subgraph 静态批处理
+    subgraph static_batch["静态批处理"]
         direction TB
-        R1[请求 1<br/>输出 10 tokens]
-        R2[请求 2<br/>输出 50 tokens]
-        R3[请求 3<br/>输出 100 tokens]
+        R1["请求 1<br/>输出 10 tokens"]
+        R2["请求 2<br/>输出 50 tokens"]
+        R3["请求 3<br/>输出 100 tokens"]
     end
 
-    subgraph 处理过程
+    subgraph process["处理过程"]
         direction TB
         S1[Step 1] --> S2[Step 2] --> S3[...] --> S100[Step 100]
     end
 
-    subgraph 问题
-        P1[请求 1 在 Step 10 完成<br/>但必须等到 Step 100]
-        P2[请求 2 在 Step 50 完成<br/>但必须等到 Step 100]
-        P3[GPU 在等待时空转]
+    subgraph problems["问题"]
+        P1["请求 1 在 Step 10 完成<br/>但必须等到 Step 100"]
+        P2["请求 2 在 Step 50 完成<br/>但必须等到 Step 100"]
+        P3["GPU 在等待时空转"]
     end
 
     R1 --> S1
@@ -157,19 +157,19 @@ LLM 推理分为两个阶段：**Prefill（预填充）** 和 **Decode（解码�
 
 ```mermaid
 graph LR
-    subgraph Prefill 阶段
-        P1[输入: 'Hello, how are you?']
-        P2[并行处理所有 tokens]
-        P3[初始化 KV Cache]
-        P4[生成第一个 token]
+    subgraph prefill["Prefill 阶段"]
+        P1["输入: 'Hello, how are you?'"]
+        P2["并行处理所有 tokens"]
+        P3["初始化 KV Cache"]
+        P4["生成第一个 token"]
         P1 --> P2 --> P3 --> P4
     end
 
-    subgraph Decode 阶段
-        D1[读取 KV Cache]
-        D2[处理 1 个 token]
-        D3[更新 KV Cache]
-        D4[生成下一个 token]
+    subgraph decode["Decode 阶段"]
+        D1["读取 KV Cache"]
+        D2["处理 1 个 token"]
+        D3["更新 KV Cache"]
+        D4["生成下一个 token"]
         D1 --> D2 --> D3 --> D4
         D4 -.->|循环| D1
     end
@@ -209,25 +209,25 @@ vLLM 的核心创新是 **PagedAttention**（分页注意力），其灵感来�
 
 ```mermaid
 graph TB
-    subgraph 逻辑视图（每个请求看到的）
-        L1[请求 A 的 KV Cache]
-        L2[请求 B 的 KV Cache]
-        L3[请求 C 的 KV Cache]
+    subgraph logical_view["逻辑视图 - 每个请求看到的"]
+        L1["请求 A 的 KV Cache"]
+        L2["请求 B 的 KV Cache"]
+        L3["请求 C 的 KV Cache"]
     end
 
-    subgraph Block Table（页表）
-        BT[逻辑块 → 物理块<br/>映射关系]
+    subgraph block_table["Block Table - 页表"]
+        BT["逻辑块 → 物理块<br/>映射关系"]
     end
 
-    subgraph 物理显存（实际存储）
+    subgraph physical_memory["物理显存 - 实际存储"]
         P1[Block 0]
         P2[Block 1]
         P3[Block 2]
         P4[Block 3]
         P5[Block 4]
         P6[Block 5]
-        P7[空闲]
-        P8[空闲]
+        P7["空闲"]
+        P8["空闲"]
     end
 
     L1 --> BT
@@ -255,17 +255,17 @@ graph TB
 
 ```mermaid
 graph LR
-    subgraph 传统方案
-        T1[预分配 4096 tokens]
-        T2[实际使用 100 tokens]
-        T3[浪费 97.5%]
+    subgraph traditional["传统方案"]
+        T1["预分配 4096 tokens"]
+        T2["实际使用 100 tokens"]
+        T3["浪费 97.5%"]
         T1 --> T2 --> T3
     end
 
-    subgraph PagedAttention
-        P1[按需分配]
-        P2[用多少分配多少]
-        P3[浪费 < 4%]
+    subgraph paged_attention["PagedAttention"]
+        P1["按需分配"]
+        P2["用多少分配多少"]
+        P3["浪费 < 4%"]
         P1 --> P2 --> P3
     end
 
@@ -285,18 +285,18 @@ vLLM 的第二项创新是 **Continuous Batching**（连续批处理），也叫
 
 ```mermaid
 flowchart TB
-    subgraph 静态批处理
+    subgraph static_batching["静态批处理"]
         direction LR
-        S1[批次开始] --> S2[所有请求一起处理] --> S3[等待最长完成] --> S4[批次结束]
-        S5[新请求等待下一批]
+        S1["批次开始"] --> S2["所有请求一起处理"] --> S3["等待最长完成"] --> S4["批次结束"]
+        S5["新请求等待下一批"]
     end
 
-    subgraph 连续批处理
+    subgraph continuous_batching["连续批处理"]
         direction LR
-        C1[每个 step 重新调度]
-        C2[完成的请求立即退出]
-        C3[新请求立即加入]
-        C4[始终保持高并发]
+        C1["每个 step 重新调度"]
+        C2["完成的请求立即退出"]
+        C3["新请求立即加入"]
+        C4["始终保持高并发"]
         C1 --> C2
         C2 --> C3
         C3 --> C4

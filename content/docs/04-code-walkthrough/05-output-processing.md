@@ -13,18 +13,18 @@ weight: 5
 
 ```mermaid
 graph LR
-    subgraph 模型执行
+    subgraph model_exec["模型执行"]
         Sample[采样] --> SamplerOut[SamplerOutput]
     end
 
-    subgraph 输出处理
+    subgraph output_processing["输出处理"]
         SamplerOut --> Update[更新请求状态]
         Update --> Check[检查停止条件]
         Check --> Detok[Detokenize]
         Detok --> Build[构建输出]
     end
 
-    subgraph 返回用户
+    subgraph return_user["返回用户"]
         Build --> Stream[流式返回]
         Build --> Final[最终返回]
     end
@@ -530,7 +530,7 @@ flowchart TD
         FMT --> |流式| SSE[SSE Events]
     end
 
-    subgraph 用户
+    subgraph user["用户"]
         JSON --> User1[完整响应]
         SSE --> User2[增量响应]
     end

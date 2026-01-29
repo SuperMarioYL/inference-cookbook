@@ -25,9 +25,9 @@ weight: 3
 
 ```mermaid
 graph LR
-    subgraph 阅读理解
-        T1[张三] --> T2[今天] --> T3[去了] --> T4[公园]
-        T4 --> T5[他]
+    subgraph reading["阅读理解"]
+        T1["张三"] --> T2["今天"] --> T3["去了"] --> T4["公园"]
+        T4 --> T5["他"]
         T5 -.->|关注| T1
     end
 ```
@@ -38,12 +38,12 @@ graph LR
 
 ```mermaid
 graph TB
-    subgraph 固定窗口
-        FW[只能看到附近几个 token]
+    subgraph fixed_window["固定窗口"]
+        FW["只能看到附近几个 token"]
     end
 
-    subgraph 注意力机制
-        ATT[可以关注序列中任意位置<br/>并根据相关性分配权重]
+    subgraph attention_mechanism["注意力机制"]
+        ATT["可以关注序列中任意位置<br/>并根据相关性分配权重"]
     end
 
     style ATT fill:#c8e6c9
@@ -87,29 +87,29 @@ $$
 
 ```mermaid
 flowchart TD
-    subgraph 步骤1: 生成 Q, K, V
-        X[输入 X<br/>seq_len × hidden_dim]
-        X --> WQ[W_Q 投影]
-        X --> WK[W_K 投影]
-        X --> WV[W_V 投影]
-        WQ --> Q[Query<br/>seq_len × d_k]
-        WK --> K[Key<br/>seq_len × d_k]
-        WV --> V[Value<br/>seq_len × d_v]
+    subgraph step1["步骤1 - 生成 Q, K, V"]
+        X["输入 X<br/>seq_len × hidden_dim"]
+        X --> WQ["W_Q 投影"]
+        X --> WK["W_K 投影"]
+        X --> WV["W_V 投影"]
+        WQ --> Q["Query<br/>seq_len × d_k"]
+        WK --> K["Key<br/>seq_len × d_k"]
+        WV --> V["Value<br/>seq_len × d_v"]
     end
 
-    subgraph 步骤2: 计算注意力分数
-        Q --> MM[Q × K^T]
+    subgraph step2["步骤2 - 计算注意力分数"]
+        Q --> MM["Q × K^T"]
         K --> MM
-        MM --> SC[÷ √d_k<br/>缩放]
-        SC --> MASK[+ Mask<br/>可选]
+        MM --> SC["÷ √d_k<br/>缩放"]
+        SC --> MASK["+ Mask<br/>可选"]
         MASK --> SM[Softmax]
-        SM --> ATT[注意力权重<br/>seq_len × seq_len]
+        SM --> ATT["注意力权重<br/>seq_len × seq_len"]
     end
 
-    subgraph 步骤3: 加权求和
-        ATT --> OUT[× V]
+    subgraph step3["步骤3 - 加权求和"]
+        ATT --> OUT["× V"]
         V --> OUT
-        OUT --> O[输出<br/>seq_len × d_v]
+        OUT --> O["输出<br/>seq_len × d_v"]
     end
 
     style SC fill:#fff9c4
@@ -199,14 +199,14 @@ Token 2 [  0.20    0.20     0.60  ]  # Token 2 关注谁
 
 ```mermaid
 graph LR
-    subgraph 无缩放
-        S1[大的点积值] --> SM1[Softmax 饱和]
-        SM1 --> G1[梯度消失]
+    subgraph no_scale["无缩放"]
+        S1["大的点积值"] --> SM1["Softmax 饱和"]
+        SM1 --> G1["梯度消失"]
     end
 
-    subgraph 有缩放
-        S2[缩放后的点积] --> SM2[Softmax 正常]
-        SM2 --> G2[梯度正常]
+    subgraph with_scale["有缩放"]
+        S2["缩放后的点积"] --> SM2["Softmax 正常"]
+        SM2 --> G2["梯度正常"]
     end
 
     style G1 fill:#ffcdd2
@@ -232,11 +232,11 @@ graph LR
 
 ```mermaid
 graph TB
-    subgraph 多头注意力的优势
-        H1[Head 1<br/>关注语法关系]
-        H2[Head 2<br/>关注语义关系]
-        H3[Head 3<br/>关注位置关系]
-        H4[Head 4<br/>关注其他模式]
+    subgraph multi_head_advantage["多头注意力的优势"]
+        H1["Head 1<br/>关注语法关系"]
+        H2["Head 2<br/>关注语义关系"]
+        H3["Head 3<br/>关注位置关系"]
+        H4["Head 4<br/>关注其他模式"]
     end
 ```
 
@@ -244,13 +244,13 @@ graph TB
 
 ```mermaid
 graph TD
-    X[输入 X<br/>batch × seq × hidden] --> SPLIT[分割成多个头]
+    X["输入 X<br/>batch × seq × hidden"] --> SPLIT["分割成多个头"]
 
-    subgraph 并行计算
-        SPLIT --> H1[Head 1<br/>Attention]
-        SPLIT --> H2[Head 2<br/>Attention]
-        SPLIT --> H3[Head 3<br/>Attention]
-        SPLIT --> HN[Head N<br/>Attention]
+    subgraph parallel_compute["并行计算"]
+        SPLIT --> H1["Head 1<br/>Attention"]
+        SPLIT --> H2["Head 2<br/>Attention"]
+        SPLIT --> H3["Head 3<br/>Attention"]
+        SPLIT --> HN["Head N<br/>Attention"]
     end
 
     H1 --> CAT[Concat]
@@ -258,8 +258,8 @@ graph TD
     H3 --> CAT
     HN --> CAT
 
-    CAT --> WO[W_O 投影]
-    WO --> O[输出]
+    CAT --> WO["W_O 投影"]
+    WO --> O["输出"]
 ```
 
 ### 4.3 代码实现
@@ -337,13 +337,13 @@ hidden_dim = num_heads × head_dim
 
 ```mermaid
 graph LR
-    subgraph 无掩码（双向注意力）
+    subgraph no_mask["无掩码 - 双向注意力"]
         A1[token 1] <--> A2[token 2]
         A1 <--> A3[token 3]
         A2 <--> A3
     end
 
-    subgraph 有掩码（单向注意力）
+    subgraph with_mask["有掩码 - 单向注意力"]
         B1[token 1]
         B2[token 2] --> B1
         B3[token 3] --> B1
@@ -433,11 +433,11 @@ after softmax:
 
 ```mermaid
 graph LR
-    subgraph 序列长度影响
-        L1[n=512] --> C1[计算量 262K]
-        L2[n=2048] --> C2[计算量 4.2M]
-        L3[n=8192] --> C3[计算量 67M]
-        L4[n=32768] --> C4[计算量 1B]
+    subgraph seq_len_impact["序列长度影响"]
+        L1[n=512] --> C1["计算量 262K"]
+        L2[n=2048] --> C2["计算量 4.2M"]
+        L3[n=8192] --> C3["计算量 67M"]
+        L4[n=32768] --> C4["计算量 1B"]
     end
 ```
 
@@ -464,14 +464,14 @@ vLLM 主要使用 **Flash Attention** 作为注意力后端。
 
 ```mermaid
 graph TB
-    subgraph MHA（Multi-Head Attention）
+    subgraph mha["MHA - Multi-Head Attention"]
         MQ1[Q Head 1] --> MK1[K Head 1]
         MQ2[Q Head 2] --> MK2[K Head 2]
         MQ3[Q Head 3] --> MK3[K Head 3]
         MQ4[Q Head 4] --> MK4[K Head 4]
     end
 
-    subgraph GQA（Grouped-Query Attention）
+    subgraph gqa["GQA - Grouped-Query Attention"]
         GQ1[Q Head 1] --> GK1[K Group 1]
         GQ2[Q Head 2] --> GK1
         GQ3[Q Head 3] --> GK2[K Group 2]
@@ -518,8 +518,8 @@ sequenceDiagram
 
     New->>ATT: 计算新 token 的 Q, K, V
     Cache->>ATT: 提供历史 K, V
-    ATT->>ATT: Q_new × [K_cache, K_new]^T
-    ATT->>ATT: Attention × [V_cache, V_new]
+    ATT->>ATT: Q_new x [K_cache, K_new]^T
+    ATT->>ATT: Attention x [V_cache, V_new]
     ATT->>Cache: 将 K_new, V_new 加入缓存
 ```
 

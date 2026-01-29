@@ -15,18 +15,18 @@ BlockPool 是 vLLM 内存管理的基石，它直接管理 GPU 上的物理内�
 
 ```mermaid
 graph TD
-    subgraph 上层接口
+    subgraph upper_interface["上层接口"]
         KVM[KVCacheManager]
     end
 
-    subgraph BlockPool 内部
+    subgraph block_pool_internal["BlockPool 内部"]
         BP[BlockPool]
         Blocks[blocks: list]
         FreeQ[FreeKVCacheBlockQueue<br/>空闲块队列]
         HashCache[BlockHashToBlockMap<br/>缓存查找表]
     end
 
-    subgraph GPU 显存
+    subgraph gpu_memory["GPU 显存"]
         GPU[KV Cache 物理内存]
     end
 
@@ -281,13 +281,13 @@ graph TD
         NB[null_block]
     end
 
-    subgraph "空闲队列 (初始状态)"
+    subgraph free_queue_init["空闲队列 - 初始状态"]
         B1[Block 1] --> B2[Block 2]
         B2 --> B3[Block 3]
         B3 --> BN[...]
     end
 
-    subgraph "GPU 物理内存"
+    subgraph gpu_physical_memory["GPU 物理内存"]
         GPU["KV Cache Tensor<br/>[num_blocks, 2, num_heads, block_size, head_dim]"]
     end
 

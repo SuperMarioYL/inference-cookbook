@@ -15,25 +15,25 @@ weight: 4
 
 ```mermaid
 graph TD
-    subgraph 用户层
+    subgraph user_layer["用户层"]
         User[用户请求]
     end
 
-    subgraph 引擎层
+    subgraph engine_layer["引擎层"]
         Engine[EngineCore]
     end
 
-    subgraph 调度层
+    subgraph scheduling_layer["调度层"]
         Scheduler[Scheduler<br/>调度器]
         Waiting[waiting 队列]
         Running[running 队列]
     end
 
-    subgraph 内存管理层
+    subgraph memory_layer["内存管理层"]
         KVM[KVCacheManager]
     end
 
-    subgraph 执行层
+    subgraph execution_layer["执行层"]
         Executor[ModelExecutor]
     end
 
@@ -166,7 +166,7 @@ flowchart TD
     Start[schedule 开始] --> Init[初始化预算和输出列表]
     Init --> RunLoop{running 队列}
 
-    subgraph 处理运行中请求
+    subgraph process_running["处理运行中请求"]
         RunLoop --> |遍历| CalcTokens[计算需要调度的 token 数]
         CalcTokens --> Allocate[allocate_slots 分配 KV Cache]
         Allocate --> AllocOK{分配成功?}
@@ -183,7 +183,7 @@ flowchart TD
     WaitCheck -->|是| SkipWaiting[跳过 waiting 队列]
     WaitCheck -->|否| WaitLoop{waiting 队列}
 
-    subgraph 处理等待请求
+    subgraph process_waiting["处理等待请求"]
         WaitLoop --> |遍历| CheckStatus[检查请求状态]
         CheckStatus --> ReadyCheck{可以调度?}
         ReadyCheck -->|否| SkipWait[跳过并继续]

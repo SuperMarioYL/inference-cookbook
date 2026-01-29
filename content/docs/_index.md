@@ -24,27 +24,27 @@ weight: 1
 
 ```mermaid
 flowchart TD
-    subgraph 第一阶段：理解问题
-        A[为什么需要 vLLM] --> B[LLM 推理挑战]
-        B --> C[vLLM 架构概览]
+    subgraph stage1["第一阶段 - 理解问题"]
+        A["为什么需要 vLLM"] --> B["LLM 推理挑战"]
+        B --> C["vLLM 架构概览"]
     end
 
-    subgraph 第二阶段：学习基础
-        C --> D[神经网络基础]
-        D --> E[Transformer 架构]
-        E --> F[注意力机制]
-        F --> G[KV Cache 概念]
-        G --> H[LLM 生成过程]
+    subgraph stage2["第二阶段 - 学习基础"]
+        C --> D["神经网络基础"]
+        D --> E["Transformer 架构"]
+        E --> F["注意力机制"]
+        F --> G["KV Cache 概念"]
+        G --> H["LLM 生成过程"]
     end
 
-    subgraph 第三阶段：掌握核心
-        H --> I[PagedAttention]
-        I --> J[连续批处理]
+    subgraph stage3["第三阶段 - 掌握核心"]
+        H --> I["PagedAttention"]
+        I --> J["连续批处理"]
     end
 
-    subgraph 第四阶段：代码实践
-        J --> K[代码入口分析]
-        K --> L[引擎核心流程]
+    subgraph stage4["第四阶段 - 代码实践"]
+        J --> K["代码入口分析"]
+        K --> L["引擎核心流程"]
     end
 
     style A fill:#e1f5fe
@@ -59,26 +59,26 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    subgraph 快速入门
-        A[为什么需要 vLLM] --> B[vLLM 架构概览]
+    subgraph s1["快速入门"]
+        A["为什么需要 vLLM"] --> B["vLLM 架构概览"]
     end
 
-    subgraph 核心模块
-        B --> C[PagedAttention]
-        C --> D[KV Cache 管理器]
-        D --> E[调度器原理]
-        E --> F[连续批处理]
+    subgraph s2["核心模块"]
+        B --> C["PagedAttention"]
+        C --> D["KV Cache 管理器"]
+        D --> E["调度器原理"]
+        E --> F["连续批处理"]
     end
 
-    subgraph 代码深入
-        F --> G[请求生命周期]
-        G --> H[模型执行流程]
+    subgraph s3["代码深入"]
+        F --> G["请求生命周期"]
+        G --> H["模型执行流程"]
     end
 
-    subgraph 进阶主题
-        H --> I[量化技术]
-        I --> J[投机解码]
-        J --> K[分布式推理]
+    subgraph s4["进阶主题"]
+        H --> I["量化技术"]
+        I --> J["投机解码"]
+        J --> K["分布式推理"]
     end
 
     style A fill:#e1f5fe

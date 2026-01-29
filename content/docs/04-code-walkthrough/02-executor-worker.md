@@ -13,16 +13,16 @@ weight: 2
 
 ```mermaid
 graph TD
-    subgraph EngineCore
+    subgraph engine_core["EngineCore"]
         Core[EngineCore]
         Sched[Scheduler]
     end
 
-    subgraph Executor 层
+    subgraph executor_layer["Executor 层"]
         Exec[Executor]
     end
 
-    subgraph Worker 层
+    subgraph worker_layer["Worker 层"]
         W0[Worker 0<br/>GPU 0]
         W1[Worker 1<br/>GPU 1]
         W2[Worker 2<br/>GPU 2]
@@ -457,7 +457,7 @@ class GPUModelRunner:
 flowchart TD
     A[execute_model 开始] --> B[_prepare_inputs]
 
-    subgraph 输入准备
+    subgraph input_prep["输入准备"]
         B --> B1[处理 token IDs]
         B1 --> B2[计算位置编码]
         B2 --> B3[构建 attention metadata]
@@ -466,10 +466,10 @@ flowchart TD
 
     B4 --> C[model forward]
 
-    subgraph 前向传播
+    subgraph forward_pass["前向传播"]
         C --> C1[Embedding]
         C1 --> C2[Transformer Layers]
-        C2 --> C3[每层: Attention + FFN]
+        C2 --> C3[每层 - Attention + FFN]
         C3 --> C4[LM Head]
     end
 

@@ -13,32 +13,32 @@ weight: 6
 
 ```mermaid
 graph TD
-    subgraph 1. 提交阶段
+    subgraph phase1["1. 提交阶段"]
         A1[用户调用 generate]
         A2[Tokenize]
         A3[创建请求]
         A4[加入 waiting 队列]
     end
 
-    subgraph 2. 调度阶段
+    subgraph phase2["2. 调度阶段"]
         B1[查找前缀缓存]
         B2[分配 KV Cache]
         B3[加入 running 队列]
     end
 
-    subgraph 3. 执行阶段
+    subgraph phase3["3. 执行阶段"]
         C1[准备输入]
         C2[模型前向传播]
         C3[采样]
     end
 
-    subgraph 4. 更新阶段
+    subgraph phase4["4. 更新阶段"]
         D1[追加 token]
         D2[检查停止条件]
         D3[更新状态]
     end
 
-    subgraph 5. 返回阶段
+    subgraph phase5["5. 返回阶段"]
         E1[Detokenize]
         E2[构建输出]
         E3[返回用户]

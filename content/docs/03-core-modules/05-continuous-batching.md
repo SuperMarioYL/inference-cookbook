@@ -259,20 +259,20 @@ Step 2:
 
 ```mermaid
 graph TD
-    subgraph 传统方式[传统方式]
+    subgraph traditional["传统方式"]
         P1[Prefill A] --> D1[Decode A]
         D1 --> P2[Prefill B]
         P2 --> D2[Decode B]
     end
 
-    subgraph 混合处理[混合处理]
+    subgraph mixed["混合处理"]
         M1[Prefill A + Decode B,C]
         M2[Decode A,B,C + Prefill D]
         M1 --> M2
     end
 
-    Note1[时间长，GPU 利用不均] -.-> 传统方式
-    Note2[时间短，GPU 持续高负载] -.-> 混合处理
+    Note1[时间长，GPU 利用不均] -.-> traditional
+    Note2[时间短，GPU 持续高负载] -.-> mixed
 
     style 混合处理 fill:#c8e6c9
 ```
@@ -338,14 +338,14 @@ def schedule(self):
 
 ```mermaid
 graph LR
-    subgraph 静态批处理
+    subgraph static_batching["静态批处理"]
         S1[Batch 1<br/>100 req/s]
         S2[等待]
         S3[Batch 2<br/>100 req/s]
         S1 --> S2 --> S3
     end
 
-    subgraph 连续批处理
+    subgraph continuous_batching["连续批处理"]
         C1[持续处理<br/>300 req/s]
     end
 

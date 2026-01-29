@@ -25,7 +25,7 @@ weight: 2
 
 ```mermaid
 graph LR
-    subgraph RNN 的顺序处理
+    subgraph rnn_seq["RNN 的顺序处理"]
         X1[x₁] --> H1[h₁] --> H2[h₂] --> H3[h₃] --> H4[h₄]
         X2[x₂] --> H2
         X3[x₃] --> H3
@@ -72,31 +72,31 @@ graph TB
 
 ```mermaid
 graph TB
-    subgraph 输入
-        I[源序列<br/>例: 英文句子]
+    subgraph input["输入"]
+        I["源序列<br/>例: 英文句子"]
     end
 
-    subgraph Encoder
-        E1[Embedding + 位置编码]
+    subgraph encoder["Encoder"]
+        E1["Embedding + 位置编码"]
         E2[Multi-Head Attention]
         E3[Feed Forward]
-        E4[× N 层]
+        E4["× N 层"]
         E1 --> E2 --> E3
         E3 -.-> E4
     end
 
-    subgraph Decoder
-        D1[Embedding + 位置编码]
+    subgraph decoder["Decoder"]
+        D1["Embedding + 位置编码"]
         D2[Masked Multi-Head Attention]
         D3[Cross Attention]
         D4[Feed Forward]
-        D5[× N 层]
+        D5["× N 层"]
         D1 --> D2 --> D3 --> D4
         D4 -.-> D5
     end
 
-    subgraph 输出
-        O[目标序列<br/>例: 中文翻译]
+    subgraph output["输出"]
+        O["目标序列<br/>例: 中文翻译"]
     end
 
     I --> E1
@@ -116,16 +116,16 @@ graph TB
 
 ```mermaid
 graph TD
-    subgraph Decoder-Only 架构
-        I[输入 tokens] --> EMB[Embedding Layer]
-        EMB --> PE[+ 位置编码]
+    subgraph decoder_only["Decoder-Only 架构"]
+        I["输入 tokens"] --> EMB[Embedding Layer]
+        EMB --> PE["+ 位置编码"]
         PE --> B1[Transformer Block 1]
         B1 --> B2[Transformer Block 2]
         B2 --> B3[...]
         B3 --> BN[Transformer Block N]
         BN --> LN[Layer Norm]
-        LN --> LM[LM Head<br/>Linear: hidden → vocab]
-        LM --> O[输出 logits]
+        LN --> LM["LM Head<br/>Linear: hidden → vocab"]
+        LM --> O["输出 logits"]
     end
 
     style EMB fill:#e3f2fd
@@ -150,16 +150,16 @@ graph TD
 
 ```mermaid
 graph TD
-    subgraph Transformer Block
-        I[输入 X] --> LN1[Layer Norm 1]
-        LN1 --> ATT[Multi-Head<br/>Self-Attention]
+    subgraph transformer_block["Transformer Block"]
+        I["输入 X"] --> LN1[Layer Norm 1]
+        LN1 --> ATT["Multi-Head<br/>Self-Attention"]
         ATT --> ADD1[+]
         I --> ADD1
         ADD1 --> LN2[Layer Norm 2]
-        LN2 --> FFN[Feed Forward<br/>Network]
+        LN2 --> FFN["Feed Forward<br/>Network"]
         FFN --> ADD2[+]
         ADD1 --> ADD2
-        ADD2 --> O[输出]
+        ADD2 --> O["输出"]
     end
 
     style ATT fill:#bbdefb
@@ -272,12 +272,12 @@ pe = sinusoidal_position_encoding(512, 4096)
 
 ```mermaid
 graph LR
-    subgraph RoPE 原理
-        Q[Query 向量] --> R1[旋转矩阵<br/>R(pos)]
-        R1 --> RQ[旋转后的 Query]
+    subgraph rope_principle["RoPE 原理"]
+        Q["Query 向量"] --> R1["旋转矩阵<br/>R(pos)"]
+        R1 --> RQ["旋转后的 Query"]
 
-        K[Key 向量] --> R2[旋转矩阵<br/>R(pos)]
-        R2 --> RK[旋转后的 Key]
+        K["Key 向量"] --> R2["旋转矩阵<br/>R(pos)"]
+        R2 --> RK["旋转后的 Key"]
     end
 ```
 
@@ -306,8 +306,8 @@ def apply_rope(q, k, cos, sin):
 
 ```mermaid
 graph TD
-    subgraph Multi-Head Attention
-        I[输入 X] --> WQ[W_Q]
+    subgraph multi_head_attn["Multi-Head Attention"]
+        I["输入 X"] --> WQ[W_Q]
         I --> WK[W_K]
         I --> WV[W_V]
 
@@ -336,7 +336,7 @@ graph TD
         HN --> CAT
 
         CAT --> WO[W_O]
-        WO --> O[输出]
+        WO --> O["输出"]
     end
 ```
 
@@ -363,10 +363,10 @@ FFN 是一个简单的两层全连接网络：
 
 ```mermaid
 graph LR
-    I[输入<br/>hidden_dim] --> L1[Linear 1<br/>hidden → intermediate]
-    L1 --> ACT[激活函数<br/>GELU/SiLU]
-    ACT --> L2[Linear 2<br/>intermediate → hidden]
-    L2 --> O[输出<br/>hidden_dim]
+    I["输入<br/>hidden_dim"] --> L1["Linear 1<br/>hidden → intermediate"]
+    L1 --> ACT["激活函数<br/>GELU/SiLU"]
+    ACT --> L2["Linear 2<br/>intermediate → hidden"]
+    L2 --> O["输出<br/>hidden_dim"]
 ```
 
 ```python
@@ -391,13 +391,13 @@ LLaMA 等模型使用 **SwiGLU** 激活函数：
 
 ```mermaid
 graph LR
-    I[输入] --> G[Gate Proj]
+    I["输入"] --> G[Gate Proj]
     I --> U[Up Proj]
-    G --> SILU[SiLU 激活]
+    G --> SILU["SiLU 激活"]
     SILU --> MUL[×]
     U --> MUL
     MUL --> D[Down Proj]
-    D --> O[输出]
+    D --> O["输出"]
 ```
 
 ```python
@@ -496,15 +496,15 @@ class RMSNorm(nn.Module):
 
 ```mermaid
 graph TB
-    subgraph Post-Norm
-        I1[输入] --> ATT1[Attention]
+    subgraph post_norm["Post-Norm"]
+        I1["输入"] --> ATT1[Attention]
         ATT1 --> ADD1[+]
         I1 --> ADD1
         ADD1 --> LN1[LayerNorm]
     end
 
-    subgraph Pre-Norm（现代 LLM 常用）
-        I2[输入] --> LN2[LayerNorm]
+    subgraph pre_norm["Pre-Norm - 现代 LLM 常用"]
+        I2["输入"] --> LN2[LayerNorm]
         LN2 --> ATT2[Attention]
         ATT2 --> ADD2[+]
         I2 --> ADD2
@@ -534,11 +534,11 @@ output = x + Layer(x)
 
 ```mermaid
 graph LR
-    subgraph 无残差
+    subgraph no_residual["无残差"]
         X1[x] --> L1[Layer 1] --> L2[Layer 2] --> L3[Layer 3] --> Y1[y]
     end
 
-    subgraph 有残差
+    subgraph with_residual["有残差"]
         X2[x] --> LA[Layer 1] --> LB[Layer 2] --> LC[Layer 3] --> Y2[y]
         X2 --> Y2
         LA --> LB

@@ -38,26 +38,26 @@ PagedAttention 是 vLLM 最重要的创新，它借鉴了操作系统虚拟内�
 
 ```mermaid
 graph TB
-    subgraph 时间 T1: 三个请求开始
-        M1[Request A<br/>预分配 2GB<br/>实际用 0.1GB]
-        M2[Request B<br/>预分配 2GB<br/>实际用 0.2GB]
-        M3[Request C<br/>预分配 2GB<br/>实际用 0.1GB]
-        M4[空闲 2GB]
+    subgraph time_t1["时间 T1 - 三个请求开始"]
+        M1["Request A<br/>预分配 2GB<br/>实际用 0.1GB"]
+        M2["Request B<br/>预分配 2GB<br/>实际用 0.2GB"]
+        M3["Request C<br/>预分配 2GB<br/>实际用 0.1GB"]
+        M4["空闲 2GB"]
     end
 
-    subgraph 时间 T2: Request B 完成
-        N1[Request A<br/>预分配 2GB<br/>实际用 0.5GB]
-        N2[空洞 2GB<br/>外部碎片]
-        N3[Request C<br/>预分配 2GB<br/>实际用 0.3GB]
-        N4[空闲 2GB]
+    subgraph time_t2["时间 T2 - Request B 完成"]
+        N1["Request A<br/>预分配 2GB<br/>实际用 0.5GB"]
+        N2["空洞 2GB<br/>外部碎片"]
+        N3["Request C<br/>预分配 2GB<br/>实际用 0.3GB"]
+        N4["空闲 2GB"]
     end
 
-    subgraph 时间 T3: 新请求 D 到来
-        O1[Request A<br/>2GB]
-        O2[空洞 2GB]
-        O3[Request C<br/>2GB]
-        O4[空闲 2GB]
-        O5[Request D 需要 3GB<br/>失败！]
+    subgraph time_t3["时间 T3 - 新请求 D 到来"]
+        O1["Request A<br/>2GB"]
+        O2["空洞 2GB"]
+        O3["Request C<br/>2GB"]
+        O4["空闲 2GB"]
+        O5["Request D 需要 3GB<br/>失败!"]
     end
 
     style N2 fill:#ffcdd2
@@ -83,16 +83,16 @@ graph TB
 
 ```mermaid
 graph LR
-    subgraph 虚拟内存
-        VA[虚拟地址空间<br/>程序看到的连续空间]
+    subgraph virtual_memory["虚拟内存"]
+        VA["虚拟地址空间<br/>程序看到的连续空间"]
     end
 
-    subgraph 页表
-        PT[Page Table<br/>虚拟页 → 物理页]
+    subgraph page_table["页表"]
+        PT["Page Table<br/>虚拟页 → 物理页"]
     end
 
-    subgraph 物理内存
-        PA[物理内存<br/>实际不连续的页]
+    subgraph physical_memory["物理内存"]
+        PA["物理内存<br/>实际不连续的页"]
     end
 
     VA --> PT --> PA
@@ -120,17 +120,17 @@ graph LR
 
 ```mermaid
 graph LR
-    subgraph 传统方案
-        T1[预分配连续空间]
-        T2[大量浪费]
+    subgraph traditional["传统方案"]
+        T1["预分配连续空间"]
+        T2["大量浪费"]
         T1 --> T2
     end
 
-    subgraph PagedAttention
-        P1[按需分配]
-        P2[分块存储]
-        P3[非连续]
-        P4[高利用率]
+    subgraph paged_attention["PagedAttention"]
+        P1["按需分配"]
+        P2["分块存储"]
+        P3["非连续"]
+        P4["高利用率"]
         P1 --> P2 --> P3 --> P4
     end
 
@@ -243,15 +243,15 @@ def get_slot_mapping(token_position, block_size, block_table):
 
 ```mermaid
 graph LR
-    subgraph Token 位置 35
+    subgraph token_pos["Token 位置 35"]
         T[token_position = 35]
     end
 
-    subgraph 计算
-        LB[逻辑块 = 35 // 16 = 2]
-        OFF[偏移 = 35 % 16 = 3]
-        PB[物理块 = block_table[2] = 8]
-        SLOT[slot = 8 × 16 + 3 = 131]
+    subgraph calculation["计算"]
+        LB["逻辑块 = 35 // 16 = 2"]
+        OFF["偏移 = 35 % 16 = 3"]
+        PB["物理块 = block_table[2] = 8"]
+        SLOT["slot = 8 × 16 + 3 = 131"]
     end
 
     T --> LB --> PB
@@ -267,19 +267,19 @@ graph LR
 
 ```mermaid
 graph TB
-    subgraph 传统方案
-        A1[Request A: 2GB 预分配<br/>实际 0.1GB]
-        A2[Request B: 2GB 预分配<br/>实际 0.2GB]
-        A3[Request C: 2GB 预分配<br/>实际 0.1GB]
-        A4[空洞和碎片]
+    subgraph traditional_approach["传统方案"]
+        A1["Request A: 2GB 预分配<br/>实际 0.1GB"]
+        A2["Request B: 2GB 预分配<br/>实际 0.2GB"]
+        A3["Request C: 2GB 预分配<br/>实际 0.1GB"]
+        A4["空洞和碎片"]
     end
 
-    subgraph PagedAttention
-        B1[Block Pool<br/>统一管理所有块]
-        B2[Request A: 2 blocks]
-        B3[Request B: 4 blocks]
-        B4[Request C: 2 blocks]
-        B5[空闲块可立即复用]
+    subgraph paged_attention_approach["PagedAttention"]
+        B1["Block Pool<br/>统一管理所有块"]
+        B2["Request A: 2 blocks"]
+        B3["Request B: 4 blocks"]
+        B4["Request C: 2 blocks"]
+        B5["空闲块可立即复用"]
     end
 
     style A4 fill:#ffcdd2
@@ -315,23 +315,23 @@ sequenceDiagram
 
 ```mermaid
 graph TB
-    subgraph 共享场景
-        P[共同前缀<br/>'System prompt...']
+    subgraph shared_scenario["共享场景"]
+        P["共同前缀<br/>'System prompt...'"]
     end
 
-    subgraph 共享的 Blocks
+    subgraph shared_blocks["共享的 Blocks"]
         B1[Block 0]
         B2[Block 1]
         B3[Block 2]
     end
 
-    subgraph Request A
-        A[继续生成 A 的内容]
+    subgraph request_a["Request A"]
+        A["继续生成 A 的内容"]
         AB[Block 10]
     end
 
-    subgraph Request B
-        B[继续生成 B 的内容]
+    subgraph request_b["Request B"]
+        B["继续生成 B 的内容"]
         BB[Block 15]
     end
 
@@ -385,20 +385,20 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    subgraph 输入
-        Q[Query: 新 token 的 Q]
-        BT[Block Table: 物理块列表]
+    subgraph input["输入"]
+        Q["Query: 新 token 的 Q"]
+        BT["Block Table: 物理块列表"]
     end
 
-    subgraph PagedAttention 计算
-        FETCH[从各个物理块获取 K, V]
-        COMPUTE[计算 Attention<br/>Q × K^T / √d]
+    subgraph paged_attn_compute["PagedAttention 计算"]
+        FETCH["从各个物理块获取 K, V"]
+        COMPUTE["计算 Attention<br/>Q × K^T / √d"]
         SOFTMAX[Softmax]
-        WEIGHTED[加权求和 V]
+        WEIGHTED["加权求和 V"]
     end
 
-    subgraph 输出
-        O[Attention 输出]
+    subgraph output["输出"]
+        O["Attention 输出"]
     end
 
     Q --> COMPUTE
@@ -557,9 +557,9 @@ __global__ void paged_attention_v2_kernel(
 
 ```mermaid
 graph LR
-    subgraph 吞吐量对比
-        T1[传统方案<br/>1x 基准]
-        T2[PagedAttention<br/>2-4x 提升]
+    subgraph throughput_compare["吞吐量对比"]
+        T1["传统方案<br/>1x 基准"]
+        T2["PagedAttention<br/>2-4x 提升"]
     end
 
     style T2 fill:#c8e6c9

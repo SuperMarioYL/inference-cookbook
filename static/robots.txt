@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://inference.cookbook.lei6393.com/vllm/sitemap.xml
+Sitemap: https://inference.cookbook.lei6393.com/sglang/sitemap.xml
+Sitemap: https://inference.cookbook.lei6393.com/ucm/sitemap.xml
+Sitemap: https://inference.cookbook.lei6393.com/dynamo/sitemap.xml
+Sitemap: https://inference.cookbook.lei6393.com/cacheblend/sitemap.xml

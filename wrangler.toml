@@ -1,0 +1,14 @@
+# Cloudflare Workers 静态站点配置
+name = "inference-cookbook"
+compatibility_date = "2025-01-01"
+
+# 静态资源配置
+[assets]
+directory = "./public"
+html_handling = "auto-trailing-slash"   # 自动处理尾部斜杠（index.html 加斜杠，其他页面不加）
+not_found_handling = "404-page"         # 404 时返回最近的 404.html
+
+# 可观测性 - 持久化请求日志
+[observability]
+enabled = true
+head_sampling_rate = 1                  # 记录 100% 请求日志（可调低以节省用量）

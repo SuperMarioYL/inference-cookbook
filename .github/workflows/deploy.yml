@@ -36,4 +36,4 @@ jobs:
         env:
           HUGO_ENVIRONMENT: production
           TZ: Asia/Shanghai
-        run: hugo --gc --minify
+        run: hugo --gc

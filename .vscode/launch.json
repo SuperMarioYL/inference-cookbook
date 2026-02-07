@@ -19,7 +19,7 @@
       "name": "Hugo Build",
       "type": "node-terminal",
       "request": "launch",
-      "command": "hugo --gc --minify",
+      "command": "hugo --gc",
       "cwd": "${workspaceFolder}"
     }
   ]

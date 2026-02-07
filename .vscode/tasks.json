@@ -23,7 +23,7 @@
     {
       "label": "Hugo: Build",
       "type": "shell",
-      "command": "hugo --gc --minify",
+      "command": "hugo --gc",
       "group": "build",
       "presentation": {
         "echo": true,

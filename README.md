@@ -2,7 +2,7 @@
 
 > 面向深度学习初学者的 vLLM 技术文档，从基础概念到核心算法的完整解析
 
-**在线阅读**: [https://inference.cookbook.lei6393.com](https://inference.cookbook.lei6393.com)
+**在线阅读**: [https://inference.lei6393.com](https://inference.lei6393.com)
 
 ## 简介
 

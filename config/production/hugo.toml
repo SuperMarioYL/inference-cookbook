@@ -1,2 +1,2 @@
 # Overrides for production environment
-baseurl = "/"
+baseurl = "https://inference.cookbook.lei6393.com/"

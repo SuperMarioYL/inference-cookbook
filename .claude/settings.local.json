@@ -7,7 +7,8 @@
       "Bash(find:*)",
       "Bash(hugo list:*)",
       "Bash(npm run dev:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "WebFetch(domain:developers.cloudflare.com)"
     ]
   }
 }

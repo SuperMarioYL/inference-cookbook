@@ -8,11 +8,13 @@
       <p class="lead fs-4 text-muted my-4">{{ .Params.lead | safeHTML }}</p>
       <div class="my-5">
         <div class="d-flex flex-wrap justify-content-center gap-3 mb-3">
+          <a class="btn btn-primary btn-lg px-4" href="/pytorch/00-overview/01-architecture-overview/" role="button">PyTorch</a>
           <a class="btn btn-primary btn-lg px-4" href="/vllm/00-overview/overview/" role="button">vLLM</a>
           <a class="btn btn-primary btn-lg px-4" href="/sglang/00-overview/overview/" role="button">SGLang</a>
           <a class="btn btn-primary btn-lg px-4" href="/ucm/01-overview/01-introduction/" role="button">UCM</a>
           <a class="btn btn-primary btn-lg px-4" href="/dynamo/00-overview/overview/" role="button">Dynamo</a>
           <a class="btn btn-primary btn-lg px-4" href="/cacheblend/00-overview/overview/" role="button">CacheBlend</a>
+          <a class="btn btn-primary btn-lg px-4" href="/mooncake/00-beginner-guide/01-what-is-mooncake/" role="button">Mooncake</a>
         </div>
         <div class="d-flex justify-content-center">
           <a class="btn btn-outline-secondary px-4" href="https://github.com/SuperMarioYL/inference-cookbook" role="button">GitHub</a>
@@ -69,6 +71,16 @@
       <p class="text-muted">从入门到精通，掌握主流 LLM 推理技术</p>
     </div>
     <div class="framework-grid">
+      <a href="/pytorch/00-overview/01-architecture-overview/" class="framework-card">
+        <span class="framework-badge">基础框架</span>
+        <h3>PyTorch</h3>
+        <p>深度学习框架源码解析，涵盖 Tensor、Autograd、NN Module、编译器栈等 11 个核心模块</p>
+        <div class="framework-tags">
+          <span>Tensor/Storage</span>
+          <span>Autograd</span>
+          <span>TorchDynamo</span>
+        </div>
+      </a>
       <a href="/vllm/00-overview/overview/" class="framework-card">
         <span class="framework-badge">入门推荐</span>
         <h3>vLLM</h3>
@@ -113,6 +125,16 @@
           <span>RAG 加速</span>
           <span>KV 融合</span>
           <span>RoPE 恢复</span>
+        </div>
+      </a>
+      <a href="/mooncake/00-beginner-guide/01-what-is-mooncake/" class="framework-card">
+        <span class="framework-badge">FAST'25 最佳论文</span>
+        <h3>Mooncake</h3>
+        <p>KVCache-centric 分离式 LLM 推理系统，生产环境实现 +498% 请求容量提升</p>
+        <div class="framework-tags">
+          <span>分离式架构</span>
+          <span>分布式存储</span>
+          <span>RDMA</span>
         </div>
       </a>
     </div>

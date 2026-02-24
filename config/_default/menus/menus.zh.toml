@@ -1,9 +1,4 @@
 [[main]]
-  name = "首页"
-  url = "/"
-  weight = 1
-
-[[main]]
   name = "vLLM"
   url = "/vllm/00-overview/overview/"
   weight = 10
@@ -32,6 +27,11 @@
   name = "Mooncake"
   url = "/mooncake/00-beginner-guide/01-what-is-mooncake/"
   weight = 26
+
+[[main]]
+  name = "Flash Attention"
+  url = "/flashattention/00-overview/overview/"
+  weight = 28
 
 [[main]]
   name = "PyTorch"

@@ -3,12 +3,6 @@ title: "驱逐与高可用"
 weight: 3
 ---
 
-# 驱逐与高可用
-
-[上一篇](02-master-service.md) | [目录](../README.md) | [下一篇](../04-transfer-engine/)
-
----
-
 ## 7.1 驱逐策略
 
 ### 7.1.1 驱逐触发条件
@@ -124,17 +118,32 @@ void MasterService::BatchEvict(double evict_ratio_target,
 
 驱逐优先级：
 
-```mermaid
-graph TD
-    subgraph "驱逐优先级（从高到低）"
-        P1[1. 租约过期 + 无 SoftPin<br/>最旧的 lease_timeout]
-        P2[2. 租约过期 + 有 SoftPin<br/>但 SoftPin 也过期]
-        P3[3. 租约过期 + SoftPin 未过期<br/>仅在允许时驱逐]
-        P4[4. 租约未过期<br/>不可驱逐]
-    end
-
-    P1 --> P2 --> P3 --> P4
-```
+{{< stateboard >}}
+title: "租约如何限制本轮驱逐"
+rows: ["对象", "读租约", "候选"]
+steps:
+  - title: "两个对象都占内存"
+    detail: "假设 A、B 在同一租户中，没有硬 pin，其他条件相同。"
+    cells:
+      - ["A", "B"]
+      - ["有效", "到期"]
+      - ["·", "·"]
+    focus: [[1, 0], [1, 1]]
+  - title: "内存达到高水位"
+    detail: "B 先进入可回收候选。仍在读租约窗口内的 A 继续保留。"
+    cells:
+      - ["A", "B"]
+      - ["有效", "到期"]
+      - ["保留", "候选"]
+    focus: [[2, 0], [2, 1]]
+  - title: "A 的窗口到期"
+    detail: "若读者没有续出新的保护且没有其他限制，后续扫描才可重新考虑 A。"
+    cells:
+      - ["A", "B"]
+      - ["到期", "到期"]
+      - ["候选", "候选"]
+    focus: [[1, 0], [2, 0]]
+{{< /stateboard >}}
 
 ### 7.1.3 nth_element 优化
 
@@ -231,29 +240,27 @@ void HandleExpiredClients(const std::vector<UUID>& expired_clients) {
 
 客户端生命周期：
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant Master as MasterService
-    participant Monitor as ClientMonitor
-
-    Client->>Master: MountSegment
-    Master->>Monitor: Push to ping_queue
-    Monitor->>Monitor: Start TTL timer
-
-    loop 心跳循环
-        Client->>Master: Ping
-        Master->>Monitor: Push to ping_queue
-        Monitor->>Monitor: Reset TTL
-    end
-
-    Note over Client: 客户端崩溃或网络中断
-
-    Monitor->>Monitor: TTL 过期
-    Monitor->>Master: Mark as NEED_REMOUNT
-    Master->>Master: Unmount segments
-    Master->>Master: Clear invalid handles
-```
+{{< trace >}}
+title: "持有者失联之后，索引如何变化"
+actors: ["持有者", "Master", "存活监控", "读取者"]
+steps:
+  - from: 0
+    to: 1
+    label: "挂载 segment"
+    detail: "持有者把自己的存储空间登记到 Master，并持续发送心跳。"
+  - from: 1
+    to: 2
+    label: "更新存活记录"
+    detail: "监控按收到的心跳判断该客户端是否还处于可服务状态。"
+  - from: 2
+    to: 1
+    label: "调度离场"
+    detail: "超出配置的存活和怀疑窗口时，Master 开始处理该客户端离场。"
+  - from: 1
+    to: 3
+    label: "查询其余副本"
+    detail: "离场数据经过清理后，读取者从其他有效副本取数；仅有失效副本时读取无法继续。"
+{{< /trace >}}
 
 ## 7.3 高可用与 Leader 选举
 
@@ -349,48 +356,39 @@ int MasterServiceSupervisor::Start() {
 
 Leader 选举流程：
 
-```mermaid
-sequenceDiagram
-    participant Node1 as Node 1
-    participant Node2 as Node 2
-    participant etcd
-
-    Node1->>etcd: Get master_view_key
-    etcd-->>Node1: KEY_NOT_EXIST
-
-    Node2->>etcd: Get master_view_key
-    etcd-->>Node2: KEY_NOT_EXIST
-
-    Node1->>etcd: GrantLease(TTL=5s)
-    etcd-->>Node1: lease_id=123
-
-    Node2->>etcd: GrantLease(TTL=5s)
-    etcd-->>Node2: lease_id=456
-
-    Node1->>etcd: CreateWithLease(key, "node1", lease=123)
-    etcd-->>Node1: OK, version=1
-
-    Node2->>etcd: CreateWithLease(key, "node2", lease=456)
-    etcd-->>Node2: TRANSACTION_FAIL (key exists)
-
-    Note over Node1: 成为 Leader
-    Note over Node2: 等待 Leader 变更
-
-    loop Keep Alive
-        Node1->>etcd: KeepAlive(lease=123)
-        etcd-->>Node1: OK
-    end
-
-    Note over Node1: Node 1 崩溃，停止续约
-
-    etcd->>etcd: Lease 123 过期，删除 key
-    etcd->>Node2: Watch: key deleted
-
-    Node2->>etcd: CreateWithLease(key, "node2", lease=456)
-    etcd-->>Node2: OK, version=2
-
-    Note over Node2: 成为新 Leader
-```
+{{< stateboard >}}
+title: "两个候选 Master 竞争同一个领导键"
+rows: ["候选一", "候选二", "etcd 键"]
+steps:
+  - title: "同时检查"
+    detail: "两者都看见领导键为空。分别取得租约后，仍需成功创建同一键才能担任 leader。"
+    cells:
+      - ["已就绪"]
+      - ["已就绪"]
+      - ["空"]
+    focus: [[2, 0]]
+  - title: "一号创建成功"
+    detail: "一号的条件写成功，etcd 记录一号地址并和它的租约关联。"
+    cells:
+      - ["leader"]
+      - ["候选"]
+      - ["指向一"]
+    focus: [[0, 0], [2, 0]]
+  - title: "二号等待"
+    detail: "二号的条件写失败，继续观察现有记录。"
+    cells:
+      - ["leader"]
+      - ["等待"]
+      - ["指向一"]
+    focus: [[1, 0]]
+  - title: "租约失效"
+    detail: "领导键在租约到期后释放。候选重新竞争，新的成功者才接管。"
+    cells:
+      - ["离线"]
+      - ["竞选"]
+      - ["空"]
+    focus: [[1, 0], [2, 0]]
+{{< /stateboard >}}
 
 ## 7.4 持久化存储后端
 
@@ -444,8 +442,6 @@ std::string MasterService::SanitizeKey(const std::string& key) const {
 
 ## 7.5 本章小结
 
-本章深入分析了 Mooncake Store 的核心实现：
-
 1. **分片元数据**：1024 分片设计，支持高并发访问
 2. **RAII 访问控制**：通过 Scoped Access 类保证线程安全
 3. **租约机制**：保护正在使用的对象不被驱逐
@@ -454,7 +450,3 @@ std::string MasterService::SanitizeKey(const std::string& key) const {
 6. **高可用**：基于 etcd 的 Leader 选举、防脑裂设计
 
 这些设计使 Mooncake Store 能够在高并发、大规模 KVCache 场景下保持高性能和高可靠性。
-
----
-
-[上一篇](02-master-service.md) | [目录](../README.md) | [下一篇](../04-transfer-engine/)

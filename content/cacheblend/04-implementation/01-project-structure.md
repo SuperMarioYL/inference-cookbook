@@ -3,7 +3,7 @@ title: "项目结构"
 weight: 1
 ---
 
-本文档介绍 CacheBlend 项目的整体结构，包括目录布局、核心文件清单以及代码依赖关系，帮助开发者快速了解项目组织方式。
+作者原型从 `example/blend.py` 发起两次前向。顺着模型执行器往下走，`llama.py` 负责选层，`xformers.py` 负责选位置和写回。
 
 ## 目录结构概览
 
@@ -11,7 +11,6 @@ weight: 1
 CacheBlend/
 ├── README.md                          # 项目说明文档
 ├── requirements.txt                   # Python 依赖 (rouge_score)
-├── 2405.16444v3.pdf                   # 论文 PDF
 ├── example/                           # 示例脚本
 │   ├── blend.py                       # 基础示例
 │   ├── blend_musique.py               # MusiQue 数据集评估

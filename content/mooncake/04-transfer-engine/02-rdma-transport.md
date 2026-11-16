@@ -3,10 +3,6 @@ title: "RDMA Transport 实现"
 weight: 2
 ---
 
-[上一篇](01-architecture-overview.md) | [目录](../README.md) | [下一篇](03-data-transfer-impl.md)
-
-# RDMA Transport 实现
-
 #### 9.1 RdmaTransport 初始化
 
 ```cpp
@@ -197,22 +193,27 @@ int RdmaTransport::preTouchMemory(void* addr, size_t length) {
 
 内存注册流程：
 
-```mermaid
-flowchart TD
-    A[registerLocalMemory] --> B{length > 4GB?}
-    B -->|是| C[并行 Pre-Touch]
-    B -->|否| D{多 Context?}
-    C --> D
-    D -->|是| E[并行注册到各 Context]
-    D -->|否| F[串行注册]
-    E --> G[收集 lkey/rkey]
-    F --> G
-    G --> H{location = '*'?}
-    H -->|是| I[自动检测内存位置]
-    H -->|否| J[使用指定位置]
-    I --> K[添加到元数据]
-    J --> K
-```
+{{< trace >}}
+title: "预触页与内存注册的先后关系"
+actors: ["待注册区", "CPU 页", "设备上下文", "元数据"]
+steps:
+  - from: 0
+    to: 1
+    label: "触及页面"
+    detail: "启用并适用预触页路径时，先访问区间内的页面以完成实际映射。"
+  - from: 0
+    to: 2
+    label: "注册区域"
+    detail: "把内存注册到所选 RDMA 上下文，获得访问键。"
+  - from: 2
+    to: 3
+    label: "发布位置"
+    detail: "将设备对应的键与地址范围放进传输元数据。"
+  - from: 3
+    to: 3
+    label: "后续访问"
+    detail: "发起传输时从相应描述中查找地址和键。"
+{{< /trace >}}
 
 #### 9.3 Segment 描述符
 

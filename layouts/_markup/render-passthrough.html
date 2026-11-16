@@ -1,0 +1,4 @@
+{{- $display := eq .Type "block" -}}
+{{- if $display }}<div class="equation">{{ end -}}
+{{- transform.ToMath .Inner (dict "displayMode" $display "output" "mathml") -}}
+{{- if $display }}</div>{{ end -}}

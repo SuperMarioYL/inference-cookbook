@@ -3,8 +3,6 @@ title: "P2P Store - 实现原理深度分析"
 weight: 2
 ---
 
-# P2P Store - 实现原理深度分析
-
 ## 1. 核心数据结构与分片机制
 
 ### 1.1 P2PStore 结构体
@@ -270,16 +268,34 @@ type Payload struct {
 
 Metadata 组件封装了 etcd 客户端的所有操作，核心设计是利用 etcd 的 **ModRevision** 实现乐观并发控制（CAS - Compare And Swap）。
 
-```mermaid
-flowchart TD
-    subgraph cas["乐观并发控制流程"]
-        A["读取 Payload 和 Revision"] --> B["修改 Payload 内容"]
-        B --> C{"etcd CAS 更新<br/>ModRevision == 读取时的 Revision ?"}
-        C -->|"成功"| D["更新完成"]
-        C -->|"失败 - 被其他节点修改"| E["重新读取最新 Payload"]
-        E --> B
-    end
-```
+{{< stateboard >}}
+title: "两个发布方碰到同一次目录修改"
+rows: ["客户端 A", "客户端 B", "目录版本"]
+steps:
+  - title: "两边先读取"
+    detail: "A、B 都以版本 7 的目录为基础准备修改。"
+    cells:
+      - ["读 v7"]
+      - ["读 v7"]
+      - ["v7"]
+    focus: [[0, 0], [1, 0]]
+  - title: "A 优先提交"
+    detail: "A 的条件写成功，目录进入新版本。"
+    cells:
+      - ["成功"]
+      - ["待提交"]
+      - ["v8"]
+    focus: [[0, 0], [2, 0]]
+  - title: "B 检查冲突"
+    detail: "B 的条件仍要求 v7，写入不覆盖 A 的结果；它从 v8 重新处理。"
+    cells:
+      - ["成功"]
+      - ["重读 v8"]
+      - ["v8"]
+    focus: [[1, 0], [2, 0]]
+{{< /stateboard >}}
+
+这里用相邻版本号示意一次条件写竞争，实际比较值取决于元数据存储的修订记录。
 
 **Create - 创建新 Payload（事务保证唯一性）**：
 
@@ -510,23 +526,27 @@ type RegisteredMemory struct {
 
 ### 4.2 内存注册流程
 
-```mermaid
-flowchart TD
-    subgraph add["RegisteredMemory.Add 流程"]
-        A["Add(addr, length, maxShardSize, location)"] --> B{"参数校验<br/>maxChunkSize % maxShardSize == 0 ?"}
-        B -->|"失败"| C["返回 ErrInvalidArgument"]
-        B -->|"通过"| D{"遍历 bufferList<br/>检查地址匹配"}
-        D -->|"完全匹配<br/>addr == entry.addr<br/>length == entry.length"| E["引用计数 +1<br/>直接返回"]
-        D -->|"部分重叠"| F["返回 ErrAddressOverlapped"]
-        D -->|"无匹配"| G["添加 BufferHandle<br/>refCount = 1"]
-        G --> H["按 maxChunkSize 分块"]
-        H --> I["并发 goroutine 注册每个块"]
-        I --> J{"全部成功 ?"}
-        J -->|"是"| K["返回 nil"]
-        J -->|"否"| L["回滚已成功的注册"]
-        L --> M["返回错误"]
-    end
-```
+{{< trace >}}
+title: "发布者何时可以释放已注册内存"
+actors: ["本地应用", "P2P Store", "传输引擎", "远端读取者"]
+steps:
+  - from: 0
+    to: 1
+    label: "提供内存"
+    detail: "应用将需要发布的数据及有效范围交给 P2P Store。"
+  - from: 1
+    to: 2
+    label: "注册区域"
+    detail: "传输引擎准备这段内存的远端访问描述。"
+  - from: 3
+    to: 2
+    label: "拉取内容"
+    detail: "读取者在发布有效期内使用对应位置取回内容。"
+  - from: 2
+    to: 1
+    label: "结束访问"
+    detail: "发布方需要先结束相关访问，再撤销注册和释放源内存。"
+{{< /trace >}}
 
 **核心实现**：
 
@@ -805,36 +825,31 @@ default:               // 后续错误被丢弃，避免阻塞
 
 ### 6.4 完整的数据流转路径
 
-```mermaid
-flowchart TD
-    subgraph register["Register 数据流"]
-        R1["应用调用 Register"] --> R2["Catalog.Contains 检查"]
-        R2 -->|"未注册"| R3["RegisteredMemory.Add<br/>注册内存到 Transfer Engine"]
-        R3 --> R4["构建 Shard 列表<br/>按 maxShardSize 切分"]
-        R4 --> R5{"forceCreate ?"}
-        R5 -->|"true"| R6["Metadata.Put<br/>直接写入 etcd"]
-        R5 -->|"false"| R7["Metadata.Create<br/>事务创建 (唯一性保证)"]
-        R6 --> R8["Catalog.Add<br/>记录本地状态"]
-        R7 --> R8
-    end
-
-    subgraph getreplica["GetReplica 数据流"]
-        G1["应用调用 GetReplica"] --> G2["Metadata.Get<br/>获取 Payload + Revision"]
-        G2 --> G3["doGetReplica<br/>并行拉取所有 Shard"]
-        G3 --> G4["每个 Shard 独立 goroutine"]
-        G4 --> G5["Shard.GetLocation<br/>选择数据源"]
-        G5 --> G6["TransferEngine.submitTransfer<br/>提交传输请求"]
-        G6 --> G7["轮询等待传输完成"]
-        G7 --> G8{"传输成功 ?"}
-        G8 -->|"失败"| G9["重试下一个源"]
-        G9 --> G5
-        G8 -->|"成功"| G10["所有 Shard 完成"]
-        G10 --> G11["二次校验 Revision"]
-        G11 -->|"数据有效"| G12["updatePayloadMetadata<br/>CAS 更新 Replica 位置"]
-        G11 -->|"数据源减少"| G3
-        G12 --> G13["Catalog.Add<br/>记录本地状态"]
-    end
-```
+{{< trace >}}
+title: "三个 shard 在哪里汇合"
+actors: ["源副本", "元数据目录", "传输引擎", "新副本"]
+steps:
+  - from: 0
+    to: 1
+    label: "发布 shard 信息"
+    detail: "源端登记对象及其分片位置。"
+  - from: 3
+    to: 1
+    label: "查询版本"
+    detail: "新节点取得对象元数据和修订版本，知道需要拉取哪些分片。"
+  - from: 0
+    to: 2
+    label: "提供数据"
+    detail: "本例有三个 shard，传输引擎分别从可用来源读取。"
+  - from: 2
+    to: 3
+    label: "拼回对象"
+    detail: "各次传输写入各自偏移，全部所需分片完成后对象才完整。"
+  - from: 3
+    to: 1
+    label: "更新目录"
+    detail: "新持有者根据相应的元数据契约登记新副本。"
+{{< /trace >}}
 
 ## 7. 小结
 

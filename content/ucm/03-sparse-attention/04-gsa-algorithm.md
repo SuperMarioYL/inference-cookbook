@@ -4,16 +4,17 @@ weight: 4
 ---
 
 
-> **阅读时间**: 约 20 分钟
 > **前置要求**: [UcmSparseBase 接口](./02-base-interface.md)
 
 ---
 
 ## 概述
 
-GSA（Gather-Scatter Attention）是 UCM 的高性能稀疏注意力算法，通过预取引擎实现智能的 KV Block 预加载，显著降低推理延迟。
+GSA（Gather-Scatter Attention）按选中的位置收集 KV 块。预取是否来得及，取决于块何时选出、数据放在哪里，以及计算端何时要用到它们。
 
 ---
+
+v0.9.1 保留了 [GSA 实现](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/sparse/gsa/gsa.py)，但 [Sparse 工厂](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/sparse/factory.py) 中 `GSA` 的注册处于注释状态。以下用这份源码解释检索与预取。按本版特性表复现实验时，应选择表中列出的设备路径 [GSAOnDevice](./05-gsa-on-device.md)。
 
 ## 1. 算法原理
 
@@ -44,32 +45,27 @@ GSA 的核心创新在于**预测性预取**：在模型执行前，预测哪些
 | 内存使用 | 按需加载 | 预取缓冲区 |
 | 适用场景 | 通用场景 | 对延迟敏感的场景 |
 ### 1.3 算法流程
-```mermaid
-flowchart TB
-    subgraph scheduler["Scheduler 侧"]
-        S1["接收请求"]
-        S2["生成 Block 哈希"]
-        S3["查询 Store 命中"]
-        S4["构建预取计划"]
-        S5["提交给 Prefetch Engine"]
-    end
-    subgraph prefetch["Prefetch Engine"]
-        P1["解析预取计划"]
-        P2["优先级排序"]
-        P3["异步加载 KV"]
-        P4["更新状态"]
-    end
-
-    subgraph worker["Worker 侧"]
-        W1["接收执行请求"]
-        W2["等待预取完成"]
-        W3["执行稀疏注意力"]
-        W4["保存新 KV"]
-    end
-    S1 --> S2 --> S3 --> S4 --> S5
-    S5 --> P1 --> P2 --> P3 --> P4
-    P4 --> W1 --> W2 --> W3 --> W4
-```
+{{< trace >}}
+title: "GSA 怎样把候选预取到 worker"
+actors: ["调度侧", "预取队列", "存储", "worker"]
+steps:
+  - from: 0
+    to: 1
+    label: "提交计划"
+    detail: "调度侧根据本步请求和历史状态构造待预取的块。"
+  - from: 1
+    to: 2
+    label: "取回候选"
+    detail: "预取任务把所需的数据从存储取回。"
+  - from: 2
+    to: 3
+    label: "供数"
+    detail: "worker 按准备好的块表和完成状态取得数据。"
+  - from: 3
+    to: 3
+    label: "执行本层"
+    detail: "本层根据实际可用的候选执行注意力，后续步骤继续更新状态。"
+{{< /trace >}}
 
 ---
 
@@ -77,7 +73,7 @@ flowchart TB
 
 ### 2.1 GSA 类结构
 
-**代码位置**: `ucm/sparse/gsa/gsa.py`
+[v0.9.1 实现](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/sparse/gsa/gsa.py)
 
 ```python
 class GSA(UcmSparseBase):
@@ -101,7 +97,7 @@ class GSA(UcmSparseBase):
 
 ### 2.2 请求状态
 
-**代码位置**: `ucm/sparse/gsa/gsa.py:86`
+[v0.9.1 实现](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/sparse/gsa/gsa.py)
 
 ```python
 @dataclass
@@ -127,7 +123,7 @@ class GSAReqStat:
 
 ### 3.1 架构设计
 
-**代码位置**: `ucm/sparse/gsa/prefetch/prefetch_engine.py`
+[v0.9.1 实现](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/sparse/gsa/prefetch/prefetch_engine.py)
 
 ```mermaid
 graph TB
@@ -276,32 +272,32 @@ class PrefetchPriority:
 ---
 ## 4. 稀疏注意力计算
 ### 4.1 Gather-Scatter 模式
-```mermaid
-graph LR
-    subgraph gather["Gather 阶段"]
-        Q["Query"]
-        Indices["选中索引"]
-        KV["完整 KV Cache"]
-        SelectedKV["选中的 KV"]
-        Q --> Indices
-        Indices --> |"索引"| KV
-        KV --> SelectedKV
-    end
-
-    subgraph compute["计算阶段"]
-        Attention["稀疏注意力"]
-        Output["注意力输出"]
-
-        SelectedKV --> Attention
-        Q --> Attention
-        Attention --> Output
-    end
-    subgraph scatter["Scatter 阶段"]
-        FullOutput["完整输出"]
-
-        Output --> |"还原位置"| FullOutput
-    end
-```
+{{< stateboard >}}
+title: "按索引收集不连续的历史数据"
+rows: ["原位置", "候选索引", "紧凑数据"]
+steps:
+  - title: "原始布局"
+    detail: "四个 KV 块保存在原来的逻辑顺序中。"
+    cells:
+      - ["K0", "K1", "K2", "K3"]
+      - ["·", "·", "·", "·"]
+      - ["·", "·", "·", "·"]
+    focus: [[0, 0], [0, 1], [0, 2], [0, 3]]
+  - title: "选出位置"
+    detail: "用 1、3 举例；索引引用原块表中的两项。"
+    cells:
+      - ["K0", "K1", "K2", "K3"]
+      - ["1", "3", "·", "·"]
+      - ["·", "·", "·", "·"]
+    focus: [[1, 0], [1, 1]]
+  - title: "收集候选"
+    detail: "按选择次序得到 K1、K3，相关注意力计算使用这个较小集合。"
+    cells:
+      - ["K0", "K1", "K2", "K3"]
+      - ["1", "3", "·", "·"]
+      - ["K1", "K3", "·", "·"]
+    focus: [[2, 0], [2, 1]]
+{{< /stateboard >}}
 
 ### 4.2 Kernel 实现
 
@@ -495,51 +491,12 @@ class GSA(UcmSparseBase):
 
 ---
 
-## 7. 配置参数
+## 7. 预取在关键路径上的作用
 
-### 7.1 参数说明
+假设执行第 t 步时，旧候选已经就绪，另一个任务正为后续步预取。应记录前台 attention 等待旧候选多久、后台预取何时结束、下一步用到了多少已经加载的数据。减少的等待与额外读入的字节可能有所抵消；实际效果由候选准确性、带宽与重叠决定。
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `sparse_ratio` | 0.3 | 选择的 Block 比例 |
-| `local_window_sz` | 2 | 局部窗口大小 |
-| `init_window_sz` | 1 | 起始窗口大小（Sink） |
-| `min_blocks` | 4 | 最小选择数 |
-| `prefetch_workers` | 4 | 预取线程数 |
-| `max_pending_prefetch` | 64 | 最大待处理预取数 |
-| `prefetch_ahead` | 2 | 预取提前批次数 |
+以下时序解释代码保留的机制。v0.9.1 默认工厂未注册普通 GSA，使用该实现要先核对对应历史引擎环境。当前支持矩阵列出的部署入口是 [GSAOnDevice](./05-gsa-on-device.md)。[预取实现](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/sparse/gsa/prefetch/prefetch_engine.py)
 
-### 7.2 配置示例
-
-```yaml
-ucm_sparse_config:
-  GSA:
-    # 稀疏参数
-    sparse_ratio: 0.3
-    local_window_sz: 2
-    init_window_sz: 1
-    min_blocks: 4
-    # 预取配置
-    prefetch_workers: 4
-    max_pending_prefetch: 64
-    prefetch_ahead: 2
-
-    # 缓存配置
-    prefetch_cache_size: 1000
-```
-
----
-
-## 8. 性能特点
-
-### 8.1 复杂度分析
-
-| 操作 | 复杂度 | 说明 |
-|------|--------|------|
-| Block 选择 | O(B × log K) | B=块数, K=选择数 |
-| 预取调度 | O(P × log P) | P=待处理任务数 |
-| Gather 操作 | O(K × S × D) | S=块大小, D=维度 |
-| 稀疏注意力 | O(K × S × D) | K << B 时高效 |
 ### 8.2 延迟对比
 ```mermaid
 graph LR
@@ -557,34 +514,11 @@ graph LR
     end
 ```
 
-### 8.3 适用场景
+## 8. 在固定源码中检索调用链
 
-| 场景 | 效果 | 原因 |
-|------|------|------|
-| 批处理推理 | 最佳 | 预取与计算充分重叠 |
-| 流式推理 | 良好 | 预取减少等待时间 |
-| 短序列 | 一般 | 预取开销相对较大 |
-
----
-
-## 9. 使用示例
-
-```python
-from ucm.sparse.factory import UcmSparseFactory
-from ucm.sparse.base import UcmSparseRole
-
-gsa = UcmSparseFactory.create_sparse_method(
-    "GSA",
-    UcmSparseRole.WORKER,
-    {
-        "sparse_ratio": 0.3,
-        "prefetch_workers": 4
-    }
-)
-# 注册 KV Cache
-gsa.register_kv_caches(kv_caches)
-
-q, k, v, output = gsa.attention_begin(layer_idx, query, key, value, metadata)
-# ... 执行注意力计算 ...
-output = gsa.attention_finished(layer_idx, output)
+```bash
+rg -n 'class (GSAReqStat|TopkCal|GSA)|def (attention_begin|attention_finished|build_sparse_meta)' ucm/sparse/gsa/gsa.py
+rg -n 'deal_async_prefetch' ucm/sparse/gsa/prefetch/prefetch_engine.py
 ```
+
+用完整注意力作为输出质量基线，再比较相同 token、相同并发的延迟。上文数据结构和流程片段用于解释数据依赖；实际类型与接口以 [GSA 固定版本文件](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/sparse/gsa/gsa.py)为准。

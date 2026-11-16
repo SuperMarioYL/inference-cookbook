@@ -3,20 +3,9 @@ title: "KV Cache 基础"
 weight: 1
 ---
 
-## 概述
+## 计算每个 token 的缓存占用
 
-### 本章学习目标
-- 理解 KV Cache 的原理和必要性
-- 掌握 KV Cache 的内存占用计算
-- 了解 KV Cache 对推理性能的影响
-- 学习 SGLang 中 KV Cache 的实现方式
-
-### 前置知识要求
-- 了解 Transformer 架构
-- 熟悉注意力机制
-- 理解自回归生成过程
-
----
+对普通密集注意力，可用层数 × 2 × KV 头数 × 每头维度 × 每元素字节数估算完整模型每 token 的 KV。实际设备池还受并行切分、页对齐与模型专用布局影响。拿估算值与启动日志的容量核对，比从总显存倒推更可靠。 [0.5.23 内存池实现](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/mem_cache/memory_pool.py)
 
 ## 为什么需要 KV Cache
 
@@ -462,25 +451,9 @@ print(f"最大并发: {max_batch}")
 
 ---
 
-## 小结
-
-### 要点回顾
-
-1. **KV Cache 原理**：缓存历史 K, V，避免重复计算
-2. **内存占用**：2 × layers × seq_len × kv_heads × head_dim × dtype
-3. **Paged Attention**：分页存储，提高内存利用率
-4. **优化技术**：量化、GQA、MLA
-
-### 关键公式
+## 估算全注意力模型的 KV 载荷
 
 ```
 单 Token KV Cache = 2 × num_layers × num_kv_heads × head_dim × dtype_bytes
 总 KV Cache = 单 Token × seq_len × batch_size
 ```
-
-### 下一章预告
-
-在下一章《RadixAttention 原理》中，我们将：
-- 了解 Radix Tree 数据结构
-- 学习前缀缓存复用机制
-- 掌握 SGLang 的核心创新

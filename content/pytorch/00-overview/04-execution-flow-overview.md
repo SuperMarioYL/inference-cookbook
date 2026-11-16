@@ -3,7 +3,7 @@ title: "执行流程概览"
 weight: 4
 ---
 
-> 本文从一个标准训练循环出发，逐层拆解 PyTorch 在 **Eager Mode** 和 **torch.compile Mode** 下的端到端执行流程，帮助读者建立对整个框架运行时行为的全局认知。
+同一个训练循环在 eager 模式下逐个执行算子。用 `torch.compile` 包装后，TorchDynamo 可以捕获一段算子交给后端，后续调用满足 guard 时可复用编译结果。
 
 ---
 
@@ -35,26 +35,27 @@ optimizer.step()                    # 4. 参数更新
 
 5. **TensorImpl 分配**：`aten::empty` 最终创建一个 `c10::TensorImpl` 对象（`c10/core/TensorImpl.h`），其中包含 `Storage`（持有实际内存指针）、`dtype`、`device`、`strides` 等元信息。
 
-```mermaid
-sequenceDiagram
-    participant Python as "Python 层"
-    participant Binding as "C++ Binding 层"
-    participant Dispatcher as "C10 Dispatcher"
-    participant Kernel as "ATen Kernel"
-    participant Memory as "内存分配器"
-
-    Python->>Binding: torch.randn(32, 784)
-    Binding->>Dispatcher: aten::randn 调用
-    Dispatcher->>Dispatcher: 根据 dispatch key 路由
-    Dispatcher->>Kernel: CompositeExplicitAutograd
-    Kernel->>Kernel: aten::empty 创建空张量
-    Kernel->>Memory: Allocator::allocate()
-    Memory-->>Kernel: Storage 指针
-    Kernel->>Kernel: aten::normal_ 填充随机值
-    Kernel-->>Dispatcher: 返回 Tensor
-    Dispatcher-->>Binding: 返回 at::Tensor
-    Binding-->>Python: 返回 torch.Tensor
-```
+{{< trace >}}
+title: "创建一个 CPU 张量时传过哪些信息"
+actors: ["Python", "工厂入口", "存储", "返回值"]
+steps:
+  - from: 0
+    to: 1
+    label: "指定形状"
+    detail: "请求形状 [2,3] 的 float32 张量。"
+  - from: 1
+    to: 2
+    label: "安排数据区"
+    detail: "逻辑容量按 6 个元素计算，TensorImpl 记录尺寸与步幅。"
+  - from: 2
+    to: 1
+    label: "提供可写区域"
+    detail: "执行 randn 时，随机填充内核把样本写到该张量。"
+  - from: 1
+    to: 3
+    label: "交回对象"
+    detail: "随后访问元素时使用张量元数据解释底层存储。"
+{{< /trace >}}
 
 ### 1.2 前向传播 - `model(x)` 的调用链
 
@@ -314,7 +315,7 @@ stateDiagram-v2
 
 ## 4. Eager vs Compiled - 关键差异对比
 
-理解两种模式的差异对于源码阅读至关重要：
+
 
 ### 4.1 执行粒度
 

@@ -3,9 +3,9 @@ title: "REST API 基础"
 weight: 1
 ---
 
-> 本文档介绍 REST API 设计原则和 LLM 推理 API 的特殊需求，为理解 Dynamo HTTP 层奠定基础。
+## 固定 HTTP 地址后怎样验证模型可服务
 
----
+先查询 `/health` 查看前端状态，再由 `/v1/models` 取得模型名。给这个名字发送一条 chat completion，从返回的消息读取模型实际生成的文本。 [Frontend 健康检查](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/docs/fern/pages/reference/observability/health-checks.mdx)
 
 ## 1. REST API 设计原则
 
@@ -73,24 +73,31 @@ Client <──[DONE]─── Server
 
 ### 2.2 时序对比
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant S as Server
-
-    Note over C,S: 传统模式
-    C->>S: Request
-    Note over S: 处理完成后响应
-    S-->>C: Complete Response
-
-    Note over C,S: 流式模式
-    C->>S: Request
-    loop Token 生成
-        Note over S: 生成一个 Token
-        S-->>C: Token
-    end
-    S-->>C: [DONE]
-```
+{{< trace >}}
+title: 一次请求两种返回方式
+actors: ["客户端", "Frontend", "推理引擎"]
+steps:
+  - from: 0
+    to: 1
+    label: "请求完整响应"
+    detail: "客户端先以非流式方式发送。"
+  - from: 2
+    to: 1
+    label: "输出 A、B"
+    detail: "引擎先后产生两个片段；前端收集这次生成的结果。"
+  - from: 1
+    to: 0
+    label: "完整返回 AB"
+    detail: "客户端一次收到聚合后的文本。"
+  - from: 0
+    to: 1
+    label: "请求流式响应"
+    detail: "第二次打开 stream，前端有可见增量就写回。"
+  - from: 1
+    to: 0
+    label: "先 A 后 B"
+    detail: "客户端可以在 B 生成之前读取 A，最后读到结束事件。"
+{{< /trace >}}
 
 ### 2.3 特殊需求
 
@@ -367,19 +374,6 @@ curl http://localhost:8080/v1/chat/completions \
     "stream": true
   }'
 ```
-
----
-
-## 总结
-
-LLM HTTP API 的设计要点：
-
-1. **REST 原则**：资源导向、无状态、统一接口
-2. **流式响应**：SSE 技术支持 Token 级流式输出
-3. **OpenAI 兼容**：降低用户迁移成本
-4. **错误处理**：标准 HTTP 状态码和结构化错误信息
-
-这些基础知识是理解 Dynamo HTTP 服务层实现的前提。
 
 ---
 

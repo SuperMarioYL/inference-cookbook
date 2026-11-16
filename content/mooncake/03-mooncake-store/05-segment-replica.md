@@ -3,11 +3,7 @@ title: "Segment 与 Replica 管理"
 weight: 5
 ---
 
-[上一篇](04-memory-allocators.md) | [目录](../README.md) | [下一篇](../04-transfer-engine/)
-
-# Segment 与 Replica 管理
-
-本章分析 Mooncake Store 中 Segment 和 Replica 的管理机制。
+Segment 描述一段可以分配的存储空间。Replica 指向某个对象实际写入的那一份数据，带有自己的介质和可读状态。
 
 ## 16.1 Segment 管理架构
 
@@ -135,15 +131,39 @@ ErrorCode ScopedSegmentAccess::MountSegment(const Segment& segment,
 
 **Segment 生命周期**：
 
-```mermaid
-stateDiagram-v2
-    [*] --> Undefined: 创建 MountedSegment
-    Undefined --> OK: MountSegment 成功
-    OK --> Unmounting: PrepareUnmountSegment
-    Unmounting --> [*]: CommitUnmountSegment
-
-    OK --> OK: 正常服务中
-```
+{{< stateboard >}}
+title: "一段内存何时可以接收新分配"
+rows: ["节点内存", "Master 记录", "新分配"]
+steps:
+  - title: "本地预备"
+    detail: "节点持有一段可供共享的内存，Master 尚未将它列入池中。"
+    cells:
+      - ["已分配"]
+      - ["无记录"]
+      - ["等待"]
+    focus: [[0, 0], [1, 0]]
+  - title: "挂载完成"
+    detail: "公布描述符并成功挂载后，Master 可以选择这段空间。"
+    cells:
+      - ["已注册"]
+      - ["已挂载"]
+      - ["可选"]
+    focus: [[1, 0], [2, 0]]
+  - title: "开始卸载"
+    detail: "节点进入卸载流程，相关引用和在途操作按相应生命周期处理。"
+    cells:
+      - ["待释放"]
+      - ["卸载中"]
+      - ["停止"]
+    focus: [[1, 0], [2, 0]]
+  - title: "卸载完成"
+    detail: "清理结束后该段退出可分配集合，节点才结束其生命周期。"
+    cells:
+      - ["已释放"]
+      - ["已移除"]
+      - ["停止"]
+    focus: [[0, 0], [1, 0]]
+{{< /stateboard >}}
 
 ### 16.1.4 Segment 卸载：两阶段流程
 
@@ -499,8 +519,6 @@ MasterClient::PutStart(const std::string& key,
 
 ## 16.4 本章小结
 
-本章深入分析了 Mooncake Store 的核心代码实现：
-
 1. **MasterService**：分片架构、MetadataAccessor 模式、两阶段写入事务
 2. **驱逐机制**：两阶段驱逐、优先级策略、nth_element 优化
 3. **内存分配器**：CacheLib 和 Offset 两种策略的实现细节
@@ -509,7 +527,3 @@ MasterClient::PutStart(const std::string& key,
 6. **RPC 客户端**：模板化调用、协程异步、指标集成
 
 这些代码体现了现代 C++ 的最佳实践：RAII 资源管理、类型安全、零拷贝设计和高效的并发控制。
-
----
-
-[上一篇](04-memory-allocators.md) | [目录](../README.md) | [下一篇](../04-transfer-engine/)

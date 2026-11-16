@@ -58,7 +58,7 @@ graph LR
 Flash Attention 对 GQA/MQA 提供两种实现路径：
 
 1. **非打包模式（Non-PackGQA）**：每个 Thread Block 处理一个 Q 头，通过 `bidh / G` 索引到对应的 KV 头。简单但可能浪费 GPU 资源。
-2. **打包模式（PackGQA）**：将同一 KV 头组下的多个 Q 头打包到同一个 Tile 中，显著提升 GPU 利用率。
+2. **打包模式（PackGQA）**：把共用 KV 的 Q 头排入同一 tile，提高短查询的有效行占比。
 
 **源文件**：
 - 打包管理器：`hopper/pack_gqa.h`
@@ -96,19 +96,9 @@ PackGQA 将同一 KV 头组下的多个 Q 头沿 M 维度堆叠到同一个 Tile
 打包模式：每个 Tile 的 M 维度 = seqlen_q × G 的一个块（G = qhead_per_khead）
 ```
 
-```mermaid
-graph TB
-    subgraph nopack["非打包模式（seqlen_q=1, G=4）"]
-        T1["Tile 0 - Q头0<br/>有效行: 1/128<br/>利用率: 0.78%"]
-        T2["Tile 1 - Q头1<br/>有效行: 1/128<br/>利用率: 0.78%"]
-        T3["Tile 2 - Q头2<br/>有效行: 1/128<br/>利用率: 0.78%"]
-        T4["Tile 3 - Q头3<br/>有效行: 1/128<br/>利用率: 0.78%"]
-    end
+对单 token decode，四个 Q 头共用一个 KV 头。比较打包前每个任务的一行和打包后一个 tile 中的四行。
 
-    subgraph pack["打包模式（seqlen_q=1, G=4）"]
-        T5["Tile 0 - KV头0<br/>有效行: 4/128<br/>利用率: 3.1%<br/>行0=Q头0, 行1=Q头1<br/>行2=Q头2, 行3=Q头3"]
-    end
-```
+{{< mechanism "fa-pack-heads" >}}
 
 Grid 维度相应改变：
 
@@ -309,21 +299,29 @@ K/V: (batch, seqlen_k, num_heads_k, headdim)  // 不变
 
 ### 4.3 内存访问模式对比
 
-```mermaid
-graph LR
-    subgraph nopack_mem["非打包模式内存访问"]
-        Q1_np["Q 头 0<br/>连续 seqlen_q 行"] --> KV_np["KV 头 0<br/>连续 seqlen_k 行"]
-        Q2_np["Q 头 1<br/>连续 seqlen_q 行"] --> KV_np
-        Q3_np["Q 头 2<br/>连续 seqlen_q 行"] --> KV_np
-        Q4_np["Q 头 3<br/>连续 seqlen_q 行"] --> KV_np
-    end
+{{< trace >}}
+title: "四个 Q 头怎样取同一 KV 头"
+actors: ["Q 头组", "分组映射", "K/V 块", "每头输出"]
+steps:
+  - from: 0
+    to: 1
+    label: "取组内编号"
+    detail: "短序列中 Q0–Q3 属于同一 KV 头。组内编号区分四个查询向量。"
+  - from: 1
+    to: 2
+    label: "定位共享页"
+    detail: "在 B、S 与 KV 头索引相同的条件下，这些查询引用同一组 K/V 行。"
+  - from: 0
+    to: 3
+    label: "分别计算注意力"
+    detail: "每个查询独立与 K 打分、归一化并加权 V，得到本头的输出。"
+  - from: 3
+    to: 0
+    label: "按头写回"
+    detail: "结果映射回原始 Q 头编号，供输出投影使用。"
+{{< /trace >}}
 
-    subgraph pack_mem["打包模式内存访问"]
-        QP["Q 头 0-3 交织<br/>不连续，需逐行计算指针"] --> KV_p["KV 头 0<br/>连续 seqlen_k 行<br/>TMA 正常加载"]
-    end
-```
-
-非打包模式下，Q 的加载是连续的，可以使用 TMA；打包模式下 Q 不连续，必须使用 CpAsync 逐行加载。但这个代价通常被更高的 SM 利用率所弥补。
+这里分析的 Hopper 分支中，打包后的连续计算行可能来自不同 Q 头。加载方按实际 stride 取回各行，共用的 K/V 仍以 KV 头为单位读取。
 
 ---
 
@@ -444,7 +442,7 @@ if num_heads_q != num_heads_k:
 
 ### 7.1 `should_pack_gqa` 启发式
 
-Flash Attention 不总是启用 PackGQA，而是根据启发式规则决定：
+Hopper 的 `should_pack_gqa` 比较两种布局的有效行占比。
 
 ```cpp
 // hopper/heuristics.h:9-17
@@ -462,7 +460,7 @@ inline bool should_pack_gqa(bool varlen_q, int seqlen_q, int qhead_per_khead, in
 }
 ```
 
-**核心指标**：Tile 利用率 = 有效行数 / Tile 总行数。只有当 PackGQA 的利用率显著优于非打包模式时（超过 0.9 倍）才启用。
+**核心指标**：Tile 利用率 = 有效行数 / Tile 总行数。这条固定长度启发式的判断为 `nopack_eff < 0.9 × pack_eff`。这两个比值比较的是有效行占比。
 
 ### 7.2 利用率分析示例
 
@@ -516,7 +514,7 @@ graph TD
 Python API 提供 `pack_gqa` 参数供用户手动控制：
 
 ```python
-from flash_attn import flash_attn_func
+from flash_attn_3.flash_attn_interface import flash_attn_func
 
 # 自动决策（默认）
 out = flash_attn_func(q, k, v, causal=True)
@@ -556,6 +554,6 @@ PackGQA 的优势场景：
 
 ## 导航
 
-- 上一篇：[KV Cache 与推理优化](02-kv-cache-inference.md)
-- 下一篇：[FP8 支持](04-fp8-support.md)
-- [返回目录](../README.md)
+- 上一篇：[KV Cache 与推理优化](/flashattention/06-advanced-features/02-kv-cache-inference/)
+- 下一篇：[FP8 支持](/flashattention/06-advanced-features/04-fp8-support/)
+- [返回目录](/flashattention/00-overview/overview/)

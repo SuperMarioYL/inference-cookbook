@@ -5,42 +5,39 @@ weight: 4
 
 > 难度：高级 | 前置知识：熟悉 TensorImpl、Storage、ScalarType/Device/Layout、Dispatcher 基本概念
 
-本文是一篇代码链路 debug 分析文章。我们以最简单的 `torch.randn(3, 4)` 为例，完整追踪从 Python 函数调用到 C++ 内存分配再到随机数填充的全过程。通过这条链路，你将看到 PyTorch 的 Python 绑定、代码生成、算子分发、内存分配器等核心机制是如何协作的。
+在默认 CPU、float32 环境里，`torch.randn(3, 4)` 需要 48 字节的元素存储。先跟踪这次分配，再跟踪生成的 12 个随机数写进了哪里。
 
 ---
 
 ## 0. 调用全景
 
-在深入细节之前，先通过一张序列图了解完整的调用链：
+跟踪在 CPU 上创建一个 2×3 的 float32 张量。
 
-```mermaid
-sequenceDiagram
-    participant PY as "Python 层"
-    participant BIND as "C++ 绑定层"
-    participant DISP as "Dispatcher"
-    participant KERN as "Native Kernel"
-    participant EMPTY as "EmptyTensor"
-    participant ALLOC as "Allocator"
-    participant FILL as "Normal 填充"
-
-    PY->>BIND: torch.randn(3, 4)
-    BIND->>BIND: 解析参数, 构造 TensorOptions
-    BIND->>DISP: at::randn({3,4}, options)
-    DISP->>DISP: 根据 DispatchKeySet 选择 kernel
-    DISP->>KERN: at::native::randn(size, generator, dtype, layout, device, pin_memory)
-    KERN->>DISP: at::empty(size, options)
-    DISP->>EMPTY: empty_cpu / empty_generic
-    EMPTY->>EMPTY: 计算 storage_nbytes
-    EMPTY->>ALLOC: allocator->allocate(nbytes)
-    ALLOC-->>EMPTY: DataPtr (原始内存指针)
-    EMPTY->>EMPTY: 创建 StorageImpl
-    EMPTY->>EMPTY: 创建 TensorImpl, 设置 size/stride
-    EMPTY-->>KERN: 返回空 Tensor
-    KERN->>FILL: tensor.normal_(0, 1, generator)
-    FILL->>FILL: CPU kernel 填充正态分布随机数
-    FILL-->>KERN: 返回填充后的 Tensor
-    KERN-->>PY: 返回 Python Tensor 对象
-```
+{{< trace >}}
+title: "randn(2, 3) 创建哪些数据"
+actors: ["调用者", "工厂算子", "分配器", "随机填充"]
+steps:
+  - from: 0
+    to: 1
+    label: "请求六个值"
+    detail: "示例指定 CPU、float32 和形状 [2,3]。"
+  - from: 1
+    to: 2
+    label: "申请存储"
+    detail: "工厂先创建空张量，逻辑数据区需要 6×4=24 字节；底层分配块可能更大。"
+  - from: 2
+    to: 1
+    label: "绑定存储"
+    detail: "连续布局的 stride 为 [3,1]，同一行内相邻列相差一个元素。"
+  - from: 1
+    to: 3
+    label: "原地填充"
+    detail: "normal_ 将正态分布的样本写入已分配的数据区。"
+  - from: 3
+    to: 0
+    label: "返回张量"
+    detail: "调用者现在可以通过 shape、stride 与 dtype 解释六个数。"
+{{< /trace >}}
 
 ---
 
@@ -224,7 +221,6 @@ static TensorBase _empty_generic(
 }
 ```
 
-让我们逐步分析每个关键步骤。
 
 ### 4.2 字节数计算
 
@@ -377,7 +373,7 @@ b c10::TensorImpl::generic_set_sizes_contiguous
 gdb --args python -c "import torch; x = torch.randn(3, 4); print(x)"
 ```
 
-你将看到调用栈从 Python 一路穿越到 C++ 底层，与本文描述的链路完全一致。
+在断点处打印调用栈。对照所选设备和构建，找到请求内存的分配器与填充随机数的内核。
 
 ---
 

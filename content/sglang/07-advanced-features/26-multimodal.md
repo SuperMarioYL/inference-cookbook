@@ -3,20 +3,9 @@ title: "多模态"
 weight: 3
 ---
 
-## 概述
+## 从输入预处理追到模型的视觉位置
 
-### 本章学习目标
-- 理解 VLM 推理架构
-- 掌握图像处理流程
-- 了解视频理解实现
-- 学习多模态优化
-
-### 前置知识要求
-- 了解 Vision Transformer
-- 熟悉图像编码概念
-- 理解多模态融合
-
----
+同一个文字提示配不同图片时，视觉输入也必须参与对应状态的区分。先检查模型 processor、聊天模板和媒体地址是否解析成功，再看视觉 token 的数量和其对上下文长度与显存的影响。 [0.5.23 视觉请求](https://github.com/sgl-project/sglang/blob/v0.5.23/docs/docs/advanced_features/vlm_query.mdx)
 
 ## 多模态架构
 
@@ -57,27 +46,27 @@ graph TB
 
 ### 完整流程
 
-```mermaid
-graph TB
-    subgraph process["图像处理流程"]
-        INPUT["图像输入<br/>URL/Base64/文件"]
-        LOAD["加载图像"]
-        RESIZE["预处理<br/>Resize/Normalize"]
-        PATCH["分割 Patches"]
-        ENCODE["视觉编码"]
-        PROJECT["投影到 LLM 空间"]
-        MERGE["与文本 Embedding 合并"]
-        FORWARD["LLM 前向"]
-
-        INPUT --> LOAD
-        LOAD --> RESIZE
-        RESIZE --> PATCH
-        PATCH --> ENCODE
-        ENCODE --> PROJECT
-        PROJECT --> MERGE
-        MERGE --> FORWARD
-    end
-```
+{{< trace >}}
+title: 一张图片和一个问题如何拼成输入
+actors: ["请求", "视觉处理", "视觉编码", "语言模型"]
+steps:
+  - from: 0
+    to: 1
+    label: "送入图片"
+    detail: "输入含一张图与用户的问题，预处理器按模型要求解码并调整图像。"
+  - from: 1
+    to: 2
+    label: "视觉特征"
+    detail: "图片被组织为像素张量或 patch，送进视觉编码器。"
+  - from: 2
+    to: 3
+    label: "映射到模型空间"
+    detail: "模型的视觉投影将特征转为语言模型可以消费的表示。"
+  - from: 0
+    to: 3
+    label: "放回对应位置"
+    detail: "文本模板中的图像标记与相应视觉表示对应，语言模型在共同上下文上生成回答。"
+{{< /trace >}}
 
 ### 图像加载
 
@@ -587,10 +576,10 @@ if cached_kv is not None:
 
 ```bash
 python -m sglang.launch_server \
-    --model Qwen/Qwen2-VL-7B-Instruct \
+    --model-path Qwen/Qwen2-VL-7B-Instruct \
     --chat-template qwen2-vl \
     --mem-fraction-static 0.8 \
-    --max-num-reqs 32
+    --max-running-requests 32
 ```
 
 ### 模型特定配置
@@ -621,7 +610,7 @@ print(response.status_code)
 
 ```bash
 # 减少批次大小
---max-num-reqs 16
+--max-running-requests 16
 
 # 降低图像分辨率
 # 使用更小的模型
@@ -636,29 +625,4 @@ print(response.status_code)
 ```
 
 ---
-
-## 小结
-
-### 要点回顾
-
-1. **架构**：视觉编码器 + 投影层 + LLM
-2. **流程**：加载 -> 预处理 -> 编码 -> 融合 -> 生成
-3. **视频**：帧采样 + 逐帧编码 + 时序建模
-4. **优化**：缓存、批处理、动态分辨率
-
-### 支持能力
-
-| 能力 | 支持情况 |
-|------|---------|
-| 单图理解 | 支持 |
-| 多图对比 | 支持 |
-| 视频理解 | 支持 |
-| 动态分辨率 | 部分模型支持 |
-
-### 下一章预告
-
-在下一模块《实战调试篇》中，我们将：
-- 学习调试技巧和关键断点
-- 掌握性能分析方法
-- 了解常见问题排查
 

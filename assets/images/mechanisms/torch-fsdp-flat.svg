@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 472 265" role="img" aria-labelledby="torch-fsdp-flat-title">
+  <title id="torch-fsdp-flat-title">FSDP1 如何把两个参数切成三片</title>
+  <desc>示例只有 6 个同 dtype 的标量，用 3 个 rank 均分，不计 padding。</desc>
+<defs><marker id="torch-fsdp-flat-end" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+<text x="14" y="28" class="diagram-title" text-anchor="start">FSDP1 如何把两个参数切成三片</text>
+
+  <g data-frame="0">
+    <title>两套参数</title>
+    <desc>A 有 2 个元素，B 有 4 个元素；两者由同一个 FSDP1 包装单元管理。</desc>
+    <text x="17" y="76" class="label" text-anchor="start">原参数</text>
+    <text x="17" y="147" class="label" text-anchor="start">展平区</text>
+    <text x="17" y="216" class="label" text-anchor="start">分片</text>
+    <rect x="100" y="52" width="44" height="33" rx="4" class="stored"/><text x="122" y="73.5" class="label" text-anchor="middle">a0</text>
+    <rect x="148" y="52" width="44" height="33" rx="4" class="stored"/><text x="170" y="73.5" class="label" text-anchor="middle">a1</text>
+    <rect x="218" y="52" width="44" height="33" rx="4" class="stored"/><text x="240" y="73.5" class="label" text-anchor="middle">b0</text>
+    <rect x="266" y="52" width="44" height="33" rx="4" class="stored"/><text x="288" y="73.5" class="label" text-anchor="middle">b1</text>
+    <rect x="314" y="52" width="44" height="33" rx="4" class="stored"/><text x="336" y="73.5" class="label" text-anchor="middle">b2</text>
+    <rect x="362" y="52" width="44" height="33" rx="4" class="stored"/><text x="384" y="73.5" class="label" text-anchor="middle">b3</text>
+    <rect x="106" y="124" width="46" height="33" rx="4" class="idle"/><text x="129" y="145.5" class="label" text-anchor="middle">·</text>
+    <rect x="158" y="124" width="46" height="33" rx="4" class="idle"/><text x="181" y="145.5" class="label" text-anchor="middle">·</text>
+    <rect x="210" y="124" width="46" height="33" rx="4" class="idle"/><text x="233" y="145.5" class="label" text-anchor="middle">·</text>
+    <rect x="262" y="124" width="46" height="33" rx="4" class="idle"/><text x="285" y="145.5" class="label" text-anchor="middle">·</text>
+    <rect x="314" y="124" width="46" height="33" rx="4" class="idle"/><text x="337" y="145.5" class="label" text-anchor="middle">·</text>
+    <rect x="366" y="124" width="46" height="33" rx="4" class="idle"/><text x="389" y="145.5" class="label" text-anchor="middle">·</text>
+    <rect x="105" y="192" width="98" height="36" rx="4" class="idle"/><text x="154" y="215" class="label" text-anchor="middle">·</text>
+    <rect x="209" y="192" width="98" height="36" rx="4" class="idle"/><text x="258" y="215" class="label" text-anchor="middle">·</text>
+    <rect x="313" y="192" width="98" height="36" rx="4" class="idle"/><text x="362" y="215" class="label" text-anchor="middle">·</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>展平</title>
+    <desc>把六个元素放入连续区间，记录各参数的原始 shape、偏移与长度。</desc>
+    <text x="17" y="76" class="label" text-anchor="start">原参数</text>
+    <text x="17" y="147" class="label" text-anchor="start">展平区</text>
+    <text x="17" y="216" class="label" text-anchor="start">分片</text>
+    <rect x="100" y="52" width="44" height="33" rx="4" class="idle"/><text x="122" y="73.5" class="label" text-anchor="middle">a0</text>
+    <rect x="148" y="52" width="44" height="33" rx="4" class="idle"/><text x="170" y="73.5" class="label" text-anchor="middle">a1</text>
+    <rect x="218" y="52" width="44" height="33" rx="4" class="idle"/><text x="240" y="73.5" class="label" text-anchor="middle">b0</text>
+    <rect x="266" y="52" width="44" height="33" rx="4" class="idle"/><text x="288" y="73.5" class="label" text-anchor="middle">b1</text>
+    <rect x="314" y="52" width="44" height="33" rx="4" class="idle"/><text x="336" y="73.5" class="label" text-anchor="middle">b2</text>
+    <rect x="362" y="52" width="44" height="33" rx="4" class="idle"/><text x="384" y="73.5" class="label" text-anchor="middle">b3</text>
+    <rect x="106" y="124" width="46" height="33" rx="4" class="fresh"/><text x="129" y="145.5" class="label" text-anchor="middle">a0</text>
+    <rect x="158" y="124" width="46" height="33" rx="4" class="fresh"/><text x="181" y="145.5" class="label" text-anchor="middle">a1</text>
+    <rect x="210" y="124" width="46" height="33" rx="4" class="fresh"/><text x="233" y="145.5" class="label" text-anchor="middle">b0</text>
+    <rect x="262" y="124" width="46" height="33" rx="4" class="fresh"/><text x="285" y="145.5" class="label" text-anchor="middle">b1</text>
+    <rect x="314" y="124" width="46" height="33" rx="4" class="fresh"/><text x="337" y="145.5" class="label" text-anchor="middle">b2</text>
+    <rect x="366" y="124" width="46" height="33" rx="4" class="fresh"/><text x="389" y="145.5" class="label" text-anchor="middle">b3</text>
+    <rect x="105" y="192" width="98" height="36" rx="4" class="idle"/><text x="154" y="215" class="label" text-anchor="middle">·</text>
+    <rect x="209" y="192" width="98" height="36" rx="4" class="idle"/><text x="258" y="215" class="label" text-anchor="middle">·</text>
+    <rect x="313" y="192" width="98" height="36" rx="4" class="idle"/><text x="362" y="215" class="label" text-anchor="middle">·</text>
+    <circle cx="235" cy="118" r="4" class="packet" data-dx="-100" data-dy="-36"/>
+  </g>
+  <g data-frame="2" display="none">
+    <title>按 rank 分片</title>
+    <desc>每个 rank 保存连续的两个元素。计算前 all-gather 可以恢复完整区间与原参数视图。</desc>
+    <text x="17" y="76" class="label" text-anchor="start">原参数</text>
+    <text x="17" y="147" class="label" text-anchor="start">展平区</text>
+    <text x="17" y="216" class="label" text-anchor="start">分片</text>
+    <rect x="100" y="52" width="44" height="33" rx="4" class="idle"/><text x="122" y="73.5" class="label" text-anchor="middle">a0</text>
+    <rect x="148" y="52" width="44" height="33" rx="4" class="idle"/><text x="170" y="73.5" class="label" text-anchor="middle">a1</text>
+    <rect x="218" y="52" width="44" height="33" rx="4" class="idle"/><text x="240" y="73.5" class="label" text-anchor="middle">b0</text>
+    <rect x="266" y="52" width="44" height="33" rx="4" class="idle"/><text x="288" y="73.5" class="label" text-anchor="middle">b1</text>
+    <rect x="314" y="52" width="44" height="33" rx="4" class="idle"/><text x="336" y="73.5" class="label" text-anchor="middle">b2</text>
+    <rect x="362" y="52" width="44" height="33" rx="4" class="idle"/><text x="384" y="73.5" class="label" text-anchor="middle">b3</text>
+    <rect x="106" y="124" width="46" height="33" rx="4" class="stored"/><text x="129" y="145.5" class="label" text-anchor="middle">a0</text>
+    <rect x="158" y="124" width="46" height="33" rx="4" class="stored"/><text x="181" y="145.5" class="label" text-anchor="middle">a1</text>
+    <rect x="210" y="124" width="46" height="33" rx="4" class="stored"/><text x="233" y="145.5" class="label" text-anchor="middle">b0</text>
+    <rect x="262" y="124" width="46" height="33" rx="4" class="stored"/><text x="285" y="145.5" class="label" text-anchor="middle">b1</text>
+    <rect x="314" y="124" width="46" height="33" rx="4" class="stored"/><text x="337" y="145.5" class="label" text-anchor="middle">b2</text>
+    <rect x="366" y="124" width="46" height="33" rx="4" class="stored"/><text x="389" y="145.5" class="label" text-anchor="middle">b3</text>
+    <rect x="105" y="192" width="98" height="36" rx="4" class="fresh"/><text x="154" y="215" class="label" text-anchor="middle">r0 · 2 项</text>
+    <rect x="209" y="192" width="98" height="36" rx="4" class="fresh"/><text x="258" y="215" class="label" text-anchor="middle">r1 · 2 项</text>
+    <rect x="313" y="192" width="98" height="36" rx="4" class="fresh"/><text x="362" y="215" class="label" text-anchor="middle">r2 · 2 项</text>
+    <circle cx="344" cy="186" r="4" class="packet" data-dx="0" data-dy="-27"/>
+  </g>
+</svg>

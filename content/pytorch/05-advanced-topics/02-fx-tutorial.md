@@ -3,7 +3,7 @@ title: "FX 图系统教程"
 weight: 2
 ---
 
-> 本文面向 PyTorch 初学者，从零开始介绍 FX（Functional Transformations）的核心概念：符号追踪、Graph / Node / GraphModule 数据结构、简单图变换，以及 FX 在 `torch.compile` 编译栈中的定位。
+把 `(x + 1).relu()` 交给 FX 符号追踪，得到的图里能看到输入、加法、激活和输出。沿着同一张图可以练习替换节点和重新生成 Python 代码。
 
 ---
 
@@ -110,21 +110,27 @@ print(traced.code)
 
 > 源码位置：`torch/fx/_symbolic_trace.py`（第 258 行起 `Tracer` 类定义，第 1321 行 `symbolic_trace` 函数）
 
-```mermaid
-flowchart TB
-    A["Tracer.trace(module)"] --> B["为每个 forward 参数\n创建 Proxy 对象"]
-    B --> C["执行 module.forward(proxy_x)"]
-    C --> D["Proxy 拦截每个操作\n如 add / linear / clamp"]
-    D --> E["每个操作对应一个 Node\n写入 Graph"]
-    E --> F["收集 return 值\n创建 output Node"]
-    F --> G["Graph 构建完成"]
-    G --> H["包装为 GraphModule\n并生成 forward 代码"]
-
-    style A fill:#E8F4FD,stroke:#2196F3
-    style D fill:#FFF3E0,stroke:#FF9800
-    style G fill:#E8F5E9,stroke:#4CAF50
-    style H fill:#E8F5E9,stroke:#4CAF50
-```
+{{< trace >}}
+title: "执行符号输入怎样记录一张 FX 图"
+actors: ["Python 函数", "Proxy", "FX Graph", "GraphModule"]
+steps:
+  - from: 0
+    to: 1
+    label: "接收占位输入"
+    detail: "对可追踪的 f(x)=x.sin()+1 调用 symbolic_trace，x 在追踪中由 Proxy 表示。"
+  - from: 1
+    to: 2
+    label: "记录 sin"
+    detail: "调用代理的 sin 方法，新增 call_method 节点；结果也由 Proxy 表示。"
+  - from: 1
+    to: 2
+    label: "记录加一"
+    detail: "把上一节点作为输入，建立 add 节点，随后添加 output。"
+  - from: 2
+    to: 3
+    label: "生成前向"
+    detail: "GraphModule 持有这张图，并能用真实张量执行生成的 forward。"
+{{< /trace >}}
 
 ### 3.3 符号追踪的局限
 
@@ -473,15 +479,15 @@ FX Graph 在整个流程中充当了"**通用语言**"的角色 —— 前端只
 
 **本模块后续文章：**
 
-- [Graph 与 Node 深度解析](./01-graph-node-deep-dive.md) -- Node 的完整属性、Graph 的增删改查 API、双向链表实现
-- [Proxy 与 Tracer 机制](./02-proxy-tracer-internals.md) -- Proxy 如何拦截操作、Tracer 的子类化扩展
-- [图变换实战](./03-graph-transforms.md) -- subgraph_rewriter、Interpreter / Transformer 模式
-- [GraphModule 代码生成](./04-codegen-internals.md) -- CodeGen 如何从 Graph 生成 Python 代码并 exec 执行
-- [FX 与 Dynamo 的衔接](./05-fx-dynamo-bridge.md) -- Dynamo 如何生成 ATen 级别 FX Graph、OutputGraph 机制
+- [Graph 与 Node 深度解析](/pytorch/05-advanced-topics/03-graph-and-node/) -- Node 的完整属性、Graph 的增删改查 API、双向链表实现
+- [Proxy 与 Tracer 机制](https://github.com/pytorch/pytorch/blob/v2.15.0/torch/fx/proxy.py) -- Proxy 如何拦截操作、Tracer 的子类化扩展
+- [图变换实战](/pytorch/05-advanced-topics/02-fx-tutorial/) -- subgraph_rewriter、Interpreter / Transformer 模式
+- [GraphModule 代码生成](https://github.com/pytorch/pytorch/blob/v2.15.0/torch/fx/graph.py) -- CodeGen 如何从 Graph 生成 Python 代码并 exec 执行
+- [FX 与 Dynamo 的衔接](/pytorch/05-advanced-topics/04-dynamo-tutorial/) -- Dynamo 如何生成 ATen 级别 FX Graph、OutputGraph 机制
 
 **关联模块：**
 
-- [Module 0 - 架构总览](../module-00-overview/00-architecture-overview.md) -- FX 在 PyTorch 整体架构中的位置
-- [Module 5 - 算子分发入门](../module-05-dispatch/00-dispatch-tutorial.md) -- FX Graph 中的算子如何被分发执行
-- [Module 8 - TorchDynamo](../module-08-dynamo/00-dynamo-tutorial.md) -- Dynamo 如何捕获 FX Graph
-- [Module 9 - Inductor](../module-09-inductor/00-inductor-tutorial.md) -- Inductor 如何消费 FX Graph 并生成高效内核
+- [Module 0 - 架构总览](/pytorch/00-overview/01-architecture-overview/) -- FX 在 PyTorch 整体架构中的位置
+- [Module 5 - 算子分发入门](/pytorch/03-core-modules/06-dispatch-key-system/) -- FX Graph 中的算子如何被分发执行
+- [Module 8 - TorchDynamo](/pytorch/05-advanced-topics/04-dynamo-tutorial/) -- Dynamo 如何捕获 FX Graph
+- [Module 9 - Inductor](/pytorch/05-advanced-topics/07-inductor-overview/) -- Inductor 如何消费 FX Graph 并生成高效内核

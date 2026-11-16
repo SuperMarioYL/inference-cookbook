@@ -1,215 +1,41 @@
 ---
-title: "问题定义"
+title: "同一份手册换了位置，KV 还能用吗？"
 weight: 2
 ---
 
-本节分析现有 KV Cache 处理方案的局限性，深入探讨 Cross-Attention 的重要性，并明确 CacheBlend 要解决的核心问题。
+第一次请求是“手册 M + 问题一”，第二次是“手册 M + 问题二”。两次请求从开头读到手册末尾，看到的是同一串 token。普通前缀缓存能复用这段连续前缀中所有已缓存、满足块边界的部分；手册本身可以占很多块。
 
----
+现在把检索材料 R 插到手册之前。普通前缀匹配从首个不同 token 起中断。读到 M 时，每个词可以注意到前面的 R。原先单独为 M 算出的 KV 缺少这种影响；如果位置编码依赖位置，还要对齐它在新序列中的位置。
 
-## 2.1 现有方案概述
+{{< mechanism "cacheblend-reorder" >}}
 
-目前存在三种主要的 KV Cache 处理方案：
+## CacheBlend 怎样利用这份手册
 
-```mermaid
-graph TB
-    subgraph solutions["方案对比"]
-        subgraph sol_a["A - Full KV Recompute"]
-            A1["Chunk 1"] --> A2["Chunk 2"]
-            A2 --> A3["Chunk 3"]
-            A3 --> A4["KV Cache of 1,2,3"]
-            A4 --> AO["速度 - 最慢 / 质量 - 最好"]
-        end
+整段重新 prefill 能算出当前输入的完整结果。直接把旧 KV 搬到新位置省下计算，但会保留旧上文带来的误差。CacheBlend 走第三条路径，先找到 M 的缓存，在检查层估计各位置偏差，再为选中的 token 和新问题做计算，把结果与复用部分合并。新问题本身也要读取它之前的上下文。
 
-        subgraph sol_b["B - Prefix Caching"]
-            B1["KV Cache 1 前缀"] --> B2["Chunk 2"]
-            B2 --> B3["Chunk 3"]
-            B3 --> B4["KV Cache of 1,2,3"]
-            B4 --> BO["速度 - 略快 / 质量 - 好"]
-        end
+这里的“段落”是应用提供的文档，“token”是模型的输入单位，“缓存块”是引擎分配、索引 KV 的单位。段落边界与缓存块边界可以落在不同位置。实验时记录分词后的长度；聊天模板、分隔符乃至前导空格都可能移动匹配边界。[CacheBlend 论文](https://arxiv.org/abs/2405.16444v3) · [原型的筛选与合并](https://github.com/YaoJiayi/CacheBlend/blob/55ad02675939f783a38d579393527d218a7fd581/vllm_blend/vllm/attention/backends/xformers.py)
 
-        subgraph sol_c["C - Full KV Reuse"]
-            C1["KV Cache 1"]
-            C2["KV Cache 2"]
-            C3["KV Cache 3"]
-            C1 --> C4["直接拼接"]
-            C2 --> C4
-            C3 --> C4
-            C4 --> CO["速度 - 最快 / 质量 - 差"]
-        end
+## 用两个 token 看出上文的影响
 
-        subgraph sol_d["D - CacheBlend"]
-            D1["KV Cache 1"]
-            D2["KV Cache 2"]
-            D3["KV Cache 3"]
-            D1 --> D4["选择性重计算"]
-            D2 --> D4
-            D3 --> D4
-            D4 --> DO["速度 - 快 / 质量 - 好"]
-        end
-    end
+把手册 M 的两个 token 简化成标量 1 和 2，把检索材料 R 简化成 3。只用一层因果自注意力，Q、K、V 的投影都取恒等映射。这样第二层若也用恒等投影，拿到的 K 和 V 就是第一层的输出。下面的例子可直接在 PyTorch CPU 上运行。
 
-    style AO fill:#ff9999
-    style BO fill:#ffcc99
-    style CO fill:#ff9999
-    style DO fill:#99ff99
+```python
+import torch
+
+def layer(x):
+    scores = x @ x.T
+    visible = torch.ones_like(scores, dtype=torch.bool).tril()
+    return scores.masked_fill(~visible, -torch.inf).softmax(-1) @ x
+
+manual = torch.tensor([[1.], [2.]], dtype=torch.float64)
+retrieved = torch.tensor([[3.]], dtype=torch.float64)
+old = layer(manual)
+new = layer(torch.cat((retrieved, manual)))[1:]
+print("旧上文", old[:, 0].tolist())
+print("新上文", new[:, 0].tolist())
+assert not torch.allclose(old, new)
 ```
 
-## 2.2 Full KV Recompute（完全 KV 重计算）
+单独处理 M 得到约 `[1.0000, 1.8808]`；在开头加入 R 后，M 两个位置变成了 `[2.7616, 2.8509]`。即使不使用位置编码，旧 KV 到第二层也已经出现偏差。真实模型里的偏差分布决定了选择性重算能保留多少收益。
 
-**工作原理**：
-- 将原始文本作为输入直接输入 LLM
-- LLM 在 Prefill 期间计算所有 token 的 KV Cache
-
-**优点**：
-- 生成质量最高，包含完整的跨块注意力信息
-
-**缺点**：
-- 速度最慢，尤其是长输入时
-- Prefill 延迟和计算量与输入长度超线性增长
-
-## 2.3 Prefix Caching（前缀缓存）
-
-**工作原理**：
-- 预计算并存储可复用文本块的 KV Cache
-- 如果文本块位于 LLM 输入的前缀位置，则可直接复用预计算的 KV Cache
-- 代表系统：vLLM、SGLang、RAGCache
-
-**优点**：
-- 前缀的 KV Cache 不受后续文本影响，生成结果与完全重计算完全相同
-- 对于单一前缀场景效果很好
-
-**缺点**：
-- 只能复用**第一个**文本块的 KV Cache
-- 当输入包含多个文本块时，除第一个块外，其他块的 KV Cache 都无法复用
-- 在 RAG 场景中，加速效果有限
-
-```mermaid
-graph LR
-    subgraph prefix_limit["Prefix Caching 的局限"]
-        C1["Chunk 1 / 可复用"] --> C2["Chunk 2 / 需重计算"]
-        C2 --> C3["Chunk 3 / 需重计算"]
-        C3 --> Q["Query"]
-    end
-
-    style C1 fill:#90EE90
-    style C2 fill:#ff9999
-    style C3 fill:#ff9999
-```
-
-## 2.4 Full KV Reuse（完全 KV 复用）
-
-**工作原理**：
-- 独立预计算每个文本块的 KV Cache
-- 当复用的文本不在输入前缀位置时，通过调整位置编码来复用 KV Cache
-- 代表系统：PromptCache
-
-**优点**：
-- 速度最快，几乎不需要重新计算
-
-**缺点**：
-- **忽略了跨块注意力**（Cross-Attention）
-- 由于预计算时不知道前面的文本块，无法计算跨块的注意力信息
-- 对于需要综合多个文本块信息的查询，会导致错误答案
-
-## 2.5 Cross-Attention（跨块注意力）的重要性
-
-让我们通过一个具体例子来说明跨块注意力为何重要：
-
-**场景设置**：
-- **Chunk 1**: "Lionel Messi scored 13 goals at FIFA World Cups."
-- **Chunk 2**: "Cristiano Ronaldo scored 8 goals at FIFA World Cups."
-- **Query**: "Who scored more goals at FIFA World Cups, Messi or Ronaldo?"
-
-```mermaid
-graph TB
-    subgraph full_recompute["Full KV Recompute - 正确答案"]
-        A1["Chunk 1 - Messi 13球"] --> A2["Chunk 2 - Ronaldo 8球"]
-        A2 --> AQ["Query - 谁进球更多?"]
-        AQ --> AA["Messi 进球比 Ronaldo 多"]
-
-        A1 -.->|"Cross-Attention 建立关联"| A2
-    end
-
-    subgraph full_reuse["Full KV Reuse - 错误答案"]
-        B1["KV - Messi 13球"]
-        B2["KV - Ronaldo 8球"]
-        BQ["Query - 谁进球更多?"]
-        B1 --> BC["直接拼接"]
-        B2 --> BC
-        BQ --> BC
-        BC --> BA["无法正确比较 答非所问"]
-
-        B1 -.x|"无 Cross-Attention"| B2
-    end
-
-    style AA fill:#90EE90
-    style BA fill:#ff9999
-```
-
-**Attention Matrix（注意力矩阵）对比**：
-
-Full KV Recompute 的注意力矩阵包含完整的 Cross-Attention 区域，而 Full KV Reuse 的注意力矩阵在 Cross-Attention 区域为零（从未计算）。
-
-```
-Full KV Recompute:          Full KV Reuse:
-┌─────────────────┐         ┌─────────────────┐
-│ █████           │         │ █████           │
-│ █████           │         │ █████           │
-│ █████████████   │  vs     │ █████ 00000     │  <- Cross-Attention
-│ █████████████   │         │ █████ 00000     │    区域缺失
-│ ███████████████ │         │ █████ █████████ │
-└─────────────────┘         └─────────────────┘
-   Chunk1  Chunk2              Chunk1  Chunk2
-```
-
-## 2.6 实验验证：Cross-Attention 的影响
-
-论文通过实验验证了 Cross-Attention 的重要性。在 Musique 和 2WikiMQA 两个多跳问答数据集上，随着检索的相关文本块数量增加：
-
-1. **Full KV Recompute**（包含 Cross-Attention）的 F1 分数持续提升
-2. **Full KV Reuse**（无 Cross-Attention）的 F1 分数明显低于前者
-3. 差距随文本块数量增加而扩大
-
-```mermaid
-graph LR
-    subgraph f1_compare["F1 分数对比 - Musique 数据集"]
-        direction TB
-        X["5个块"] --> Y["15个块"] --> Z["25个块"] --> W["35个块"]
-
-        A["Full Recompute: 0.22 -> 0.30 -> 0.32 -> 0.33"]
-        B["Full Reuse: 0.18 -> 0.20 -> 0.21 -> 0.20"]
-    end
-```
-
-## 2.7 CacheBlend 的目标
-
-CacheBlend 旨在解决一个核心挑战：
-
-> **当 LLM 输入包含多个文本块时，如何快速组合它们各自预计算的 KV Cache，以达到与昂贵的 Full KV Recompute 相同的生成质量？**
-
-换句话说，CacheBlend 追求同时获得：
-- **Full KV Reuse 的速度**
-- **Full KV Recompute 的质量**
-
-```mermaid
-graph TB
-    subgraph target_space["CacheBlend 目标空间"]
-        A["Full KV Recompute / 慢 + 高质量"]
-        B["Full KV Reuse / 快 + 低质量"]
-        C["CacheBlend / 快 + 高质量"]
-
-        A -.->|"保持质量"| C
-        B -.->|"保持速度"| C
-    end
-
-    style C fill:#90EE90,stroke:#333,stroke-width:3px
-```
-
----
-
-## 下一步
-
-了解了问题背景后，接下来我们将深入探讨 CacheBlend 的核心理论，包括选择性 KV 重计算的数学基础和关键洞察：
-
-- [CacheBlend 核心理论](../02-theory/01-selective-recompute.md)
+把材料 R 去掉，手册又回到输入开头，此时可以用普通前缀匹配。[UCM 的两次请求实验](/ucm/01-overview/03-quick-start/) 演示怎样把这样的前缀从外部存储读回。

@@ -1,0 +1,11 @@
+<div class="mechanism-controls" hidden>
+  <button type="button" data-back>上一步</button>
+  <button type="button" data-play>播放</button>
+  <button type="button" data-next>下一步</button>
+  <span class="step-counter" aria-hidden="true"></span>
+</div>
+<ol class="mechanism-steps" aria-live="polite">
+  {{ range $index, $step := . -}}
+    <li value="{{ add $index 1 }}"><strong>{{ or $step.title $step.label }}</strong>　{{ $step.detail }}</li>
+  {{ end -}}
+</ol>

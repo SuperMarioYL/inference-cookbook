@@ -3,9 +3,9 @@ title: "PyO3 绑定实现"
 weight: 2
 ---
 
-> 本文档详细解析 Dynamo 的 PyO3 绑定层，包括核心类的设计、LLM 相关绑定和异步支持的实现细节。
+## 从 Python 可见接口反查绑定
 
----
+Python 类型存根标出了哪些方法返回 awaitable，哪些对象可以异步迭代。先以 `client.generate` 的返回流为例，再沿同名绑定查 Rust 侧如何产生下一项。 [Python 类型存根](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/bindings/python/src/dynamo/_core.pyi)
 
 ## 1. 模块结构
 
@@ -522,24 +522,31 @@ impl ResponseStream {
 
 ### 5.2 流式响应流程
 
-```mermaid
-sequenceDiagram
-    participant Py as Python
-    participant RS as ResponseStream
-    participant Rust as Rust Stream
-    participant Worker as Worker
-
-    Py->>RS: async for response in stream
-    loop 每个响应
-        RS->>Rust: stream.next().await
-        Rust->>Worker: 获取下一个 token
-        Worker-->>Rust: Token 数据
-        Rust-->>RS: Some(Ok(item))
-        RS-->>Py: yield response
-    end
-    Rust-->>RS: None (流结束)
-    RS-->>Py: StopAsyncIteration
-```
+{{< trace >}}
+title: Python 异步循环如何消费 Rust 流
+actors: ["Python", "Rust 流", "Worker"]
+steps:
+  - from: 0
+    to: 1
+    label: "等待下一项"
+    detail: "Python 端 async for 发起一次异步读取。"
+  - from: 2
+    to: 1
+    label: "一项就绪"
+    detail: "worker 的第一个返回值进入运行时流。"
+  - from: 1
+    to: 0
+    label: "交给 Python"
+    detail: "绑定层恢复等待者，调用方读 item.data()。"
+  - from: 2
+    to: 1
+    label: "流抵达末尾"
+    detail: "没有剩余输出时，底层流进入结束状态。"
+  - from: 1
+    to: 0
+    label: "退出循环"
+    detail: "Python 完成这次迭代，可检查累计收到的结果。"
+{{< /trace >}}
 
 ### 5.3 Python 端使用
 
@@ -691,9 +698,7 @@ fn deserialize_response(
 
 ---
 
-## 总结
-
-PyO3 绑定层的核心设计：
+## Rust 与 Python 绑定对照
 
 | 特性 | 实现方式 |
 |------|----------|
@@ -703,12 +708,8 @@ PyO3 绑定层的核心设计：
 | 类型提示 | .pyi 存根文件 |
 | 序列化 | msgspec 集成 |
 
-这套绑定让 Python 开发者能够直接使用 Rust 核心运行时的全部能力。
-
----
-
 ## 参考文件
 
-- [lib/bindings/python/rust/lib.rs](../../../lib/bindings/python/rust/lib.rs) - PyO3 绑定主文件
-- [lib/bindings/python/rust/llm.rs](../../../lib/bindings/python/rust/llm.rs) - LLM 相关绑定
-- [dynamo/_core.pyi](../../../python/dynamo/_core.pyi) - 类型存根
+- [lib/bindings/python/rust/lib.rs](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/bindings/python/rust/lib.rs) - PyO3 绑定主文件
+- [lib/bindings/python/rust/llm.rs](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/bindings/python/rust/llm.rs) - LLM 相关绑定
+- [Python 类型存根](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/bindings/python/src/dynamo/_core.pyi) - 类型存根

@@ -3,7 +3,7 @@ title: "DispatchKey 系统"
 weight: 6
 ---
 
-> 本文面向有一定 C++ 基础的中级读者，深入解析 PyTorch 调度系统的基石 -- DispatchKey 与 DispatchKeySet。
+一次算子调用可能同时涉及自动求导和某个设备后端。`DispatchKeySet` 把适用的键组织成集合，Dispatcher 按优先级选择下一层。
 > 核心源码位置: `c10/core/DispatchKey.h`, `c10/core/DispatchKeySet.h`, `c10/core/impl/LocalDispatchKeySet.h`
 > 难度: 中级
 
@@ -516,10 +516,11 @@ PyTorch 提供三种 RAII guard 来管理 TLS 状态：
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Default: 线程创建
+    [*] --> ThreadReady
+    state "线程初始状态" as ThreadReady
 
-    Default --> AutogradActive: 操作触发调度
-    note right of Default
+    ThreadReady --> AutogradActive: 操作触发调度
+    note right of ThreadReady
         included = {BackendSelect, ADInplaceOrView}
         excluded = {各 Autocast keys}
     end note
@@ -765,8 +766,8 @@ print(torch._C._dispatch_dump("aten::add.Tensor"))
 
 ## 延伸阅读
 
-- [02-dispatcher-core.md](./02-dispatcher-core.md) - Dispatcher 核心机制，DispatchKey 如何驱动实际的调度流程
-- [Module 1 - TensorImpl 深度解析](../module-01-tensor-storage/01-tensorimpl-deep-dive.md) - 了解 `key_set_` 在 TensorImpl 中的存储方式
-- [Module 0 - 执行流程总览](../module-00-overview/03-execution-flow-overview.md) - 从更高层面理解调度在整个执行流程中的位置
-- [Module 2 - Autograd](../module-02-autograd/01-computational-graph.md) - Autograd DispatchKey 如何触发梯度计算
+- [02-dispatcher-core.md](/pytorch/03-core-modules/07-dispatcher-core/) - Dispatcher 核心机制，DispatchKey 如何驱动实际的调度流程
+- [Module 1 - TensorImpl 深度解析](/pytorch/02-fundamentals/01-tensorimpl-deep-dive/) - 了解 `key_set_` 在 TensorImpl 中的存储方式
+- [Module 0 - 执行流程总览](/pytorch/00-overview/04-execution-flow-overview/) - 从更高层面理解调度在整个执行流程中的位置
+- [Module 2 - Autograd](/pytorch/02-fundamentals/05-computational-graph/) - Autograd DispatchKey 如何触发梯度计算
 - PyTorch 官方文档: [Dispatcher in C++](https://pytorch.org/tutorials/advanced/dispatcher.html)

@@ -4,14 +4,13 @@ weight: 4
 ---
 
 
-> **阅读时间**: 约 15 分钟
 > **前置要求**: [vLLM 架构概览](./03-vllm-architecture.md)
 
 ---
 
 ## 概述
 
-理解硬件内存层级和数据传输特性是优化 LLM 推理的关键。本文介绍 GPU/CPU 内存架构以及 UCM 如何利用这些特性进行优化。
+留在设备内存的 KV 可以直接供注意力内核读取。将块移到主存或磁盘能腾出设备空间，再次命中时需要把它们搬回来。
 
 ---
 
@@ -142,27 +141,27 @@ class PinnedMemoryPool:
 
 CPU 和 GPU 之间通过 PCIe 总线传输数据：
 
-```mermaid
-graph LR
-    subgraph cpu["CPU 侧"]
-        DRAM["CPU DRAM"]
-        PCIE_C["PCIe Controller"]
-    end
-
-    subgraph pcie["PCIe 总线"]
-        BUS["PCIe Gen4/5<br/>32/64 GB/s"]
-    end
-
-    subgraph gpu["GPU 侧"]
-        PCIE_G["PCIe Controller"]
-        HBM["GPU HBM"]
-    end
-
-    DRAM --> PCIE_C
-    PCIE_C --> BUS
-    BUS --> PCIE_G
-    PCIE_G --> HBM
-```
+{{< trace >}}
+title: "主机上一个 KV 块怎样到达 GPU"
+actors: ["主机缓冲", "复制流", "PCIe", "设备块"]
+steps:
+  - from: 0
+    to: 1
+    label: "提交 H2D"
+    detail: "源缓冲中已有完整 KV，目标地址属于已分配的设备块。"
+  - from: 1
+    to: 2
+    label: "开始复制"
+    detail: "设备运行时按复制流的依赖发起传输。"
+  - from: 2
+    to: 3
+    label: "到达设备"
+    detail: "数据经过本机 PCIe 路径写入目标范围。"
+  - from: 3
+    to: 3
+    label: "等待完成"
+    detail: "模型使用这个块以前等待对应事件，源缓冲也有自己的复用时机。"
+{{< /trace >}}
 
 ### 4.2 NVLink（多 GPU）
 
@@ -195,44 +194,57 @@ graph TB
 ---
 ## 5. 异步传输与重叠
 ### 5.1 同步 vs 异步传输
-```mermaid
-sequenceDiagram
-    participant CPU
-    participant GPU
-
-    Note over CPU,GPU: 同步传输 - 阻塞等待
-    CPU->>GPU: 发起传输
-    CPU->>CPU: 等待完成...
-    GPU-->>CPU: 传输完成
-    CPU->>CPU: 继续执行
-
-    Note over CPU,GPU: 异步传输 - 并行执行
-    CPU->>GPU: 发起传输（非阻塞）
-    CPU->>CPU: 继续其他工作
-    GPU-->>CPU: 传输完成通知
-```
+{{< trace >}}
+title: "异步复制期间主线程在做什么"
+actors: ["主线程", "复制流", "目标缓冲", "模型"]
+steps:
+  - from: 0
+    to: 1
+    label: "提交复制"
+    detail: "主线程把指定源与目的范围交给复制流。"
+  - from: 0
+    to: 0
+    label: "准备下一步"
+    detail: "异步提交返回后，主线程可以先做与目的数据无关的工作。"
+  - from: 1
+    to: 2
+    label: "完成写入"
+    detail: "复制流完成本次传输并到达相应的事件。"
+  - from: 2
+    to: 3
+    label: "消费数据"
+    detail: "模型等待这个依赖满足后再读目的缓冲。"
+{{< /trace >}}
 
 ### 5.2 计算与传输重叠
 
-UCM 利用异步传输实现计算与数据传输的重叠：
+假设两层使用独立的目标缓冲区，设备允许复制与计算同时进行。
 
-```mermaid
-gantt
-    title 计算与传输重叠示意
-    dateFormat X
-    axisFormat %s
-
-    section 无重叠
-    加载 KV :load1, 0, 3
-    计算 Attention :compute1, 3, 5
-    保存 KV :save1, 5, 8
-    section 有重叠
-    加载 KV (Layer N+1) :load2, 0, 3
-    计算 Attention (Layer N) :compute2, 0, 2
-    保存 KV (Layer N-1) :save2, 0, 2
-```
+{{< timeline >}}
+title: 复制下一层的 KV 时，计算流可以做什么
+unit: 时隙
+ticks: [0, 1, 2, 3, 4, 5]
+tracks:
+  - name: 复制流
+    bars: [[0, 2, "读 L0"], [2, 4, "读 L1"]]
+  - name: 计算流
+    bars: [[2, 3, "算 L0"], [4, 5, "算 L1"]]
+steps:
+  - at: 0
+    title: 读取 L0
+    detail: 示意中每层传输用两个时隙，计算用一个时隙。
+  - at: 2
+    title: 两条流开始重叠
+    detail: L0 已经就绪。复制流读 L1 的同时，计算流使用 L0。
+  - at: 3
+    title: 计算流等待 L1
+    detail: L0 算完了，但 L1 还没到。空白的一格就是这次没有盖住的传输时间。
+  - at: 5
+    title: 两层完成
+    detail: 串行需要六个时隙，这个排程用了五个。缩短的是重叠的那一个时隙。
+{{< /timeline >}}
 ### 5.3 CUDA Streams
-CUDA Streams 用于管理异步操作：
+下面的单层代码先把依赖关系写清楚。要得到图中的重叠，需要在算 L0 时就提交 L1 的读取，并为两层分别记录就绪事件。
 ```python
 class AsyncTransfer:
     def __init__(self):
@@ -297,7 +309,7 @@ UCM 支持灵活的存储层级组合：
 1. Cache|Posix - 本地高速缓存
    HBM ↔ Pinned Memory Cache ↔ 本地 SSD
 
-2. Cache|NFS - 分布式缓存
+2. Cache|Posix - POSIX 后端也可使用各节点的共享挂载点
    HBM ↔ Pinned Memory Cache ↔ NFS 共享存储
 
 3. Cache|DS3FS - 云存储缓存
@@ -308,36 +320,55 @@ UCM 支持灵活的存储层级组合：
 ## 7. 传输优化技术
 ### 7.1 批量传输
 将多个小传输合并为大传输：
-```mermaid
-graph TB
-    subgraph nobatch["无批量 - 多次小传输"]
-        T1["传输 Block 1<br/>4KB"] --> T2["传输 Block 2<br/>4KB"]
-        T2 --> T3["传输 Block 3<br/>4KB"]
-        T3 --> T4["传输 Block 4<br/>4KB"]
-    end
-    subgraph batch["批量 - 一次大传输"]
-        B1["传输 Block 1-4<br/>16KB 合并传输"]
-    end
-    nobatch --> |"4x 启动开销"| Result1["总时间长"]
-    batch --> |"1x 启动开销"| Result2["总时间短"]
-```
+{{< stateboard >}}
+title: "四次小传输怎样共用一次提交"
+rows: ["块", "独立提交", "批量提交"]
+steps:
+  - title: "四份数据"
+    detail: "本例 A 到 D 各有一份地址和长度描述。"
+    cells:
+      - ["A", "B", "C", "D"]
+      - ["·", "·", "·", "·"]
+      - ["·", "·", "·", "·"]
+    focus: [[0, 0], [0, 1], [0, 2], [0, 3]]
+  - title: "独立提交"
+    detail: "四次调用分别带一份描述，每次都有提交开销。"
+    cells:
+      - ["A", "B", "C", "D"]
+      - ["1", "2", "3", "4"]
+      - ["·", "·", "·", "·"]
+    focus: [[1, 0], [1, 1], [1, 2], [1, 3]]
+  - title: "统一提交"
+    detail: "批接口一次传入四份描述；每份数据的源与目的位置仍单独保留。"
+    cells:
+      - ["A", "B", "C", "D"]
+      - ["1", "2", "3", "4"]
+      - ["批1", "批1", "批1", "批1"]
+    focus: [[2, 0], [2, 1], [2, 2], [2, 3]]
+{{< /stateboard >}}
 ### 7.2 预取（Prefetch）
 提前加载即将使用的数据：
-```mermaid
-sequenceDiagram
-    participant Sched as Scheduler
-    participant Prefetch as Prefetch Engine
-    participant Store as Storage
-    participant Worker as Worker
-
-    Sched->>Prefetch: 预测下一批请求
-    Prefetch->>Store: 提前加载 KV
-    Store-->>Prefetch: KV 数据
-    Prefetch->>Prefetch: 缓存到 GPU
-    Note over Worker: 稍后...
-    Worker->>Prefetch: 请求 KV
-    Prefetch-->>Worker: 立即返回（已预取）
-```
+{{< trace >}}
+title: "预取怎样赶在模型前向之前"
+actors: ["调度器", "预取任务", "存储", "worker"]
+steps:
+  - from: 0
+    to: 1
+    label: "提交候选"
+    detail: "调度器预计后续计算会用到块 B，提前安排预取。"
+  - from: 1
+    to: 2
+    label: "请求 B"
+    detail: "存储开始读取 B，当前步继续使用已有数据。"
+  - from: 2
+    to: 3
+    label: "B 到缓冲"
+    detail: "worker 在之后的步骤获得可用数据或等待相应任务完成。"
+  - from: 3
+    to: 3
+    label: "使用 B"
+    detail: "若 B 在其层开始前已经就绪，预取覆盖了这次等待。"
+{{< /trace >}}
 ### 7.3 零拷贝（Zero-Copy）
 减少不必要的数据复制：
 ```mermaid

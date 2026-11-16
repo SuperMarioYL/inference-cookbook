@@ -3,7 +3,7 @@ title: "LLaMA Attention 实现"
 weight: 5
 ---
 
-本文档详细介绍 CacheBlend 中 `LlamaAttention` 类的实现，包括类结构、forward 方法、RoPE 位置编码处理以及 hack_kv 收集逻辑。
+`LlamaAttention.forward` 将隐藏状态投影为 Q、K、V。启用收集时，它在施加 RoPE 前克隆 K、V；后续融合就能按新输入中的位置重新旋转 K。
 
 ## 类结构
 
@@ -79,13 +79,13 @@ def forward(
     q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
 
     # Step 2: CacheBlend - 旋转旧 K
-    # 在 Check 或 After Check 模式下，需要用原始位置旋转旧 K
+    # 在 Check 或 After Check 模式下，需要用组合输入中的目标位置旋转收集时保存的原始 K
     if status in [1, 2]:
         if cache_fuse_metadata["fake_q"] is None:
             # 创建虚拟 Query（任意值，只需要形状匹配）
             cache_fuse_metadata['fake_q'] = torch.rand_like(q)
 
-        # 使用原始位置旋转旧 K
+        # 使用组合输入中的目标位置旋转收集时保存的原始 K
         _, old_kv[0] = self.rotary_emb(
             cache_fuse_metadata['org_pos'],  # 原始位置
             cache_fuse_metadata['fake_q'],   # 虚拟 Query
@@ -113,32 +113,27 @@ def forward(
 
 ## RoPE 位置编码处理流程
 
-```mermaid
-graph TB
-    subgraph "RoPE 处理"
-        H["hidden_states"] --> QKV["qkv_proj"]
-        QKV --> Split["split [Q, K, V]"]
-        Split --> Q["Query"]
-        Split --> K["Key (新)"]
-        Split --> V["Value (新)"]
-
-        subgraph "CacheBlend: 旧 K 旋转"
-            OldK["old_kv[0] (旧 K)"] --> RotOld["rotary_emb"]
-            OrgPos["org_pos"] --> RotOld
-            FakeQ["fake_q"] --> RotOld
-            RotOld --> OldKRot["旋转后的旧 K"]
-        end
-
-        Q --> RotNew["rotary_emb"]
-        K --> RotNew
-        Pos["positions"] --> RotNew
-        RotNew --> QRot["旋转后的 Q"]
-        RotNew --> KRot["旋转后的 K"]
-    end
-
-    style OldK fill:#ffcc99
-    style OldKRot fill:#ffcc99
-```
+{{< trace >}}
+title: "一次 collect 前向保存了哪份 K"
+actors: ["投影层", "原始 QKV", "hack_kv", "旋转与注意力"]
+steps:
+  - from: 0
+    to: 1
+    label: "拆出 QKV"
+    detail: "qkv_proj 的输出按 query 与 KV 宽度拆开。"
+  - from: 1
+    to: 2
+    label: "克隆 K、V"
+    detail: "collect 打开时，模型把此时的 K、V 克隆进 hack_kv。"
+  - from: 1
+    to: 3
+    label: "旋转当前 Q/K"
+    detail: "正常前向按本请求的位置旋转 Q 与 K，继续计算注意力。"
+  - from: 2
+    to: 3
+    label: "融合时取回"
+    detail: "后续融合会取出原始 K，按组合输入的目标位置旋转。"
+{{< /trace >}}
 
 ## hack_kv 收集逻辑
 

@@ -3,10 +3,11 @@ title: "连续批处理机制"
 weight: 5
 ---
 
+## 在引擎输出中区分请求与批次
+
+两个请求共用一轮执行，仍然保持各自的进度和输出通道。沿 EngineCore 的 step 或 step_with_batch_queue 读本轮提交、回收以及完成请求的过程；文中的概念循环省略异步执行与投机分支。 [0.33.0 执行循环](https://github.com/vllm-project/vllm/blob/v0.33.0/vllm/v1/engine/core.py)
 
 连续批处理（Continuous Batching）是 vLLM 实现高吞吐量的关键技术之一。与传统的静态批处理不同，连续批处理允许请求在推理过程中动态加入和退出，极大地提高了 GPU 利用率。
-
-本章我们将深入了解连续批处理的原理、实现和优势。
 
 ---
 
@@ -29,23 +30,27 @@ Batch 1:
 
 ### 1.2 静态批处理的问题
 
-```mermaid
-gantt
-    title 静态批处理的浪费
-    dateFormat X
-    axisFormat %s
-
-    section Batch 1
-    请求 A (50 tokens) :active, a1, 0, 50
-    请求 A 等待       :done, a2, 50, 200
-    请求 B (100 tokens) :active, b1, 0, 100
-    请求 B 等待       :done, b2, 100, 200
-    请求 C (200 tokens) :active, c1, 0, 200
-
-    section Batch 2 (等待)
-    请求 D           :crit, d1, 200, 250
-    请求 E           :crit, e1, 200, 280
-```
+{{< stateboard >}}
+title: 固定批次的三个槽位
+rows: ["第 1 槽", "第 2 槽", "第 3 槽"]
+steps:
+  - title: "第 1 轮"
+    detail: "A、B、C 分别生成 50、100、200 个 token，三个槽位都在执行。"
+    cells: [["A"], ["B"], ["C"]]
+    focus: [[0, 0], [1, 0], [2, 0]]
+  - title: "第 51 轮"
+    detail: "A 已经结束。D 虽然在排队，这个固定批次继续执行 B、C。"
+    cells: [["空"], ["B"], ["C"]]
+    focus: [[0, 0]]
+  - title: "第 101 轮"
+    detail: "B 也结束，只剩 C。"
+    cells: [["空"], ["空"], ["C"]]
+    focus: [[1, 0]]
+  - title: "第 201 轮"
+    detail: "C 结束后，新批次才能纳入 D 与 E。"
+    cells: [["D"], ["E"], ["空"]]
+    focus: [[0, 0], [1, 0]]
+{{< /stateboard >}}
 
 **问题分析：**
 
@@ -80,20 +85,27 @@ Step 101: [请求 D, 请求 E, 请求 C]
 
 ### 2.2 优势对比
 
-```mermaid
-gantt
-    title 连续批处理的高效性
-    dateFormat X
-    axisFormat %s
-
-    section 请求流
-    请求 A (50 tokens) :active, a1, 0, 50
-    请求 B (100 tokens) :active, b1, 0, 100
-    请求 C (200 tokens) :active, c1, 0, 200
-    请求 D (立即开始) :active, d1, 50, 100
-    请求 E (立即开始) :active, e1, 100, 180
-    请求 F (立即开始) :active, f1, 100, 250
-```
+{{< stateboard >}}
+title: 相同三槽改为逐轮选批
+rows: ["第 1 槽", "第 2 槽", "第 3 槽"]
+steps:
+  - title: "第 1 轮"
+    detail: "A、B、C 占据三个执行位置。"
+    cells: [["A"], ["B"], ["C"]]
+    focus: [[0, 0], [1, 0], [2, 0]]
+  - title: "第 51 轮"
+    detail: "A 已结束，下一轮允许 D 加入；B 和 C 继续生成。"
+    cells: [["D"], ["B"], ["C"]]
+    focus: [[0, 0]]
+  - title: "第 101 轮"
+    detail: "D 的 50 个 token 也已完成，B 达到 100 个。E 可使用其中一个空位。"
+    cells: [["E"], ["空"], ["C"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "后续轮次"
+    detail: "C 和 E 各自达到停止条件后退出，新到达的请求可从下一轮起补入。"
+    cells: [["空"], ["空"], ["空"]]
+    focus: [[0, 0], [2, 0]]
+{{< /stateboard >}}
 
 **优势分析：**
 
@@ -544,26 +556,8 @@ PagedAttention: 内存可以动态分配/释放
 
 ---
 
-## 11. 小结
-
-本章我们深入了解了连续批处理机制：
-
-1. **静态批处理的问题**：GPU 空闲、高延迟、低吞吐量
-2. **连续批处理的解决方案**：迭代级调度，动态加入/退出
-3. **vLLM 的实现**：
-   - 每个 step 重新调度
-   - 完成的请求立即释放资源
-   - 新请求立即加入批次
-4. **Prefill 与 Decode 混合**：不同阶段的请求交替执行
-5. **分块预填充**：长输入分成多个 chunk 处理
-6. **与其他技术协同**：PagedAttention、前缀缓存、投机解码
-
-连续批处理是 vLLM 实现高吞吐量的核心技术之一，结合 PagedAttention 和前缀缓存，使得 vLLM 能够高效地服务大量并发请求。
-
----
-
 ## 导航
 
 - 上一篇：[调度器原理](04-scheduler.md)
 - 下一篇：[入口点分析](../04-code-walkthrough/01-entry-points.md)
-- [返回目录](../README.md)
+- [返回目录](/vllm/00-overview/overview/)

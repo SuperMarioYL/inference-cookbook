@@ -7,7 +7,7 @@ weight: 5
 
 模型序列化是深度学习工程中的核心环节。训练好的模型需要保存到磁盘以供推理使用；训练过程需要定期保存 checkpoint 以支持断点续训。PyTorch 的序列化机制围绕 `state_dict`（状态字典）设计，提供了清晰、灵活的模型保存与加载方案。
 
-本文将从源码层面分析 `state_dict()`、`load_state_dict()`、序列化格式、以及状态字典钩子的实现。
+保存模块时，`state_dict()` 会收集参数与持久化 buffer。加载到新模块时，`load_state_dict()` 根据键名还原它们。
 
 源码位置：`torch/nn/modules/module.py`
 
@@ -284,7 +284,8 @@ model.load_state_dict(state_dict)
 torch.save(model, "model_full.pt")
 
 # 加载
-model = torch.load("model_full.pt")
+# 仅用于自己保存且来源可信的旧完整对象
+model = torch.load("model_full.pt", weights_only=False)
 ```
 
 **不推荐的原因**：
@@ -318,37 +319,27 @@ best_acc = checkpoint["best_acc"]
 
 ### 4.4 序列化流程图
 
-```mermaid
-sequenceDiagram
-    participant User as "用户代码"
-    participant Save as "torch.save"
-    participant SD as "state_dict()"
-    participant Module as "Module 树"
-    participant Pickle as "pickle 序列化"
-    participant File as "磁盘文件"
-
-    Note over User,File: 保存流程
-    User->>SD: model.state_dict()
-    SD->>Module: _state_dict_pre_hooks
-    SD->>Module: _save_to_state_dict (参数 + Buffer)
-    SD->>Module: 递归子模块.state_dict()
-    SD->>Module: _state_dict_hooks
-    SD-->>User: OrderedDict
-    User->>Save: torch.save(state_dict, path)
-    Save->>Pickle: pickle.dump(state_dict)
-    Pickle->>File: 写入 .pt 文件
-
-    Note over User,File: 加载流程
-    User->>File: torch.load(path)
-    File->>Pickle: pickle.load()
-    Pickle-->>User: OrderedDict
-    User->>Module: model.load_state_dict(state_dict)
-    Module->>Module: _load_state_dict_pre_hooks
-    Module->>Module: _load_from_state_dict (copy_ 参数)
-    Module->>Module: 递归子模块加载
-    Module->>Module: _load_state_dict_post_hooks
-    Module-->>User: _IncompatibleKeys
-```
+{{< trace >}}
+title: "state_dict 离开模型再装回"
+actors: ["模型 A", "状态字典", "文件", "模型 B"]
+steps:
+  - from: 0
+    to: 1
+    label: "收集权重"
+    detail: "state_dict 包含已注册参数和持久 buffer，例如 linear.weight 和 BatchNorm 统计量。"
+  - from: 1
+    to: 2
+    label: "写入 checkpoint"
+    detail: "torch.save 把字典及相关底层存储序列化。"
+  - from: 2
+    to: 1
+    label: "读取到 CPU"
+    detail: "torch.load(..., weights_only=True, map_location=\"cpu\") 读回权重数据。"
+  - from: 1
+    to: 3
+    label: "按键装载"
+    detail: "在相同结构的新模块上调用 load_state_dict；默认按匹配键把值复制给现有参数与 buffer。"
+{{< /trace >}}
 
 ## 5. 序列化格式结构
 
@@ -538,7 +529,7 @@ model.load_state_dict(new_state_dict)
 
 ## 8. weights_only 安全加载
 
-从 PyTorch 2.6 开始，`torch.load` 默认要求 `weights_only=True`：
+从 PyTorch 2.6 开始，未显式传入 `pickle_module` 时，`torch.load` 默认使用 `weights_only=True`。
 
 ```python
 # 安全加载（推荐）
@@ -548,7 +539,7 @@ state_dict = torch.load("model.pt", weights_only=True)
 state_dict = torch.load("model.pt", weights_only=False)
 ```
 
-`weights_only=True` 使用受限的 unpickler，只允许反序列化 Tensor、基础 Python 类型和 NumPy 数组等安全对象。这防止了恶意 pickle 文件执行任意代码。
+`weights_only=True` 使用受限的 unpickler，适合普通 Tensor 的 state dict、基础类型与显式允许的对象。遇到 NumPy dtype 或自定义类型时可能需要单独处理；受限加载仍需考虑文件来源与资源大小。[2.15 序列化说明](https://docs.pytorch.org/docs/2.15/notes/serialization.html)
 
 ## 9. 总结
 

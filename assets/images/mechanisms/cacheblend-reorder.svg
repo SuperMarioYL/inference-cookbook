@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 452 250" role="img" aria-labelledby="cacheblend-reorder-title">
+  <title id="cacheblend-reorder-title">文档的位置改变以后</title>
+  <desc>R 是一段新材料，M 是两条请求里完全相同的手册。</desc>
+  <defs><marker id="cacheblend-reorder-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" class="arrowhead"/></marker></defs>
+  <text x="15" y="28" class="diagram-title" text-anchor="start">文档的位置改变以后</text>
+
+  <g data-frame="0">
+    <title>只改末尾的问题</title>
+    <desc>普通前缀缓存就能复用手册中仍在缓存的完整匹配块。</desc>
+    <text x="16" y="82" class="label" text-anchor="start">已有缓存</text>
+    <rect x="111" y="58" width="157" height="41" rx="5" class="stored"/>
+    <text x="189.5" y="83.5" class="label" text-anchor="middle">手册 M</text>
+    <rect x="278" y="58" width="144" height="41" rx="5" class="idle"/>
+    <text x="350.0" y="83.5" class="label" text-anchor="middle">旧问题</text>
+    <text x="16" y="169" class="label" text-anchor="start">新请求</text>
+    <rect x="111" y="144" width="157" height="41" rx="5" class="stored"/>
+    <text x="189.5" y="169.5" class="label" text-anchor="middle">手册 M</text>
+    <rect x="278" y="144" width="144" height="41" rx="5" class="fresh"/>
+    <text x="350.0" y="169.5" class="label" text-anchor="middle">新问题</text>
+    <text x="16" y="226" class="note" text-anchor="start">手册仍位于序列开头</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>把新材料插到开头</title>
+    <desc>现在序列从 R 开始。M 的文字没变，但它前面的上下文变了。</desc>
+    <text x="16" y="82" class="label" text-anchor="start">已有缓存</text>
+    <rect x="111" y="58" width="157" height="41" rx="5" class="stored"/>
+    <text x="189.5" y="83.5" class="label" text-anchor="middle">手册 M</text>
+    <rect x="278" y="58" width="144" height="41" rx="5" class="idle"/>
+    <text x="350.0" y="83.5" class="label" text-anchor="middle">旧问题</text>
+    <text x="16" y="169" class="label" text-anchor="start">新请求</text>
+    <rect x="109" y="144" width="82" height="41" rx="5" class="fresh"/>
+    <text x="150.0" y="169.5" class="label" text-anchor="middle">材料 R</text>
+    <rect x="197" y="144" width="137" height="41" rx="5" class="idle"/>
+    <text x="265.5" y="169.5" class="label" text-anchor="middle">手册 M</text>
+    <rect x="340" y="144" width="88" height="41" rx="5" class="idle"/>
+    <text x="384.0" y="169.5" class="label" text-anchor="middle">问题</text>
+
+    <text x="16" y="232" class="note" text-anchor="start">此前算出的 M 没有看到 R</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>复用并选择性重算</title>
+    <desc>CacheBlend 取回 M 已有的 KV，并重算选中的 token，补入新上下文的影响。</desc>
+    <text x="16" y="82" class="label" text-anchor="start">已有缓存</text>
+    <rect x="111" y="58" width="157" height="41" rx="5" class="stored"/>
+    <text x="189.5" y="83.5" class="label" text-anchor="middle">手册 M</text>
+    <rect x="278" y="58" width="144" height="41" rx="5" class="idle"/>
+    <text x="350.0" y="83.5" class="label" text-anchor="middle">旧问题</text>
+    <text x="16" y="169" class="label" text-anchor="start">新请求</text>
+    <rect x="109" y="144" width="82" height="41" rx="5" class="fresh"/>
+    <text x="150.0" y="169.5" class="label" text-anchor="middle">材料 R</text>
+    <rect x="197" y="144" width="137" height="41" rx="5" class="stored"/>
+    <text x="265.5" y="169.5" class="label" text-anchor="middle">手册 M</text>
+    <rect x="340" y="144" width="88" height="41" rx="5" class="idle"/>
+    <text x="384.0" y="169.5" class="label" text-anchor="middle">问题</text>
+    <rect x="212" y="191" width="13" height="13" class="fresh"/>
+    <rect x="254" y="191" width="13" height="13" class="fresh"/>
+    <rect x="301" y="191" width="13" height="13" class="fresh"/>
+    <text x="16" y="232" class="note" text-anchor="start">标记表示需要重算的 token，位置为示意</text>
+  </g>
+</svg>

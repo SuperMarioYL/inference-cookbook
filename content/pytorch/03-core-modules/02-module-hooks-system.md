@@ -5,9 +5,9 @@ weight: 2
 
 ## 1. 概述
 
-Hook（钩子）是 PyTorch Module 系统中的一项强大机制，允许开发者在不修改模型代码的前提下，在前向传播和反向传播的关键节点注入自定义逻辑。Hook 广泛应用于特征提取、梯度监控、梯度裁剪、权重冻结、模型调试等场景。
+要看某一层实际收到的张量，可以给该层注册 forward pre-hook，再用 forward hook 记录返回值。句柄的 `remove()` 会结束这次观察。
 
-本文将从源码层面分析 `torch/nn/modules/module.py` 中的 Hook 系统，包括各类 Hook 的注册机制、执行顺序、全局 Hook 和状态字典 Hook。
+在同一个模块上分别注册 forward pre-hook 和 forward hook，就能在一次调用中比较传入的参数和实际返回值。hook 的注册顺序决定了哪些修改对后续 hook 可见。
 
 ## 2. Hook 类型总览
 
@@ -183,47 +183,27 @@ def _call_impl(self, *args, **kwargs):
 
 ### 5.2 完整执行流程
 
-```mermaid
-sequenceDiagram
-    participant User as "调用方"
-    participant Call as "__call__ / _wrapped_call_impl"
-    participant Impl as "_call_impl"
-    participant GPre as "Global Forward Pre Hooks"
-    participant LPre as "Module Forward Pre Hooks"
-    participant Fwd as "forward()"
-    participant GPost as "Global Forward Hooks"
-    participant LPost as "Module Forward Hooks"
-    participant BW as "BackwardHook (反向传播时)"
-
-    User->>Call: model(input)
-    Call->>Impl: _call_impl(input)
-
-    Note over Impl: 检查是否有任何 Hook
-
-    alt 无 Hook - 快速路径
-        Impl->>Fwd: forward(input)
-        Fwd-->>User: output
-    else 有 Hook - 慢速路径
-        Impl->>GPre: 执行全局 forward_pre_hooks
-        GPre-->>Impl: 可能修改 args
-        Impl->>LPre: 执行模块 forward_pre_hooks
-        LPre-->>Impl: 可能修改 args
-
-        Note over Impl: 设置 BackwardHook (如有 backward hooks)
-
-        Impl->>Fwd: forward(args)
-        Fwd-->>Impl: result
-
-        Impl->>GPost: 执行全局 forward_hooks
-        GPost-->>Impl: 可能修改 result
-        Impl->>LPost: 执行模块 forward_hooks
-        LPost-->>Impl: 可能修改 result
-
-        Note over BW: backward 阶段触发 backward hooks
-
-        Impl-->>User: result
-    end
-```
+{{< trace >}}
+title: "一次模块调用中谁能替换数值"
+actors: ["调用者", "前置 hook", "forward", "后置 hook"]
+steps:
+  - from: 0
+    to: 1
+    label: "传入 2"
+    detail: "本例只注册一个本地前置和一个本地后置 hook，通过 module(2) 进入调用包装。"
+  - from: 1
+    to: 2
+    label: "输入加一"
+    detail: "前置 hook 返回替换后的输入 3；模块的 forward 实际接收 3。"
+  - from: 2
+    to: 3
+    label: "乘以两倍"
+    detail: "forward 返回 6，后置 hook 能看到输入和该返回值。"
+  - from: 3
+    to: 0
+    label: "输出加十"
+    detail: "后置 hook 返回 16，调用者最终收到 16。没有返回替换值的 hook 会保留原结果。"
+{{< /trace >}}
 
 ### 5.3 _call_impl 详细逻辑
 
@@ -502,5 +482,3 @@ Hook 系统的设计遵循以下原则：
 3. **可组合性**：同一模块可注册多个 Hook，按注册顺序执行
 4. **可撤销性**：通过 `RemovableHandle.remove()` 移除 Hook
 5. **非侵入性**：Hook 不需要修改模型代码，通过外部注册即可工作
-
-理解 Hook 系统对于掌握 PyTorch 的调试、可视化和高级训练技巧至关重要。在下一篇文章中，我们将分析 PyTorch 内置的常用层（Linear、Conv2d、BatchNorm 等）的源码实现。

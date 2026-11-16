@@ -3,9 +3,9 @@ title: "Dynamo 设计理念"
 weight: 3
 ---
 
-> 本文介绍 NVIDIA Dynamo 的设计目标、技术栈选择以及核心设计原则。
+## 把部署需求映射到可观测边界
 
----
+在 1.6.2，发现后端决定哪些 worker 进入候选，请求平面承载组件调用，事件平面传播异步状态。架构取舍可以先用一次请求解释：模型是否可见、为什么选中该实例、它何时返回第一个 token。 [运行时架构](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/docs/fern/pages/developer-guide/knowledge-base/concepts/system-architecture/architecture.md)
 
 ## 1. 设计目标
 
@@ -22,17 +22,13 @@ graph TB
     end
 ```
 
-### 具体指标目标
+### 怎么衡量这些设计的效果
 
-| 目标 | 具体要求 |
-|------|----------|
-| 吞吐量 | 相比单机部署提升 2-3 倍 |
-| TTFT | KV 路由优化 3 倍 |
-| 延迟 | P99 < 100ms（短请求） |
-| 扩展性 | 支持 100+ GPU 集群 |
-| 可用性 | 99.9% SLA |
-
----
+| 关心的问题 | 用同一条请求轨迹比较 |
+|---|---|
+| 路由是否省了预填充？ | 各 worker 实际复用的 token、排队时间与客户端首 token 延迟。 |
+| 分离后解码是否更平稳？ | 聚合与分离时的逐 token 间隔，分别记录 P/D 排队与 KV 传输时间。 |
+| 增加设备后容量如何变化？ | 在同一服务延迟目标下，测每秒能完成多少请求，记录 GPU 数、模型与并行布局。 |
 
 ## 2. 技术栈选择
 
@@ -161,20 +157,27 @@ graph TB
 
 系统状态通过事件传播：
 
-```mermaid
-sequenceDiagram
-    participant Worker
-    participant NATS
-    participant Router
-
-    Worker->>NATS: publish(kv_stored)
-    NATS->>Router: deliver(kv_stored)
-    Router->>Router: update_index()
-
-    Worker->>NATS: publish(load_metrics)
-    NATS->>Router: deliver(load_metrics)
-    Router->>Router: update_scores()
-```
+{{< trace >}}
+title: 路由器怎样得知一个块出现又消失
+actors: ["Worker", "事件通道", "路由索引"]
+steps:
+  - from: 0
+    to: 1
+    label: "发布块 A"
+    detail: "P1 计算出可复用的块 A，向配置的事件通道发布相应状态。"
+  - from: 1
+    to: 2
+    label: "加入 P1"
+    detail: "索引更新 A 的成员集合，后续查询可以估计 P1 有一块重叠。"
+  - from: 0
+    to: 1
+    label: "P1 驱逐 A"
+    detail: "本地空间被回收，worker 发布驱逐事件。"
+  - from: 1
+    to: 2
+    label: "移除 P1"
+    detail: "索引接收事件后更新成员；两个事件之间到达的查询看到不同快照。"
+{{< /trace >}}
 
 **优势**：
 - **松耦合**：组件通过事件通信

@@ -104,35 +104,31 @@ struct SharedStorage {
 
 Hopper 架构引入了 **Warp Specialization**：不同的 Warp Group 执行不同的代码路径，通过异步流水线（Pipeline）进行同步。
 
-```mermaid
-sequenceDiagram
-    participant P as Producer WG0
-    participant SMEM as 共享内存
-    participant C as Consumer WG1+
-
-    Note over P,C: 初始化 Pipeline 和 Barrier
-
-    loop 遍历每个 Tile
-        P->>SMEM: TMA Load Q → smem_q
-        P->>P: Signal barrier_Q
-
-        loop 遍历 K/V 块
-            P->>SMEM: TMA Load K_j → smem_k[stage]
-            P->>SMEM: TMA Load V_j → smem_v[stage]
-            P->>P: Signal pipeline_k[stage]
-
-            C->>C: Wait pipeline_k[stage]
-            C->>C: GMMA: S = Q @ K^T
-            C->>C: Softmax: P = softmax(S)
-            C->>C: GMMA: O += P @ V
-            C->>C: Release pipeline_k[stage]
-        end
-
-        C->>SMEM: Write O → smem_o
-        C->>C: Signal barrier_O
-        C->>SMEM: TMA Store smem_o → HBM
-    end
-```
+{{< trace >}}
+title: "Hopper 前向的交接顺序"
+actors: ["搬运组", "共享内存", "计算组", "输出"]
+steps:
+  - from: 0
+    to: 1
+    label: "装入第一块"
+    detail: "搬运组为本轮的 K/V 分配可写 stage，发起异步搬运。"
+  - from: 1
+    to: 2
+    label: "数据就绪"
+    detail: "计算组等到对应 barrier 满足后才读取该 stage。"
+  - from: 2
+    to: 2
+    label: "计算分数与输出"
+    detail: "QK、行内 softmax、PV 更新当前 Q 块的统计量和输出。"
+  - from: 2
+    to: 1
+    label: "归还 stage"
+    detail: "已消费的数据不再被读时，缓冲可交给下一块。"
+  - from: 2
+    to: 3
+    label: "写回 O 和 LSE"
+    detail: "当前 Q 块可见的所有 K/V 都处理完后，完成归一化和输出。"
+{{< /trace >}}
 
 ### 2.2 分支入口
 
@@ -534,12 +530,12 @@ Flash Attention 的 SM90 前向传播内核通过以下关键设计实现高性�
 | **SMEM 内存复用** | O 和 V 共享内存重叠 | 减少 SMEM 占用 |
 | **持久化内核** | 每个 SM 处理多个 tile | 消除内核启动开销 |
 
-> 更详细的 CUDA 内核代码逐行解析见 [前向内核实现解析](../03-cuda-kernel/03-forward-kernel-impl.md)。
+> 更详细的 CUDA 内核代码逐行解析见 [前向内核实现解析](/flashattention/03-cuda-kernel/03-forward-kernel-impl/)。
 
 ---
 
 ## 导航
 
-- 上一篇：[分块策略与调度](02-tiling-strategy.md)
-- 下一篇：[反向传播算法详解](04-backward-pass.md)
-- [返回目录](../README.md)
+- 上一篇：[分块策略与调度](/flashattention/02-core-algorithm/02-tiling-strategy/)
+- 下一篇：[反向传播算法详解](/flashattention/02-core-algorithm/04-backward-pass/)
+- [返回目录](/flashattention/00-overview/overview/)

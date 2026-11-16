@@ -3,14 +3,9 @@ title: "分布式推理"
 weight: 3
 ---
 
+## 明确本次部署切分了哪一维
 
-## 概述
-
-当模型规模超过单个 GPU 的显存容量时，需要使用分布式推理。vLLM 支持多种并行策略，可以将大模型分布到多个 GPU 上运行。
-
-本文将介绍分布式推理的基本概念、并行策略以及 vLLM 中的实现细节。
-
----
+TP 的层内通信、PP 的 stage 传输和 DP 的请求分配发生在不同边界。用同一模型与输入先跑通最小拓扑，观察每个 rank 是否载入正确权重和设备，然后再测吞吐与延迟。 [0.33.0 分布式排障](https://github.com/vllm-project/vllm/blob/v0.33.0/docs/serving/distributed_troubleshooting.md)
 
 ## 为什么需要分布式推理
 
@@ -168,35 +163,31 @@ class GroupCoordinator:
 
 ### 通信原语
 
-```mermaid
-sequenceDiagram
-    participant G0 as GPU 0
-    participant G1 as GPU 1
-    participant G2 as GPU 2
-    participant G3 as GPU 3
-
-    Note over G0,G3: AllReduce (求和)
-    G0->>G0: [1]
-    G1->>G1: [2]
-    G2->>G2: [3]
-    G3->>G3: [4]
-    G0-->>G3: 通信
-    G0->>G0: [10]
-    G1->>G1: [10]
-    G2->>G2: [10]
-    G3->>G3: [10]
-
-    Note over G0,G3: AllGather (收集)
-    G0->>G0: [A]
-    G1->>G1: [B]
-    G2->>G2: [C]
-    G3->>G3: [D]
-    G0-->>G3: 通信
-    G0->>G0: [A,B,C,D]
-    G1->>G1: [A,B,C,D]
-    G2->>G2: [A,B,C,D]
-    G3->>G3: [A,B,C,D]
-```
+{{< trace >}}
+title: 四个 rank 求和与收集
+actors: ["GPU 0", "GPU 1", "GPU 2", "GPU 3", "通信组"]
+steps:
+  - from: 0
+    to: 4
+    label: "贡献 1"
+    detail: "rank 0 的局部和为 1，其余三卡分别为 2、3、4。"
+  - from: 4
+    to: 4
+    label: "归约"
+    detail: "求和结果是 10，组内各 rank 的 all-reduce 输出相同。"
+  - from: 4
+    to: 0
+    label: "取得总和"
+    detail: "GPU 0 得到 10，其他三个 rank 也得到 10。"
+  - from: 4
+    to: 4
+    label: "改做收集"
+    detail: "若输入改为 A、B、C、D 并改用 all-gather，输出保留每卡输入的顺序。"
+  - from: 4
+    to: 3
+    label: "得到四份输入"
+    detail: "GPU 3 的结果是 [A,B,C,D]，组内其他参与者也持有该结果。"
+{{< /trace >}}
 
 ---
 
@@ -231,32 +222,7 @@ graph LR
 
 为了减少 GPU 空闲时间，使用微批次（micro-batch）流水线：
 
-```mermaid
-gantt
-    title 流水线并行调度
-    dateFormat X
-    axisFormat %s
-
-    section GPU 0
-    Micro 1 Forward: 0, 1
-    Micro 2 Forward: 1, 2
-    Micro 3 Forward: 2, 3
-    Micro 4 Forward: 3, 4
-
-    section GPU 1
-    Idle: 0, 1
-    Micro 1 Forward: 1, 2
-    Micro 2 Forward: 2, 3
-    Micro 3 Forward: 3, 4
-    Micro 4 Forward: 4, 5
-
-    section GPU 2
-    Idle: 0, 2
-    Micro 1 Forward: 2, 3
-    Micro 2 Forward: 3, 4
-    Micro 3 Forward: 4, 5
-    Micro 4 Forward: 5, 6
-```
+{{< mechanism "vllm-pipeline-slots" >}}
 
 ### vLLM 中的配置
 
@@ -424,7 +390,7 @@ vLLM 提供多种分布式执行器：
 graph TD
     A[Executor 类型] --> B[UniProcExecutor<br/>单进程]
     A --> C[MultiprocExecutor<br/>多进程]
-    A --> D[RayDistributedExecutor<br/>Ray 分布式]
+    A --> D[RayExecutorV2<br/>Ray 分布式]
 
     B --> B1[单 GPU 调试]
     C --> C1[单节点多 GPU]
@@ -629,42 +595,12 @@ export NCCL_P2P_DISABLE=1
 
 ---
 
-## 总结
-
-```mermaid
-graph TD
-    A[分布式推理] --> B[张量并行 TP]
-    A --> C[流水线并行 PP]
-    A --> D[数据并行 DP]
-
-    B --> B1[切分权重矩阵<br/>AllReduce 通信]
-    C --> C1[切分模型层<br/>P2P 通信]
-    D --> D1[复制完整模型<br/>请求分发]
-
-    E[vLLM 支持] --> F[NCCL 通信]
-    E --> G[Custom AllReduce]
-    E --> H[Ray 分布式]
-    E --> I[KV Cache 传输]
-
-    J[配置建议] --> K[单节点用 TP]
-    J --> L[多节点用 PP+TP]
-    J --> M[高吞吐用 DP]
-```
-
-关键要点：
-1. **张量并行**：单节点多 GPU 首选，低延迟
-2. **流水线并行**：跨节点扩展，需要权衡
-3. **数据并行**：吞吐量最高，但显存效率低
-4. **组合使用**：大模型通常需要 TP+PP 组合
-
----
-
 ## 参考资料
 
 1. [Megatron-LM 论文](https://arxiv.org/abs/1909.08053)
 2. [GPipe 论文](https://arxiv.org/abs/1811.06965)
 3. [NCCL 官方文档](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/)
-4. [vLLM 分布式推理文档](https://docs.vllm.ai/en/latest/serving/distributed_serving.html)
+4. [vLLM 0.33.0 并行与扩展指南](https://docs.vllm.ai/en/v0.33.0/serving/parallelism_scaling/)
 5. [Ray 官方文档](https://docs.ray.io/)
 
 ---

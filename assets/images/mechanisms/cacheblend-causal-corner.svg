@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 464 254" role="img" aria-labelledby="cacheblend-causal-corner-title">
+  <title id="cacheblend-causal-corner-title">矩形 Q/K 的右下角因果掩码</title>
+  <desc>四列 K、两行 Q；从右下角对齐后，两行的可见边界不同。</desc>
+  <text x="15" y="27" text-anchor="start" class="diagram-title">矩形 Q/K 的右下角因果掩码</text>
+  <g data-frame="0">
+    <title>固定形状</title>
+    <desc>举例令 query 有两行、key 有四列。原型传给 xFormers 的右下角掩码由这两个长度决定。</desc>
+    <text x="16" y="59" text-anchor="start" class="subhead">2 行 Q × 4 列 K</text>
+    <text x="141" y="86" text-anchor="middle" class="subhead">K0</text>
+    <rect x="115" y="99" width="51" height="38" rx="5" class="idle"/>
+    <text x="140" y="124" text-anchor="middle" class="note">·</text>
+    <rect x="115" y="146" width="51" height="38" rx="5" class="idle"/>
+    <text x="140" y="171" text-anchor="middle" class="note">·</text>
+    <text x="213" y="86" text-anchor="middle" class="subhead">K1</text>
+    <rect x="187" y="99" width="51" height="38" rx="5" class="idle"/>
+    <text x="212" y="124" text-anchor="middle" class="note">·</text>
+    <rect x="187" y="146" width="51" height="38" rx="5" class="idle"/>
+    <text x="212" y="171" text-anchor="middle" class="note">·</text>
+    <text x="285" y="86" text-anchor="middle" class="subhead">K2</text>
+    <rect x="259" y="99" width="51" height="38" rx="5" class="idle"/>
+    <text x="284" y="124" text-anchor="middle" class="note">·</text>
+    <rect x="259" y="146" width="51" height="38" rx="5" class="idle"/>
+    <text x="284" y="171" text-anchor="middle" class="note">·</text>
+    <text x="357" y="86" text-anchor="middle" class="subhead">K3</text>
+    <rect x="331" y="99" width="51" height="38" rx="5" class="idle"/>
+    <text x="356" y="124" text-anchor="middle" class="note">×</text>
+    <rect x="331" y="146" width="51" height="38" rx="5" class="idle"/>
+    <text x="356" y="171" text-anchor="middle" class="note">·</text>
+    <text x="72" y="124" text-anchor="middle" class="subhead">Q0</text>
+    <text x="72" y="171" text-anchor="middle" class="subhead">Q1</text>
+    <path d="M 354 192 H 387 V 164" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="1" stroke-dasharray="none"/>
+    <text x="16" y="227" text-anchor="start" class="note">下三角掩码按右下角对齐。</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>读取第一行</title>
+    <desc>第一行位于右对齐后的倒数第二个位置，最后一列仍受掩码屏蔽。</desc>
+    <text x="16" y="59" text-anchor="start" class="subhead">2 行 Q × 4 列 K</text>
+    <text x="141" y="86" text-anchor="middle" class="subhead">K0</text>
+    <rect x="115" y="99" width="51" height="38" rx="5" class="fresh"/>
+    <text x="140" y="124" text-anchor="middle" class="note">可见</text>
+    <rect x="115" y="146" width="51" height="38" rx="5" class="idle"/>
+    <text x="140" y="171" text-anchor="middle" class="note">·</text>
+    <text x="213" y="86" text-anchor="middle" class="subhead">K1</text>
+    <rect x="187" y="99" width="51" height="38" rx="5" class="fresh"/>
+    <text x="212" y="124" text-anchor="middle" class="note">可见</text>
+    <rect x="187" y="146" width="51" height="38" rx="5" class="idle"/>
+    <text x="212" y="171" text-anchor="middle" class="note">·</text>
+    <text x="285" y="86" text-anchor="middle" class="subhead">K2</text>
+    <rect x="259" y="99" width="51" height="38" rx="5" class="fresh"/>
+    <text x="284" y="124" text-anchor="middle" class="note">可见</text>
+    <rect x="259" y="146" width="51" height="38" rx="5" class="idle"/>
+    <text x="284" y="171" text-anchor="middle" class="note">·</text>
+    <text x="357" y="86" text-anchor="middle" class="subhead">K3</text>
+    <rect x="331" y="99" width="51" height="38" rx="5" class="idle"/>
+    <text x="356" y="124" text-anchor="middle" class="note">×</text>
+    <rect x="331" y="146" width="51" height="38" rx="5" class="idle"/>
+    <text x="356" y="171" text-anchor="middle" class="note">·</text>
+    <text x="72" y="124" text-anchor="middle" class="subhead">Q0</text>
+    <text x="72" y="171" text-anchor="middle" class="subhead">Q1</text>
+    <path d="M 354 192 H 387 V 164" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="1" stroke-dasharray="none"/>
+    <text x="16" y="227" text-anchor="start" class="note">第一行允许访问 K0、K1、K2，屏蔽 K3。</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>读取第二行</title>
+    <desc>最后一行可以读取到最后一列。这个矩形掩码本身并不接收每个稀疏 query 的原 token 下标。</desc>
+    <text x="16" y="59" text-anchor="start" class="subhead">2 行 Q × 4 列 K</text>
+    <text x="141" y="86" text-anchor="middle" class="subhead">K0</text>
+    <rect x="115" y="99" width="51" height="38" rx="5" class="stored"/>
+    <text x="140" y="124" text-anchor="middle" class="note">·</text>
+    <rect x="115" y="146" width="51" height="38" rx="5" class="fresh"/>
+    <text x="140" y="171" text-anchor="middle" class="note">可见</text>
+    <text x="213" y="86" text-anchor="middle" class="subhead">K1</text>
+    <rect x="187" y="99" width="51" height="38" rx="5" class="stored"/>
+    <text x="212" y="124" text-anchor="middle" class="note">·</text>
+    <rect x="187" y="146" width="51" height="38" rx="5" class="fresh"/>
+    <text x="212" y="171" text-anchor="middle" class="note">可见</text>
+    <text x="285" y="86" text-anchor="middle" class="subhead">K2</text>
+    <rect x="259" y="99" width="51" height="38" rx="5" class="stored"/>
+    <text x="284" y="124" text-anchor="middle" class="note">·</text>
+    <rect x="259" y="146" width="51" height="38" rx="5" class="fresh"/>
+    <text x="284" y="171" text-anchor="middle" class="note">可见</text>
+    <text x="357" y="86" text-anchor="middle" class="subhead">K3</text>
+    <rect x="331" y="99" width="51" height="38" rx="5" class="idle"/>
+    <text x="356" y="124" text-anchor="middle" class="note">×</text>
+    <rect x="331" y="146" width="51" height="38" rx="5" class="fresh"/>
+    <text x="356" y="171" text-anchor="middle" class="note">可见</text>
+    <text x="72" y="124" text-anchor="middle" class="subhead">Q0</text>
+    <text x="72" y="171" text-anchor="middle" class="subhead">Q1</text>
+    <path d="M 354 192 H 387 V 164" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="1" stroke-dasharray="none"/>
+    <text x="16" y="227" text-anchor="start" class="note">第二行一直开放到 K3。</text>
+  </g>
+</svg>

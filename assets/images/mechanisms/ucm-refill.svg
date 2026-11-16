@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 452 250" role="img" aria-labelledby="ucm-refill-title">
+  <title id="ucm-refill-title">第二条请求从哪里拿到前缀 KV</title>
+  <desc>演示外部前缀命中，B 所在设备上没有可用的本地副本。</desc>
+  <defs><marker id="ucm-refill-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" class="arrowhead"/></marker></defs>
+  <text x="15" y="28" class="diagram-title" text-anchor="start">第二条请求从哪里拿到前缀 KV</text>
+
+  <g data-frame="0">
+    <title>A 生成 KV</title>
+    <desc>A 完成前缀计算，在设备侧生成两个完整块。</desc>
+    <text x="16" y="79" class="label" text-anchor="start">设备</text>
+    <rect x="103" y="57" width="87" height="37" rx="5" class="fresh"/>
+    <text x="146.5" y="80.5" class="label" text-anchor="middle">前缀 ①</text>
+    <rect x="198" y="57" width="87" height="37" rx="5" class="fresh"/>
+    <text x="241.5" y="80.5" class="label" text-anchor="middle">前缀 ②</text>
+    <rect x="312" y="57" width="119" height="37" rx="5" class="idle"/>
+    <text x="371.5" y="80.5" class="label" text-anchor="middle">—</text>
+    <text x="16" y="181" class="label" text-anchor="start">存储</text>
+    <rect x="103" y="156" width="182" height="40" rx="5" class="idle"/>
+    <text x="194.0" y="181.0" class="label" text-anchor="middle">空</text>
+
+    <text x="16" y="228" class="note" text-anchor="start">请求 A 计算输入</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>写入存储</title>
+    <desc>Connector 把可保存的块交给存储。写入完成后，另一条请求才能读取这份副本。</desc>
+    <text x="16" y="79" class="label" text-anchor="start">设备</text>
+    <rect x="103" y="57" width="87" height="37" rx="5" class="fresh"/>
+    <text x="146.5" y="80.5" class="label" text-anchor="middle">前缀 ①</text>
+    <rect x="198" y="57" width="87" height="37" rx="5" class="fresh"/>
+    <text x="241.5" y="80.5" class="label" text-anchor="middle">前缀 ②</text>
+    <rect x="312" y="57" width="119" height="37" rx="5" class="idle"/>
+    <text x="371.5" y="80.5" class="label" text-anchor="middle">—</text>
+    <text x="16" y="181" class="label" text-anchor="start">存储</text>
+    <rect x="103" y="156" width="182" height="40" rx="5" class="stored"/>
+    <text x="194.0" y="181.0" class="label" text-anchor="middle">块 ①   块 ②</text>
+    <path d="M 195 99 L 195 151" class="edge" marker-end="url(#ucm-refill-arrow)"/>
+    <text x="16" y="228" class="note" text-anchor="start">写入完成，存储持有副本</text>
+    <rect x="190" y="144" width="10" height="10" rx="2" class="packet" data-dx="0" data-dy="-49"/>
+  </g>
+  <g data-frame="2" display="none">
+    <title>B 查到两个块</title>
+    <desc>B 具有相同前缀，设备侧没有相应内容。外部查询返回两个可回填的块。</desc>
+    <text x="16" y="79" class="label" text-anchor="start">设备</text>
+    <rect x="103" y="57" width="87" height="37" rx="5" class="idle"/>
+    <text x="146.5" y="80.5" class="label" text-anchor="middle">空</text>
+    <rect x="198" y="57" width="87" height="37" rx="5" class="idle"/>
+    <text x="241.5" y="80.5" class="label" text-anchor="middle">空</text>
+    <rect x="312" y="57" width="119" height="37" rx="5" class="idle"/>
+    <text x="371.5" y="80.5" class="label" text-anchor="middle">—</text>
+    <text x="16" y="181" class="label" text-anchor="start">存储</text>
+    <rect x="103" y="156" width="182" height="40" rx="5" class="stored"/>
+    <text x="194.0" y="181.0" class="label" text-anchor="middle">块 ①   块 ②</text>
+
+    <text x="16" y="228" class="note" text-anchor="start">请求 B 查询相同的前缀</text>
+  </g>
+  <g data-frame="3" display="none">
+    <title>加载完成</title>
+    <desc>B 在设备侧分配的位置收到 KV，再计算自己剩余的 token。</desc>
+    <text x="16" y="79" class="label" text-anchor="start">设备</text>
+    <rect x="103" y="57" width="87" height="37" rx="5" class="stored"/>
+    <text x="146.5" y="80.5" class="label" text-anchor="middle">前缀 ①</text>
+    <rect x="198" y="57" width="87" height="37" rx="5" class="stored"/>
+    <text x="241.5" y="80.5" class="label" text-anchor="middle">前缀 ②</text>
+    <rect x="312" y="57" width="119" height="37" rx="5" class="fresh"/>
+    <text x="371.5" y="80.5" class="label" text-anchor="middle">B 的后缀</text>
+    <text x="16" y="181" class="label" text-anchor="start">存储</text>
+    <rect x="103" y="156" width="182" height="40" rx="5" class="stored"/>
+    <text x="194.0" y="181.0" class="label" text-anchor="middle">块 ①   块 ②</text>
+    <path d="M 195 150 L 195 101" class="edge" marker-end="url(#ucm-refill-arrow)"/>
+    <text x="16" y="228" class="note" text-anchor="start">回填后开始计算 B 的后缀</text>
+    <rect x="190" y="97" width="10" height="10" rx="2" class="packet" data-dx="0" data-dy="46"/>
+  </g>
+</svg>

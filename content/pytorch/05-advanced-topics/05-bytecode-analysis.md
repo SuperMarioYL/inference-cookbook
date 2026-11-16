@@ -3,7 +3,6 @@ title: "字节码分析机制"
 weight: 5
 ---
 
-> *"Dynamo 的核心在于：将 Python 的动态字节码执行过程，转化为一张静态的 FX 计算图。"*
 
 ---
 
@@ -11,7 +10,7 @@ weight: 5
 
 TorchDynamo 的编译流程中，**符号执行**（Symbolic Execution）是最关键的阶段。当 `torch.compile` 捕获到一个 Python 帧时，Dynamo 并不会真正执行这些字节码，而是通过 `InstructionTranslator` 逐条**模拟**字节码的执行过程。在模拟过程中，所有的值都用 `VariableTracker` 的子类来表示（例如 `TensorVariable` 表示张量、`ConstantVariable` 表示常量），所有对张量的操作会被记录到 `OutputGraph` 持有的 FX 图中，而对 Python 对象的副作用修改则由 `SideEffects` 负责追踪。
 
-本文将深入分析以下四大核心组件：
+可以沿以下四个对象跟踪一次捕获。
 
 | 组件 | 源文件 | 核心职责 |
 |------|--------|----------|
@@ -45,10 +44,11 @@ def example(x, y):
     return x + y
 
 dis.dis(example)
-#  LOAD_FAST    0 (x)
-#  LOAD_FAST    1 (y)
-#  BINARY_ADD
-#  RETURN_VALUE
+# CPython 3.13.12
+# RESUME
+# LOAD_FAST_LOAD_FAST (x, y)
+# BINARY_OP (+)
+# RETURN_VALUE
 ```
 
 Dynamo 关心的核心字节码类别：
@@ -411,25 +411,23 @@ class TensorVariable(VariableTracker):
 
 当一个 `TensorVariable` 参与运算时（如 `x + y`），其 `call_function` 逻辑最终会调用 `OutputGraph.create_proxy()` 来在 FX 图中创建一个 `call_function` 节点，并返回一个新的 `TensorVariable` 包裹新生成的 Proxy。
 
-```mermaid
-sequenceDiagram
-    participant TX as InstructionTranslator
-    participant TV as TensorVariable
-    participant OG as OutputGraph
-    participant FX as FX Graph
-
-    TX->>TX: BINARY_ADD 指令
-    TX->>TX: pop() 得到 rhs: TensorVariable
-    TX->>TX: pop() 得到 lhs: TensorVariable
-
-    TX->>TV: call_function(tx, [lhs, rhs], {})
-    TV->>OG: create_proxy("call_function",\n operator.add, (lhs.proxy, rhs.proxy))
-    OG->>FX: 创建新 Node
-    FX-->>OG: 返回 Proxy
-    OG-->>TV: 返回新 Proxy
-    TV-->>TX: 返回新 TensorVariable(proxy=new_proxy)
-    TX->>TX: push(result)
-```
+{{< trace >}}
+title: "两个 TensorVariable 怎样产生加法节点"
+actors: ["解释循环", "符号张量", "OutputGraph", "新变量"]
+steps:
+  - from: 0
+    to: 1
+    label: "遇到加法"
+    detail: "Python 表达式 x+y 的操作数在追踪器中由 TensorVariable 表示。"
+  - from: 1
+    to: 2
+    label: "记录调用"
+    detail: "可追踪的张量加法把对应 FX 代理作为输入，进入当前图。"
+  - from: 2
+    to: 3
+    label: "包装结果"
+    detail: "新 FX 节点成为结果变量的代理，后续字节码继续使用结果而无需读取真实元素值。"
+{{< /trace >}}
 
 `TensorVariable` 还缓存了大量元数据（dtype, device, ndim, size, stride 等），这些信息从 `FakeTensor` 上提取。这使得很多属性查询（如 `x.dtype`、`x.shape`）可以直接在编译期求值，不需要插入 FX 节点。
 
@@ -467,7 +465,7 @@ flowchart TD
     end
 ```
 
-**"New" vs "Existing"** 的区别至关重要：
+副作用是否需要回放，取决于对象何时创建。
 
 - **New**（`scope >= 1`）：值在 Dynamo 追踪过程中创建。如果该值没有逃逸到 Python 世界，其突变可以被优化掉
 - **Existing**（`scope == 0`）：值在 Dynamo 追踪开始之前就存在。对其的突变必须在图执行后通过 `SideEffects` 回放
@@ -838,7 +836,7 @@ torch._logging.set_logs(bytecode=True, graph_code=True)
 
 ## 9. 小结
 
-本文从源码层面分析了 TorchDynamo 符号执行引擎的四大核心组件：
+
 
 | 组件 | 核心思想 | 关键入口方法 |
 |------|---------|-------------|

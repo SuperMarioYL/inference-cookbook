@@ -3,20 +3,9 @@ title: "LoRA 支持"
 weight: 2
 ---
 
-## 概述
+## 加载成功与同一批可用的适配器数
 
-### 本章学习目标
-- 理解 LoRA 原理和优势
-- 掌握多适配器加载机制
-- 了解动态切换实现
-- 学习批量推理优化
-
-### 前置知识要求
-- 了解 Transformer 架构
-- 熟悉模型微调概念
-- 理解矩阵分解
-
----
+两条请求即使使用同一基座，也可能指定不同适配器。记录已加载适配器名、请求实际选择的名字和本轮适配器个数；0.5.23 的 max-loras-per-batch 也计入仅用基座的请求。 [LoRA 请求与加载](https://github.com/sgl-project/sglang/blob/v0.5.23/docs/docs/advanced_features/lora.mdx)
 
 ## LoRA 原理
 
@@ -81,12 +70,12 @@ graph TB
 ```bash
 # 单个 LoRA 适配器
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --lora-paths my-lora=/path/to/lora
 
 # 多个 LoRA 适配器
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --lora-paths \
         code-lora=/path/to/code-lora \
         chat-lora=/path/to/chat-lora \
@@ -264,37 +253,23 @@ def forward_with_lora(self, x, lora_adapter):
 
 ### 混合 LoRA 批处理
 
-```mermaid
-graph TB
-    subgraph mixed_lora["混合 LoRA 批处理"]
-        REQ1["请求 1<br/>lora-A"]
-        REQ2["请求 2<br/>lora-B"]
-        REQ3["请求 3<br/>lora-A"]
-
-        GROUP["分组"]
-
-        BATCH_A["Batch A<br/>请求 1,3"]
-        BATCH_B["Batch B<br/>请求 2"]
-
-        LORA_A["LoRA-A 前向"]
-        LORA_B["LoRA-B 前向"]
-
-        MERGE["合并输出"]
-
-        REQ1 --> GROUP
-        REQ2 --> GROUP
-        REQ3 --> GROUP
-
-        GROUP --> BATCH_A
-        GROUP --> BATCH_B
-
-        BATCH_A --> LORA_A
-        BATCH_B --> LORA_B
-
-        LORA_A --> MERGE
-        LORA_B --> MERGE
-    end
-```
+{{< stateboard >}}
+title: 混合批里的适配器选择
+rows: ["请求", "适配器", "共享基座"]
+steps:
+  - title: "接收三条请求"
+    detail: "A 和 C 指定 α，B 指定 β，三者运行同一个基座模型。"
+    cells: [["A", "B", "C"], ["α", "β", "α"], ["W", "W", "W"]]
+    focus: [[1, 0], [1, 1], [1, 2]]
+  - title: "计算基础投影"
+    detail: "三条输入都使用 W 的投影结果，批内保留各自的请求映射。"
+    cells: [["A", "B", "C"], ["α", "β", "α"], ["Wx₁", "Wx₂", "Wx₃"]]
+    focus: [[2, 0], [2, 1], [2, 2]]
+  - title: "加回低秩增量"
+    detail: "每个位置只叠加它所选适配器的增量，A 与 C 可共用 α 的权重。"
+    cells: [["A", "B", "C"], ["Δα", "Δβ", "Δα"], ["Wx₁", "Wx₂", "Wx₃"]]
+    focus: [[1, 0], [1, 1], [1, 2]]
+{{< /stateboard >}}
 
 ### SGMV 内核优化
 
@@ -386,8 +361,8 @@ class DynamicLoRALoader:
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
 | `--lora-paths` | LoRA 路径映射 | 无 |
-| `--max-loras-per-batch` | 批次内最大 LoRA 数 | 4 |
-| `--max-num-batched-tokens` | 最大批处理 tokens | 8192 |
+| `--max-loras-per-batch` | 运行批次允许的适配器个数，含仅用基座的请求 | 8 |
+| `--max-loras-per-batch` 与 `--max-running-requests` | 分别约束适配器种类与在运行请求数 | 需结合负载选择 |
 
 ### 推理参数
 
@@ -495,7 +470,7 @@ curl http://localhost:30000/v1/models
 ```bash
 # 减少同时加载的 LoRA 数
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --lora-paths my-lora=/path/to/lora \
     --max-loras-per-batch 2  # 减少数量
 ```
@@ -509,29 +484,4 @@ python -m sglang.launch_server \
 ```
 
 ---
-
-## 小结
-
-### 要点回顾
-
-1. **原理**：低秩分解，高效微调
-2. **多适配器**：LRU 管理，动态加载
-3. **批处理**：SGMV 内核优化
-4. **内存**：权重共享，按需加载
-
-### 支持特性
-
-| 特性 | 支持情况 |
-|------|---------|
-| 多适配器 | 支持 |
-| 动态切换 | 支持 |
-| 批量推理 | 支持 |
-| SGMV 优化 | 支持 |
-
-### 下一章预告
-
-在下一章《多模态支持》中，我们将：
-- 了解 VLM 推理架构
-- 学习图像处理流程
-- 掌握视频理解实现
 

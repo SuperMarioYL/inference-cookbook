@@ -1,407 +1,81 @@
 ---
-title: "生产环境部署指南"
+title: "部署 Store 并接入推理引擎"
 weight: 1
 ---
 
-[上一篇](../09-performance/02-monitoring.md) | [目录](../README.md) | [下一篇](../11-summary/01-summary-and-future.md)
+这条部署路径先在一台 Linux 主机上验证三个进程：Master 管对象名与副本信息，Store 服务贡献 DRAM 并提供调试 HTTP 入口，独立 Python 读者只读，自己不贡献空间。三者先用 TCP。把相同配置迁到两台机器时，能分别定位控制面不可达、数据面不可达和内容不一致。
 
-# 生产环境部署指南
+## 安装与启动
 
-## 13.1 部署架构
-
-### 13.1.1 单集群部署
-
-```mermaid
-graph TB
-    subgraph "Control Plane"
-        etcd1[etcd Node 1]
-        etcd2[etcd Node 2]
-        etcd3[etcd Node 3]
-        Master[Master Service<br/>Active]
-        MasterStandby[Master Service<br/>Standby]
-    end
-
-    subgraph "Data Plane - Prefill Nodes"
-        P1[Prefill Node 1<br/>GPU + RDMA]
-        P2[Prefill Node 2<br/>GPU + RDMA]
-        P3[Prefill Node 3<br/>GPU + RDMA]
-    end
-
-    subgraph "Data Plane - Decode Nodes"
-        D1[Decode Node 1<br/>GPU + RDMA]
-        D2[Decode Node 2<br/>GPU + RDMA]
-        D3[Decode Node 3<br/>GPU + RDMA]
-    end
-
-    subgraph "Storage Layer"
-        SSD1[(NVMe SSD Pool)]
-    end
-
-    etcd1 <--> etcd2 <--> etcd3
-    Master --> etcd1
-    MasterStandby -.-> etcd1
-
-    P1 & P2 & P3 <-->|RDMA| D1 & D2 & D3
-    P1 & P2 & P3 --> Master
-    D1 & D2 & D3 --> Master
-    D1 & D2 & D3 --> SSD1
-
-    Master <-.->|Failover| MasterStandby
-```
-
-### 13.1.2 多集群联邦部署
-
-```mermaid
-graph TB
-    subgraph "Cluster A - Region 1"
-        MA[Master A]
-        PA1[Prefill A1]
-        PA2[Prefill A2]
-        DA1[Decode A1]
-    end
-
-    subgraph "Cluster B - Region 2"
-        MB[Master B]
-        PB1[Prefill B1]
-        DB1[Decode B1]
-        DB2[Decode B2]
-    end
-
-    subgraph "Global Load Balancer"
-        GLB[Global LB]
-    end
-
-    GLB --> MA
-    GLB --> MB
-
-    PA1 & PA2 <-->|Cross-Region RDMA| PB1
-    DA1 <-->|Cross-Region RDMA| DB1 & DB2
-```
-
-## 13.2 硬件配置建议
-
-### 13.2.1 网络配置
-
-| 组件 | 推荐配置 | 最低配置 |
-|------|----------|----------|
-| RDMA NIC | Mellanox ConnectX-7 200Gbps | ConnectX-6 100Gbps |
-| 交换机 | InfiniBand HDR 200Gbps | RoCE 100Gbps |
-| 网络拓扑 | Fat-tree, 全对分带宽 | 3:1 收敛比 |
-| MTU | 4096+ (RDMA) | 1500 (TCP fallback) |
-
-### 13.2.2 存储配置
-
-```mermaid
-graph TB
-    subgraph "推荐存储层次"
-        L1[GPU HBM<br/>~80GB, ~3TB/s]
-        L2[Host DRAM<br/>256GB-1TB, ~200GB/s]
-        L3[NVMe SSD<br/>2-8TB, ~7GB/s]
-    end
-
-    L1 -->|溢出| L2
-    L2 -->|溢出| L3
-
-    style L1 fill:#FFD700
-    style L2 fill:#90EE90
-    style L3 fill:#87CEEB
-```
-
-### 13.2.3 NUMA 配置
+非 CUDA 的 Python wheel 足以执行下面的 CPU 实验。新建虚拟环境，按[快速开始](/mooncake/00-beginner-guide/03-quick-start-tutorial/)安装系统依赖，随后在三个终端分别激活同一环境。安装 `aiohttp` 供调试 HTTP 服务使用。GPU 部署要另选匹配的包；上游提供 `kvcacheai/mooncake:0.3.14-cuda12` 和 `0.3.14-cuda13` 镜像。轮子的 Python、平台和运行库约束分别以目标变体为准。[官方安装矩阵](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/docs/source/getting_started/quick-start.md)
 
 ```bash
-# 检查 NUMA 拓扑
-numactl --hardware
-
-# 推荐配置：每个 NUMA 节点运行独立的服务实例
-# Node 0: Master Service + Client for GPU 0-3
-# Node 1: Client for GPU 4-7
-
-# 绑定进程到特定 NUMA 节点
-numactl --cpunodebind=0 --membind=0 ./mooncake_master
-numactl --cpunodebind=1 --membind=1 ./client_instance
+python -m pip install 'mooncake-transfer-engine-non-cuda==0.3.14' aiohttp
+mooncake_master --rpc_port=50051 --metrics_port=9003
 ```
 
-## 13.3 配置文件示例
-
-### 13.3.1 Master Service 配置
-
-```yaml
-# master_config.yaml
-server:
-  address: "0.0.0.0:50051"
-  max_connections: 1000
-  request_timeout_ms: 30000
-
-metadata:
-  type: "etcd"
-  endpoints:
-    - "etcd1:2379"
-    - "etcd2:2379"
-    - "etcd3:2379"
-  ttl_seconds: 30
-
-storage:
-  allocator_type: "offset"  # "cachelib" or "offset"
-  eviction_policy: "lru"
-  eviction_threshold: 0.85
-  eviction_target: 0.75
-
-high_availability:
-  enabled: true
-  lease_ttl_seconds: 10
-  anti_split_brain_wait_ms: 15000
-
-metrics:
-  enabled: true
-  prometheus_port: 9090
-  report_interval_seconds: 10
-```
-
-### 13.3.2 Transfer Engine 配置
-
-```yaml
-# transfer_engine_config.yaml
-segment:
-  name: "node001"
-  type: "DRAM"  # "DRAM" or "VRAM"
-  size_bytes: 68719476736  # 64GB
-
-transport:
-  type: "rdma"
-  devices:
-    - "mlx5_0"
-    - "mlx5_1"
-  max_qp_depth: 128
-  max_sge: 1
-  relaxed_ordering: true
-
-metadata:
-  type: "etcd"
-  endpoints:
-    - "etcd1:2379"
-    - "etcd2:2379"
-
-slice:
-  size_bytes: 65536  # 64KB
-
-async:
-  max_pending_transfers: 1000
-  completion_poll_threads: 2
-```
-
-### 13.3.3 客户端配置
-
-```yaml
-# client_config.yaml
-master:
-  endpoints:
-    - "master1:50051"
-    - "master2:50051"
-  connect_timeout_ms: 5000
-  request_timeout_ms: 10000
-
-transfer:
-  batch_size: 128
-  prefetch_enabled: true
-  prefetch_threshold: 0.7
-
-metrics:
-  enabled: true
-  cluster_id: "prod-cluster-1"
-  report_interval_seconds: 30
-
-retry:
-  max_attempts: 3
-  initial_backoff_ms: 100
-  max_backoff_ms: 5000
-```
-
-## 13.4 运维操作手册
-
-### 13.4.1 健康检查
+第二个终端启动贡献容量的服务。`--port=8081` 属于此 Python 进程。Master 仍在 50051；使用 `P2PHANDSHAKE` 时不需要另起 HTTP 元数据服务。
 
 ```bash
-#!/bin/bash
-# health_check.sh
-
-# 检查 Master 服务
-check_master() {
-    response=$(curl -s -o /dev/null -w "%{http_code}" \
-        http://localhost:9090/health)
-    if [ "$response" != "200" ]; then
-        echo "ERROR: Master service unhealthy"
-        return 1
-    fi
-    echo "OK: Master service healthy"
-}
-
-# 检查 etcd 集群
-check_etcd() {
-    etcdctl endpoint health --endpoints=etcd1:2379,etcd2:2379,etcd3:2379
-}
-
-# 检查 RDMA 连接
-check_rdma() {
-    ibstat | grep -E "State:|Physical state:"
-    if ! ibstat | grep -q "Active"; then
-        echo "WARNING: RDMA port not active"
-        return 1
-    fi
-}
-
-# 检查内存使用
-check_memory() {
-    usage=$(curl -s http://localhost:9090/metrics | \
-        grep "mooncake_master_mem_allocated_size" | \
-        awk '{print $2}')
-    capacity=$(curl -s http://localhost:9090/metrics | \
-        grep "mooncake_master_mem_total_capacity" | \
-        awk '{print $2}')
-    ratio=$(echo "scale=2; $usage / $capacity" | bc)
-    echo "Memory usage: $ratio"
-    if (( $(echo "$ratio > 0.95" | bc -l) )); then
-        echo "WARNING: Memory usage above 95%"
-        return 1
-    fi
-}
-
-# 运行所有检查
-check_master && check_etcd && check_rdma && check_memory
+MOONCAKE_MASTER=127.0.0.1:50051 \
+MOONCAKE_LOCAL_HOSTNAME=127.0.0.1 \
+MOONCAKE_TE_META_DATA_SERVER=P2PHANDSHAKE \
+MOONCAKE_PROTOCOL=tcp \
+MOONCAKE_GLOBAL_SEGMENT_SIZE=128mb \
+MOONCAKE_LOCAL_BUFFER_SIZE=64mb \
+python -m mooncake.mooncake_store_service --port=8081
 ```
 
-### 13.4.2 故障恢复
+第三个终端先检查 Master，再发一组实际的 PUT/GET。REST 测试入口接收 JSON 中的文本，GET 返回原始字节；二进制 tensor 建议走[注册缓冲的 Python 接口](/mooncake/08-integration/03-python-api-overview/)。
+
+```bash
+curl -fsS http://127.0.0.1:9003/metrics/summary
+curl -fsS -X PUT 'http://127.0.0.1:8081/api/put' \
+  -H 'Content-Type: application/json' \
+  -d '{"key":"manual-v1","value":"shared-manual"}'
+curl -fsS http://127.0.0.1:8081/api/get/manual-v1
+```
+
+预期最后一条输出 `shared-manual`。再用独立 Python 进程从同一个 Master 查这个 key。把 `global_segment_size` 设为 0，让该进程只提供自己的传输缓冲，不成为存储节点。启动时设置 `MC_STORE_MEMCPY=0` 并指定 `protocol="tcp"`，以此次读回验证同机跨进程 TCP。以下脚本保存为 `read_manual.py`，用 `MC_STORE_MEMCPY=0 python read_manual.py` 执行。
+
+```python
+from mooncake.store import MooncakeDistributedStore
+
+store = MooncakeDistributedStore()
+try:
+    status = store.setup(
+        local_hostname="127.0.0.1", metadata_server="P2PHANDSHAKE",
+        global_segment_size=0, local_buffer_size=64 * 1024**2,
+        protocol="tcp", rdma_devices="", master_server_addr="127.0.0.1:50051",
+    )
+    assert status == 0, status
+    assert store.get("manual-v1") == b"shared-manual"
+    print("reader verified 13 bytes")
+finally:
+    store.close()
+```
+
+以上命令在 Linux amd64、Python 3.12.11 和 Mooncake 非 CUDA wheel 0.3.14 下完成验证。REST 实际返回 `shared-manual`，独立 reader 输出 `reader verified 13 bytes`。两端运行在同一容器，此验证覆盖跨进程 TCP，未测量物理网卡与 RDMA。
+
+## 三个进程怎样连起来
 
 ```mermaid
-flowchart TD
-    Start[检测到故障] --> Type{故障类型?}
-
-    Type -->|Master 宕机| M1[检查 etcd Leader 选举]
-    M1 --> M2{新 Leader 选出?}
-    M2 -->|是| M3[验证服务恢复]
-    M2 -->|否| M4[手动干预:<br/>检查 etcd 集群状态]
-
-    Type -->|RDMA 链路故障| R1[检查物理连接]
-    R1 --> R2[重启 RDMA 端口]
-    R2 --> R3[验证连接恢复]
-    R3 -->|失败| R4[切换到 TCP Fallback]
-
-    Type -->|内存耗尽| E1[触发紧急驱逐]
-    E1 --> E2[检查驱逐是否成功]
-    E2 -->|失败| E3[扩容或手动清理]
-
-    Type -->|节点宕机| N1[检查 Segment 状态]
-    N1 --> N2[标记 Segment 不可用]
-    N2 --> N3[重新路由请求]
-    N3 --> N4[节点恢复后 ReMountSegment]
+flowchart LR
+    R["独立读者，无贡献容量"] -->|"查 manual-v1 的副本"| M["Master · 50051"]
+    S["Store 服务，拥有 DRAM"] -->|"挂载 segment、发布对象"| M
+    R -->|"TCP 读取对象内容"| S
+    H["调试 HTTP 客户端"] -->|"PUT 或 GET · 8081"| S
 ```
 
-### 13.4.3 扩容操作
+切换为跨机时，writer 和 reader 的 `local_hostname` 都应是对端可以实际访问的网卡地址，Master 地址也要改为双方可达的地址。`P2PHANDSHAKE` 表示点对点元数据交换，同样可以用于跨机；仍需要对端可达的数据端口。先在 A 上写入，保持 A 的贡献进程运行，在 B 上用零贡献 reader 校对内容，再更换 RDMA 协议。涉及 RDMA 时另核对 NIC、权限、内存注册和流量计数器。[部署与网络配置](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/docs/source/deployment/mooncake-store-deployment-guide.md)
 
-```bash
-#!/bin/bash
-# scale_out.sh - 添加新节点
+| 观察结果 | 下一项检查 |
+|---|---|
+| Master 的 metrics 可达，写入失败 | 是否存在已挂载且有可用空间的 segment，服务进程的 setup 是否成功。 |
+| HTTP GET 成功，独立 reader 失败 | reader 的 Master/tenant 是否一致，Store 节点公布的网络地址能否从 reader 访问。 |
+| 增加存储节点之后仍有旧数据丢失 | 增容只新增可放置容量。移除旧节点前确认原对象有其他可读副本或已完成持久化。 |
+| Store 字节能读通，引擎没有缓存收益 | 查 vLLM 的外部前缀查找与加载完成，或 SGLang 的 HiCache 实际层级命中，再检查是否发出了同一 token 前缀。 |
 
-NEW_NODE=$1
-MASTER_ADDR=$2
+部署推理引擎前，先决定是否需要按 key 共享对象。vLLM 的 `MooncakeStoreConnector` 使用共享 Store；`MooncakeConnector` 用 P/D 直接交接已注册的设备块，要额外部署遵循 transfer ID 协议的代理。[vLLM 接入](/mooncake/08-integration/01-vllm-integration/) · [Store 和直传的生命周期](/mooncake/12-code-walkthrough/03-kvcache-lifecycle/)
 
-# 1. 验证新节点 RDMA 连通性
-echo "Testing RDMA connectivity..."
-ibping -S -C mlx5_0 &
-sleep 2
-ssh $NEW_NODE "ibping -c 1000 -C mlx5_0 $(hostname)"
-
-# 2. 在新节点上启动服务
-echo "Starting services on new node..."
-ssh $NEW_NODE << 'EOF'
-    # 设置环境变量
-    export MC_MASTER_ADDR=$MASTER_ADDR
-    export MC_SEGMENT_SIZE=68719476736
-
-    # 启动 Transfer Engine
-    ./mooncake_client --config=/etc/mooncake/client.yaml &
-
-    # 等待服务就绪
-    sleep 5
-
-    # 挂载 Segment
-    ./mc_admin mount_segment \
-        --name="$(hostname)" \
-        --size=$MC_SEGMENT_SIZE \
-        --master=$MC_MASTER_ADDR
-EOF
-
-# 3. 验证新节点已注册
-echo "Verifying node registration..."
-./mc_admin list_segments --master=$MASTER_ADDR | grep $NEW_NODE
-
-echo "Scale-out complete!"
-```
-
-### 13.4.4 滚动升级
-
-```bash
-#!/bin/bash
-# rolling_upgrade.sh
-
-NODES="node1 node2 node3 node4"
-NEW_VERSION=$1
-
-for node in $NODES; do
-    echo "Upgrading $node to $NEW_VERSION..."
-
-    # 1. 标记节点进入维护模式
-    ./mc_admin set_node_status $node MAINTENANCE
-
-    # 2. 等待现有请求完成
-    echo "Draining connections..."
-    sleep 30
-
-    # 3. 停止服务
-    ssh $node "systemctl stop mooncake"
-
-    # 4. 更新二进制
-    scp mooncake-$NEW_VERSION.tar.gz $node:/tmp/
-    ssh $node << EOF
-        cd /opt/mooncake
-        tar -xzf /tmp/mooncake-$NEW_VERSION.tar.gz
-        ln -sf mooncake-$NEW_VERSION current
-EOF
-
-    # 5. 启动服务
-    ssh $node "systemctl start mooncake"
-
-    # 6. 健康检查
-    echo "Waiting for health check..."
-    for i in {1..30}; do
-        if ssh $node "curl -s localhost:9090/health" | grep -q "ok"; then
-            echo "$node healthy"
-            break
-        fi
-        sleep 2
-    done
-
-    # 7. 恢复节点
-    ./mc_admin set_node_status $node ACTIVE
-
-    echo "$node upgraded successfully"
-    sleep 10  # 冷却时间
-done
-
-echo "Rolling upgrade complete!"
-```
-
-## 13.5 本章小结
-
-本章涵盖了 Mooncake 生产环境部署的关键方面：
-
-1. **部署架构**：单集群和多集群联邦部署模式
-2. **硬件配置**：网络、存储和 NUMA 的最佳实践
-3. **配置管理**：Master、Transfer Engine 和客户端配置
-4. **运维操作**：健康检查、故障恢复、扩容和升级流程
-
-这些指南基于实际生产环境经验，帮助运维团队快速部署和管理 Mooncake 集群。
-
----
-
-[上一篇](../09-performance/02-monitoring.md) | [目录](../README.md) | [下一篇](../11-summary/01-summary-and-future.md)
+实验结束时先停读者与发请求的服务，再停贡献 segment 的进程，最后停 Master。以上实验使用 DRAM，重启全部进程后需要重新写入。希望保留数据或验证故障转移时，按具体副本策略和 [HA/SSD 部署流程](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/docs/source/deployment/mooncake-store-deployment-guide.md)另做恢复测试。

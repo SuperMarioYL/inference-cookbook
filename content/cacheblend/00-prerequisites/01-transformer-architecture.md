@@ -3,35 +3,22 @@ title: "Transformer 架构详解"
 weight: 1
 ---
 
-> 本文面向深度学习开发者，详细介绍 Transformer 架构的核心组件和实现细节，为理解 CacheBlend 打下基础。
+把两段文档连到同一条提示里，第二段的 token 就能看到第一段。这个依赖来自每层的因果自注意力，也是 CacheBlend 需要重新计算一部分位置的原因。
 
 ---
 
-## 目录
-
-- [1. Transformer 架构概述](#1-transformer-架构概述)
-- [2. Encoder-Decoder vs Decoder-Only](#2-encoder-decoder-vs-decoder-only)
-- [3. Decoder Block 详解](#3-decoder-block-详解)
-- [4. Multi-Head Attention](#4-multi-head-attention)
-- [5. Feed-Forward Network](#5-feed-forward-network)
-- [6. Layer Normalization](#6-layer-normalization)
-- [7. Residual Connection](#7-residual-connection)
-- [8. Position Encoding](#8-position-encoding)
-
----
 
 ## 1. Transformer 架构概述
 
-Transformer 是 2017 年由 Google 在论文 "Attention Is All You Need" 中提出的架构，彻底改变了自然语言处理领域。与 RNN/LSTM 不同，Transformer 完全基于注意力机制（Attention Mechanism），能够并行处理序列数据。
+Transformer 的一层先让各位置读取可见的上下文，再对每个位置做前馈变换。对 CacheBlend 来说，两段文字能否共用旧 KV，首先取决于哪些 token 的上文发生了变化。
 
-### 1.1 核心优势
+### 1.1 哪些位置可以一起算
 
-| 特性 | RNN/LSTM | Transformer |
-|------|----------|-------------|
-| 并行计算 | 无法并行（顺序依赖） | 可以并行（无顺序依赖） |
-| 长距离依赖 | 梯度消失问题 | 直接建模（注意力机制） |
-| 训练速度 | 慢 | 快 |
-| 计算复杂度 | O(n) | O(n²)（但可优化） |
+| 操作 | 同一层的位置依赖 |
+|------|-----------------|
+| RNN 处理一条序列 | 第 $t$ 步需要前一步的隐状态，时间步按顺序推进。 |
+| Transformer 处理已给定的提示词 | 输入位置已经齐备，可以并行计算各行的查询。因果 mask 决定一行能读到哪些键。 |
+| 自回归解码 | 下一次输入取决于这一轮采样出的 token。不同请求可以合批，同一请求仍逐轮生成。 |
 
 ### 1.2 整体架构
 
@@ -462,8 +449,6 @@ def rotate_half(x):
 ---
 
 ## 总结
-
-本文介绍了 Transformer 架构的核心组件：
 
 1. **Decoder-Only 架构**: 现代 LLM 的主流选择
 2. **Multi-Head Attention**: 并行计算多个注意力子空间

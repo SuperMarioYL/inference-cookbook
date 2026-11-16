@@ -3,7 +3,7 @@ title: "数据结构"
 weight: 2
 ---
 
-本文档详细介绍 CacheBlend 实现中的核心数据结构，包括 `cache_fuse_metadata` 配置字典、`old_kvs` KV 缓存管理以及 `hack_kv` 机制。
+原型用三份状态衔接两次前向。`hack_kv` 保存某层刚收集的张量，`old_kvs` 按层保存组合好的文档缓存，`cache_fuse_metadata` 记录本次检查层和入选位置。
 
 ## cache_fuse_metadata 详解
 
@@ -25,7 +25,7 @@ self.cache_fuse_metadata = {
 
     # === 临时数据 ===
     "fake_q": None,              # 用于旋转旧 K 的虚拟 query
-    "org_pos": None,             # 原始位置编码
+    "org_pos": None,             # 组合输入在筛选前的完整位置向量
     "org_seq_len": None,         # 原始序列长度
 
     # === 缓存和索引 ===
@@ -72,7 +72,7 @@ graph TB
 | `check_layers` | List[int] | 执行 HKVD 选择的层索引列表，默认 [1] |
 | `recomp_ratio` | float | 重计算 token 的比例，默认 0.16 (16%) |
 | `fake_q` | Tensor | 用于旋转旧 K 向量的虚拟 Query，任意值即可 |
-| `org_pos` | Tensor | 原始位置编码，用于正确旋转旧 KV |
+| `org_pos` | Tensor | 组合输入在筛选前的完整位置向量，用于正确旋转旧 KV |
 | `org_seq_len` | int | 原始输入序列长度 |
 | `imp_indices` | Tensor | 选定的 HKVD token 索引 |
 | `attn_bias` | AttentionBias | 特殊的注意力掩码（LowerTriangularFromBottomRightMask） |

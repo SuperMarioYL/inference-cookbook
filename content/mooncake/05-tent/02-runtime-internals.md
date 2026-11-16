@@ -3,19 +3,13 @@ title: "TENT 运行时内部机制"
 weight: 2
 ---
 
-# TENT 运行时内部机制
-
-[上一篇](01-design-overview.md) | [目录](../README.md) | [下一篇](03-transport-backends.md)
-
----
-
-本文深入分析 TENT 运行时的内部实现，覆盖核心类 `TransferEngineImpl` 的初始化与传输提交流程、控制平面的元数据管理、Segment 抽象体系、ProxyManager 分级传输机制、MemoryProber 设备探测，以及底层并发基础设施。
+TENT 收到一份源地址、目的 segment 和长度后，要找到可达的 transport，再把任务交给相应队列。若需要中转，运行时还要管理中间缓冲和两段传输的顺序。
 
 ---
 
 ## 1. TransferEngineImpl 核心运行时
 
-`TransferEngineImpl` 是 TENT 的中枢类，位于 `tent/runtime/transfer_engine_impl.h`。它协调所有传输后端、管理 Segment 生命周期、并提供面向应用的完整 API。
+`TransferEngineImpl` 是 TENT 的中枢类，位于 `mooncake-transfer-engine/tent/include/tent/runtime/transfer_engine_impl.h`。它协调所有传输后端、管理 Segment 生命周期、并提供面向应用的完整 API。
 
 ### 1.1 核心数据结构
 
@@ -92,7 +86,7 @@ TransferEngineImpl 的公开 API 可以分为四个功能域：
 
 ## 2. Control Plane 控制平面
 
-控制平面由 `ControlService` 和 `ControlClient` 两个类组成，位于 `tent/runtime/control_plane.h`。
+控制平面由 `ControlService` 和 `ControlClient` 两个类组成，位于 `mooncake-transfer-engine/tent/include/tent/runtime/control_plane.h`。
 
 ### 2.1 ControlService
 
@@ -178,36 +172,33 @@ struct SegmentDesc {
 
 ## 4. ProxyManager 分级传输
 
-`ProxyManager` 是 TENT 实现跨协议传输的核心组件，位于 `tent/runtime/proxy_manager.h`。当源和目的地之间没有直接传输路径时（例如 GPU 到远端 GPU 需要经过主机内存中转），ProxyManager 自动构建分级传输路径。
+`ProxyManager` 是 TENT 实现跨协议传输的核心组件，位于 `mooncake-transfer-engine/tent/include/tent/runtime/proxy_manager.h`。当源和目的地之间没有直接传输路径时（例如 GPU 到远端 GPU 需要经过主机内存中转），ProxyManager 自动构建分级传输路径。
 
 ### 4.1 设计原理
 
 分级传输将一个逻辑传输拆分为多个阶段：
 
-```mermaid
-sequenceDiagram
-    participant Src as 源设备<br/>(如 GPU A)
-    participant LBuf as 本地 Stage Buffer<br/>(主机内存)
-    participant RBuf as 远端 Stage Buffer<br/>(主机内存)
-    participant Dst as 目标设备<br/>(如 GPU B)
-
-    Note over Src, Dst: 分级传输流程 (3 阶段)
-
-    rect rgb(200, 220, 255)
-        Note over Src, LBuf: 阶段 1 - Local Stage
-        Src->>LBuf: NVLink/PCIe 拷贝<br/>GPU 到主机内存
-    end
-
-    rect rgb(220, 255, 220)
-        Note over LBuf, RBuf: 阶段 2 - Cross Stage
-        LBuf->>RBuf: RDMA/TCP 传输<br/>跨节点主机内存
-    end
-
-    rect rgb(255, 220, 200)
-        Note over RBuf, Dst: 阶段 3 - Remote Stage
-        RBuf->>Dst: NVLink/PCIe 拷贝<br/>主机内存到 GPU
-    end
-```
+{{< trace >}}
+title: "没有直连时，一次数据怎样中转"
+actors: ["源设备", "代理运行时", "主机缓冲", "目标设备"]
+steps:
+  - from: 0
+    to: 1
+    label: "提交目的地"
+    detail: "调用者指定目标 segment、偏移和长度。"
+  - from: 1
+    to: 2
+    label: "安排中转"
+    detail: "当前拓扑缺少可用的直连路径，运行时为这次 staged transfer 安排主机缓冲。"
+  - from: 0
+    to: 2
+    label: "填充缓冲"
+    detail: "源数据先到达中间位置，下一段依赖这一段完成。"
+  - from: 2
+    to: 3
+    label: "送达目的地"
+    detail: "第二段传输结束后，目标设备可以取得同一批字节。"
+{{< /trace >}}
 
 ### 4.2 核心组件
 
@@ -239,7 +230,7 @@ ProxyManager 使用 chunk 机制管理 stage buffer：
 
 ## 5. Memory Prober 内存探测
 
-`MemoryProber` 是 TENT 的设备内存探测器，采用插件化架构实现平台无关的内存管理。位于 `tent/runtime/memory_prober.h`。
+`MemoryProber` 是 TENT 的设备内存探测器，采用插件化架构实现平台无关的内存管理。位于 `mooncake-transfer-engine/tent/include/tent/runtime/memory_prober.h`。
 
 ### 5.1 设计特点
 
@@ -283,31 +274,27 @@ typedef struct device_plugin_t {
 
 以下流程图展示了一个传输请求从应用层提交到最终完成的完整处理路径：
 
-```mermaid
-flowchart TB
-    A["应用调用 submitTransfer(batch_id, requests)"] --> B["获取 Batch 对象"]
-    B --> C{"Batch 有效?"}
-    C -->|"否"| ERR1["返回 InvalidArgument"]
-    C -->|"是"| D["遍历 request_list"]
-    D --> E["resolveTransport(req, priority)"]
-    E --> F{"找到直接传输路径?"}
-
-    F -->|"是"| G["创建 TaskInfo"]
-    G --> H["设置 type = 解析到的 TransportType"]
-    H --> I["将任务加入 Batch"]
-
-    F -->|"否"| J["findStagingPolicy(req, policy)"]
-    J --> K{"存在分级策略?"}
-    K -->|"是"| L["创建 TaskInfo, staging=true"]
-    L --> M["提交到 ProxyManager"]
-    K -->|"否"| ERR2["返回 TransportUnavailable"]
-
-    I --> N["maybeFireSubmitHooks(batch)"]
-    M --> N
-    N --> O["按 TransportType 分组任务"]
-    O --> P["对每组调用 transport->submitTransferTasks()"]
-    P --> Q["返回 Status"]
-```
+{{< trace >}}
+title: "一个 TENT batch 怎样分给多个后端"
+actors: ["调用方", "批次表", "运行时", "后端队列", "完成状态"]
+steps:
+  - from: 0
+    to: 1
+    label: "提交请求"
+    detail: "调用者提交 batch ID 与一组传输请求。"
+  - from: 1
+    to: 2
+    label: "找到批次"
+    detail: "运行时根据批次及源、目的数据位置确定可用路径。"
+  - from: 2
+    to: 3
+    label: "分组提交"
+    detail: "沿已选 transport 分组，把任务投入对应的数据通路。"
+  - from: 3
+    to: 4
+    label: "收集进度"
+    detail: "各部分完成时更新任务状态，调用方据此决定何时消费目的缓冲。"
+{{< /trace >}}
 
 ### 6.1 传输类型解析
 
@@ -346,7 +333,7 @@ TENT 运行时大量依赖高性能并发原语，以下是核心组件：
 
 ### 7.1 BoundedMPSCQueue -- 有界多生产者单消费者队列
 
-位于 `tent/common/concurrent/bounded_mpsc_queue.h`，这是 RDMA Worker 线程的核心数据结构。
+位于 `mooncake-transfer-engine/tent/include/tent/common/concurrent/bounded_mpsc_queue.h`，这是 RDMA Worker 线程的核心数据结构。
 
 **设计特点：**
 - 基于环形缓冲区，容量固定 (默认 8192)
@@ -386,7 +373,3 @@ TENT 运行时的内部机制围绕以下核心设计展开：
 - **高性能并发原语** (lock-free queue, spinlock, TLS) 保障数据通路的低延迟
 
 这些组件共同构成了 TENT "声明式传输、运行时决策" 的技术基础。
-
----
-
-[上一篇](01-design-overview.md) | [目录](../README.md) | [下一篇](03-transport-backends.md)

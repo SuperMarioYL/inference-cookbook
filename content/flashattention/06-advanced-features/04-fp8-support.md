@@ -26,7 +26,7 @@ weight: 4
 - **2× 理论 FLOPS**：Hopper 架构的 FP8 Tensor Core 吞吐量是 FP16 的两倍
 - **更大的 Tile 尺寸**：SMEM 中可以放下更多数据，减少 GMEM 加载次数
 
-Flash Attention v2.8.3 支持 Hopper（SM90）上的 E4M3 格式 FP8，仅限前向传播。
+本篇跟踪 FA3 的 Hopper（SM90）实现：E4M3 Q/K/V 用于前向，输出为 BF16。FA2 CUDA 稳定包公开支持的输入是 FP16/BF16。FA4 的 low-precision 路径有独立的缩放接口和形状约束，选用时需核对所用 tag 的 `scales` 参数。[FA3 支持说明](https://github.com/Dao-AILab/flash-attention/blob/fa4-v4.0.0.beta39/README.md#flashattention-3-beta-release) · [FA4 接口](https://github.com/Dao-AILab/flash-attention/blob/fa4-v4.0.0.beta39/flash_attn/cute/interface.py)
 
 ### 1.2 支持范围
 
@@ -85,42 +85,29 @@ params.is_e4m3 = qkv_dtype == at::ScalarType::Float8_e4m3fn;
 
 ### 3.1 整体数据流
 
-FP8 Flash Attention 的数据流与 FP16/BF16 有显著不同。输入以 FP8 格式加载和计算，但中间结果保持 FP32 精度，最终输出为 BF16：
+FA3 Hopper 的这条前向路径读取 E4M3 输入，分数和指数和采用高精度累加。传给 PV 的权重需要再转为低精度，最终 O 写成 BF16。
 
-```mermaid
-graph LR
-    subgraph input["输入（FP8 E4M3）"]
-        Q_fp8["Q (E4M3)"]
-        K_fp8["K (E4M3)"]
-        V_fp8["V (E4M3)"]
-    end
-
-    subgraph gemm1["GEMM QK^T"]
-        QK["FP8 × FP8 → FP32 累加"]
-    end
-
-    subgraph scale["缩放与 Softmax"]
-        DS["× q_descale × k_descale"]
-        SM["Softmax (FP32)"]
-        P_fp8["P → E4M3 转换<br/>（Max_offset 扩展范围）"]
-    end
-
-    subgraph gemm2["GEMM PV"]
-        PV["E4M3 × E4M3 → FP32 累加"]
-    end
-
-    subgraph output["输出"]
-        DS2["× v_descale"]
-        O_bf16["O (BF16)"]
-    end
-
-    Q_fp8 --> QK
-    K_fp8 --> QK
-    QK --> DS --> SM --> P_fp8
-    V_fp8 --> PV
-    P_fp8 --> PV
-    PV --> DS2 --> O_bf16
-```
+{{< stateboard >}}
+title: "Hopper 上 FP8 前向的中间表示"
+rows: ["阶段", "数据", "表示"]
+steps:
+  - title: "输入"
+    detail: "FA3 Hopper 此处采用 E4M3 输入，缩放因子按实际量化方式传入。"
+    cells: [["载入"], ["Q、K、V"], ["E4M3"]]
+    focus: [[1, 0], [2, 0]]
+  - title: "计算权重"
+    detail: "QK 分数及行最大值、指数和用高精度累加；生成当前块用于 PV 的未归一化权重。"
+    cells: [["QK 与行统计"], ["S 与指数"], ["FP32"]]
+    focus: [[1, 0], [2, 0]]
+  - title: "执行 PV"
+    detail: "传给低精度矩阵乘的权重转换为 E4M3。偏移缩放降低小权重在这次转换中下溢的机会。"
+    cells: [["PV"], ["权重与 V"], ["E4M3"]]
+    focus: [[1, 0], [2, 0]]
+  - title: "写回输出"
+    detail: "归一化和相应 descale 处理后，这条 FA3 FP8 路径的输出是 BF16。"
+    cells: [["写回"], ["O"], ["BF16"]]
+    focus: [[1, 0], [2, 0]]
+{{< /stateboard >}}
 
 ### 3.2 关键设计决策
 
@@ -128,7 +115,7 @@ graph LR
 
 在 FP16/BF16 模式下，P 矩阵（Softmax 输出）在寄存器中以 FP32 计算，转为 FP16/BF16 后参与 PV 的 GMMA。但 FP8 的 Tensor Core 要求两个操作数都是 FP8，因此 P 也必须转换为 E4M3。
 
-这带来了一个挑战：Softmax 的输出范围是 $[0, 1]$，而 E4M3 的精度在这个范围内很低（只有 8 个离散值：0, 0.015625, 0.03125, ...）。Flash Attention 使用 `Max_offset` 技巧来解决这个问题（见第 4 节）。
+在 PV 乘法前，减去行最大值的未归一化指数权重介于 0 和 1 之间；足够小的权重舍入到 E4M3FN 时会变成 0。下面的偏移处理的是这个转换。
 
 ### 3.3 GMMA 布局差异
 
@@ -158,13 +145,11 @@ static_assert(!(!MmaPV_is_RS && Is_FP8), "MmaPV must be RS if FP8");
 
 ### 4.1 问题背景
 
-Softmax 的输出 $P_{ij} = \text{softmax}(S)_{ij} \in [0, 1]$。将 $P$ 转为 E4M3 时，$[0, 1]$ 范围内的精度极其有限，大量信息丢失。
+在 Hopper 前向中，内核需要把未归一化权重转成 FP8 再参与 PV 的矩阵乘。E4M3FN 的最小正次正规数是 $2^{-9}$；比它更小的权重可能舍入为零。
 
 ### 4.2 解决方案
 
-Flash Attention 引入 `Max_offset=8` 模板参数，在 `scale_apply_exp2` 中将 `max` 值减去 8，等价于将 $e^{x - max}$ 变为 $e^{x - max + 8} = e^{x-max} \cdot e^8 = e^{x-max} \cdot 2^{8/\ln 2}$（实际使用 `exp2f`，即 $2^{x-max+8}$）。
-
-这将 Softmax 的输出范围从 $[0, 1]$ 扩展到 $[0, 256]$，有效利用了 E4M3 更多的表示范围：
+以 2 为底实施指数时，在已转换底数的指数上加 8 等价于把权重乘以 256。源数据类型仍是 E4M3FN，最终 softmax 仍归一化为 1。
 
 ```cpp
 // hopper/softmax.h:64-88
@@ -198,28 +183,16 @@ if constexpr (Max_offset != 0) {
 
 ### 4.4 数值示例
 
+取一项未归一化权重 $2^{-12}$。直接转换为 E4M3FN 时会舍入为 0；先乘 256 得到 $2^{-4}$，这次转换可以精确表示。分母和加权和都使用同一缩放，归一化时相消。下面只演示权重转换的数值效果。
+
+```python
+import torch
+
+weight = torch.tensor(2.0**-12)
+direct = weight.to(torch.float8_e4m3fn).float()
+rescaled = (weight * 256).to(torch.float8_e4m3fn).float() / 256
+assert direct.item() == 0 and rescaled.item() == weight.item()
 ```
-原始 Softmax 输出（FP32）:  [0.7, 0.2, 0.05, 0.03, 0.01, 0.01, ...]
-                             sum = 1.0
-
-E4M3（无 Max_offset）:      [0.75, 0.1875, 0.0625, 0.03125, 0, 0, ...]
-                             大量小值被截断为 0
-
-E4M3（Max_offset=8）:        × 256 → [179.2, 51.2, 12.8, 7.68, 2.56, 2.56, ...]
-                             E4M3 表示:  [176, 48, 12, 8, 2.5, 2.5, ...]
-                             小值保留了更多精度
-```
-
-```mermaid
-graph TB
-    subgraph range_compare["E4M3 有效表示"]
-        R1["无 Max_offset<br/>范围 [0, 1]<br/>有效值: 0, 0.015, 0.03, ..., 1<br/>约 8 个离散值"]
-        R2["Max_offset=8<br/>范围 [0, 256]<br/>有效值: 0, 4, 5, 6, ..., 256<br/>约 60+ 个离散值"]
-    end
-    R1 ---|"扩展 256×"| R2
-```
-
----
 
 ## 5. Per-Head Descale 缩放
 
@@ -427,14 +400,14 @@ if constexpr (Is_FP8 && !V_colmajor) { flash::permute_output_fp8(tOrO); }
 | 仅前向 | 反向传播不支持 FP8，梯度计算需要更高精度 |
 | 仅 SM90 | Hopper 的 FP8 Tensor Core 是硬件前提 |
 | 输出为 BF16 | `O` 始终以 BF16 输出，不支持 FP8 输出 |
-| 需要 Descale | 量化和反量化需要用户提供缩放因子 |
+| Descale | 数据使用非单位缩放量化时需传入对应因子，缺省按 1 处理 |
 | 编译开关 | 可通过 `FLASH_ATTENTION_DISABLE_FP8` 编译时禁用 |
 
 ### 8.2 Python API 使用示例
 
 ```python
 import torch
-from flash_attn import flash_attn_func
+from flash_attn_3.flash_attn_interface import flash_attn_func
 
 batch, seqlen, nheads, headdim = 2, 1024, 32, 128
 nheads_k = 8  # GQA
@@ -517,6 +490,6 @@ auto kBlockMN = tile_size_fwd_sm90(params.d_rounded, params.dv_rounded,
 
 ## 导航
 
-- 上一篇：[GQA 与 MQA 实现](03-gqa-mqa.md)
-- 下一篇：[基础用法](../07-usage-tutorial/01-basic-usage.md)
-- [返回目录](../README.md)
+- 上一篇：[GQA 与 MQA 实现](/flashattention/06-advanced-features/03-gqa-mqa/)
+- 下一篇：[基础用法](/flashattention/07-usage-tutorial/01-basic-usage/)
+- [返回目录](/flashattention/00-overview/overview/)

@@ -3,8 +3,11 @@ title: "输出处理"
 weight: 5
 ---
 
+## 模型输出与用户看到的消息之间还有哪些状态
 
-采样完成后，生成的 token 需要经过一系列处理才能最终返回给用户。本章将详细分析从采样结果到用户输出的完整处理流程。
+调度器收回设备结果后，需要将各请求的新增 token 发给对应前端；OutputProcessor 按请求累积或解码输出，处理停止条件和增量输出。调试时先比 token ID，再比分词后的文本和 HTTP 结构。 [0.33.0 输出处理](https://github.com/vllm-project/vllm/blob/v0.33.0/vllm/v1/engine/output_processor.py)
+
+采样器返回 token ID。输出处理还要将它转换成文字、判断停止条件，并在流式请求中确定这一轮可以发送的增量。
 
 ---
 
@@ -334,30 +337,31 @@ Token IDs: [15496, 284, 262, 995, 0]
 
 ### 5.1 流式输出架构
 
-```mermaid
-sequenceDiagram
-    participant User as 用户
-    participant API as API Server
-    participant Engine as LLMEngine
-    participant Core as EngineCore
-
-    User->>API: POST /v1/completions<br/>stream=true
-
-    API->>Engine: add_request()
-
-    loop 每个 step
-        Engine->>Core: step()
-        Core-->>Engine: EngineCoreOutputs
-
-        Engine->>Engine: detokenize()
-        Engine-->>API: yield partial_output
-
-        API-->>User: SSE: data: {...}
-    end
-
-    Engine-->>API: final_output
-    API-->>User: SSE: data: [DONE]
-```
+{{< trace >}}
+title: 两个 token 写进同一个响应流
+actors: ["EngineCore", "输出处理", "HTTP", "客户端"]
+steps:
+  - from: 0
+    to: 1
+    label: "R7 得到 h"
+    detail: "引擎结果带着 R7 的请求标识和新增 token。"
+  - from: 1
+    to: 2
+    label: "解码 h"
+    detail: "前端把可见文本写进 R7 的增量对象。"
+  - from: 2
+    to: 3
+    label: "发送第一段"
+    detail: "客户端收到 delta，其中只含本次新增文本。"
+  - from: 0
+    to: 1
+    label: "R7 得到 i"
+    detail: "下一轮带来第二个输出，输出处理器仍使用 R7 的已有解码状态。"
+  - from: 2
+    to: 3
+    label: "结束事件"
+    detail: "流依次送出后续增量和终止标记，客户端拼出 hi。"
+{{< /trace >}}
 
 ### 5.2 Server-Sent Events (SSE) 格式
 
@@ -446,7 +450,7 @@ def _process_logprobs(
 ### 7.1 OpenAI 兼容格式
 
 ```python
-# vllm/entrypoints/openai/protocol.py
+# vllm/entrypoints/openai/chat_completion/protocol.py
 
 class ChatCompletionResponse(BaseModel):
     """OpenAI Chat Completion 响应格式"""
@@ -546,40 +550,7 @@ flowchart TD
 | 状态更新 | `vllm/v1/core/sched/scheduler.py` | `update_from_output()` |
 | 停止检查 | `vllm/v1/core/sched/utils.py` | `check_stop()` |
 | Detokenizer | `vllm/v1/engine/detokenizer.py` | `IncrementalDetokenizer` |
-| OpenAI 格式 | `vllm/entrypoints/openai/protocol.py` | `ChatCompletionResponse` |
-
----
-
-## 10. 小结
-
-本章我们详细分析了输出处理流程：
-
-1. **数据结构链路**：
-   - `SamplerOutput` → `ModelRunnerOutput` → `EngineCoreOutput` → `RequestOutput`
-
-2. **状态更新**：
-   - 追加 token 到请求
-   - 检查停止条件
-   - 处理完成的请求
-
-3. **停止条件**：
-   - EOS token
-   - 最大长度
-   - 停止字符串/token
-
-4. **Detokenization**：
-   - 增量解码
-   - 处理部分字符
-
-5. **流式输出**：
-   - Server-Sent Events
-   - 增量返回
-
-6. **格式化**：
-   - OpenAI 兼容格式
-   - Logprobs 处理
-
-在下一章中，我们将完整跟踪一个请求从提交到返回的完整生命周期。
+| OpenAI 格式 | `vllm/entrypoints/openai/chat_completion/protocol.py` | `ChatCompletionResponse` |
 
 ---
 
@@ -587,4 +558,4 @@ flowchart TD
 
 - 上一篇：[采样过程分析](04-sampling.md)
 - 下一篇：[请求完整生命周期](06-request-lifecycle.md)
-- [返回目录](../README.md)
+- [返回目录](/vllm/00-overview/overview/)

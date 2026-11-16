@@ -3,20 +3,9 @@ title: "张量并行"
 weight: 1
 ---
 
-## 概述
+## 把一个层切到多个 rank 后如何验证
 
-### 本章学习目标
-- 理解张量并行的原理
-- 掌握 SGLang 中的 TP 实现
-- 了解通信优化技术
-- 学习配置和调优
-
-### 前置知识要求
-- 了解分布式计算基础
-- 熟悉 NCCL 通信
-- 理解 Transformer 结构
-
----
+TP 把同一层的张量工作分布到多个 rank，并在层内通信。只增加卡数不会自动消除通信。先核对各 rank 的模型分片、设备可见性和 collective，再将单请求延迟与可支持的批量分别对比。 [0.5.23 并行参数](https://github.com/sgl-project/sglang/blob/v0.5.23/docs/docs/advanced_features/server_arguments.mdx)
 
 ## 张量并行原理
 
@@ -85,23 +74,23 @@ graph TB
 
 **行并行** (Row Parallel)：
 
-```mermaid
-graph TB
-    subgraph row["行并行"]
-        X1["X1<br/>GPU 0"]
-        X2["X2<br/>GPU 1"]
-        W1["W[0:n/2,:]"]
-        W2["W[n/2:n,:]"]
-        Y1["Y1"]
-        Y2["Y2"]
-        Y["Y1 + Y2"]
-
-        X1 --> W1 --> Y1
-        X2 --> W2 --> Y2
-        Y1 --> Y
-        Y2 --> Y
-    end
-```
+{{< stateboard >}}
+title: 行并行的两个局部和
+rows: ["rank 0", "rank 1", "完整输出"]
+steps:
+  - title: "切开输入维度"
+    detail: "演算 y=x·w，x=[2,3]、w=[4,5]。两卡各持有一个输入维度的权重。"
+    cells: [["2×4"], ["3×5"], ["·"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "各自计算"
+    detail: "rank 0 得到 8，rank 1 得到 15，每个结果只覆盖本地维度。"
+    cells: [["8"], ["15"], ["·"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "组内求和"
+    detail: "all-reduce 把局部贡献相加，两个 rank 均获得 23。"
+    cells: [["23"], ["23"], ["23"]]
+    focus: [[0, 0], [1, 0], [2, 0]]
+{{< /stateboard >}}
 
 ```python
 # 行并行：输入维度切分
@@ -146,12 +135,12 @@ graph TB
 ```bash
 # 2 GPU 张量并行
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-70B-Instruct \
+    --model-path meta-llama/Llama-3.1-70B-Instruct \
     --tensor-parallel-size 2
 
 # 4 GPU 张量并行
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-70B-Instruct \
+    --model-path meta-llama/Llama-3.1-70B-Instruct \
     --tensor-parallel-size 4
 ```
 
@@ -359,18 +348,18 @@ graph TB
 ```bash
 # 基本 TP
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-70B-Instruct \
+    --model-path meta-llama/Llama-3.1-70B-Instruct \
     --tensor-parallel-size 4
 
 # 指定 GPU
 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-70B-Instruct \
+    --model-path meta-llama/Llama-3.1-70B-Instruct \
     --tensor-parallel-size 4
 
 # 多节点（使用 torchrun）
 torchrun --nproc_per_node=8 --nnodes=2 \
     -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-405B-Instruct \
+    --model-path meta-llama/Llama-3.1-405B-Instruct \
     --tensor-parallel-size 16
 ```
 
@@ -386,25 +375,9 @@ torchrun --nproc_per_node=8 --nnodes=2 \
 
 ---
 
-## 小结
-
-### 要点回顾
-
-1. **原理**：将模型层内切分到多个 GPU
-2. **切分**：列并行 + 行并行组合
-3. **通信**：AllReduce/AllGather
-4. **优化**：通信计算重叠
-
-### 关键参数
+## 张量并行的启动参数
 
 | 参数 | 作用 |
 |------|------|
 | `--tensor-parallel-size` | TP 大小 |
 | `CUDA_VISIBLE_DEVICES` | 指定 GPU |
-
-### 下一章预告
-
-在下一章《流水线并行》中，我们将：
-- 了解 PP 原理
-- 学习气泡优化
-- 掌握 TP+PP 组合

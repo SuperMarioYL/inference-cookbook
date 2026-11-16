@@ -3,20 +3,10 @@ title: "注意力机制深度解析"
 weight: 2
 ---
 
-> 深入理解 Self-Attention 和 Cross-Attention 的计算原理，为理解 CacheBlend 的核心创新奠定基础。
+手册前面加了一段检索材料，手册里的词就能读到这段新上文。沿 Q、K、V 的计算过程可以看到这种变化怎样进入注意力。
 
 ---
 
-## 目录
-
-- [1. Scaled Dot-Product Attention](#1-scaled-dot-product-attention)
-- [2. Self-Attention vs Cross-Attention](#2-self-attention-vs-cross-attention)
-- [3. Causal Attention Mask](#3-causal-attention-mask)
-- [4. 注意力的计算复杂度](#4-注意力的计算复杂度)
-- [5. 注意力稀疏性](#5-注意力稀疏性)
-- [6. 从零实现注意力机制](#6-从零实现注意力机制)
-
----
 
 ## 1. Scaled Dot-Product Attention
 
@@ -28,19 +18,32 @@ $$
 
 ### 1.2 计算步骤分解
 
-```mermaid
-graph LR
-    subgraph "注意力计算步骤"
-        Q["Query (Q)"] --> MatMul1["Q @ K^T"]
-        K["Key (K)"] --> MatMul1
-        MatMul1 --> Scale["÷ √d_k"]
-        Scale --> Mask["+ Mask (可选)"]
-        Mask --> Softmax["Softmax"]
-        Softmax --> MatMul2["@ V"]
-        V["Value (V)"] --> MatMul2
-        MatMul2 --> Output["Output"]
-    end
-```
+{{< stateboard >}}
+title: "第三个词怎样读前面三个位置"
+rows: ["位置", "权重", "值"]
+steps:
+  - title: "计算分数"
+    detail: "把第三个词的 Q 与三个 K 做点积。"
+    cells:
+      - ["1", "2", "3"]
+      - ["待算", "待算", "待算"]
+      - ["V1", "V2", "V3"]
+    focus: [[0, 2]]
+  - title: "归一化"
+    detail: "假设缩放后的分数为 0、0、ln 2，softmax 给出三个权重。"
+    cells:
+      - ["1", "2", "3"]
+      - ["¼", "¼", "½"]
+      - ["V1", "V2", "V3"]
+    focus: [[1, 0], [1, 1], [1, 2]]
+  - title: "加权求和"
+    detail: "输出包含 V1 和 V2 各四分之一，加上 V3 的二分之一。"
+    cells:
+      - ["1", "2", "3"]
+      - ["¼", "¼", "½"]
+      - ["¼V1", "¼V2", "½V3"]
+    focus: [[2, 0], [2, 1], [2, 2]]
+{{< /stateboard >}}
 
 ### 1.3 为什么要缩放？
 
@@ -120,33 +123,31 @@ graph TB
 
 在 RAG 场景中，当多个文本块（chunks）拼接时：
 
-```mermaid
-graph TB
-    subgraph "RAG 场景的注意力"
-        subgraph "Chunk 1"
-            T1["Token 1-100"]
-        end
+{{< stateboard >}}
+title: "把检索结果放到手册之前"
+rows: ["输入", "M 的上文"]
+steps:
+  - title: "单独处理手册"
+    detail: "单独编码 M 时，M2 可以看到 M1。"
+    cells:
+      - ["M1", "M2", "·", "·"]
+      - ["M1", "·", "·", "·"]
+    focus: [[0, 0], [0, 1]]
+  - title: "拼入检索结果"
+    detail: "检索段落 R 在前面，两段文字现在属于同一条因果序列。"
+    cells:
+      - ["R1", "R2", "M1", "M2"]
+      - ["R1", "R2", "M1", "·"]
+    focus: [[0, 0], [0, 1], [0, 3]]
+  - title: "比较同一个 M2"
+    detail: "对 M2 而言，前面新增了 R1 与 R2。这正是旧隐藏状态缺少的信息。"
+    cells:
+      - ["R1", "R2", "M1", "M2"]
+      - ["R1", "R2", "M1", "·"]
+    focus: [[1, 0], [1, 1]]
+{{< /stateboard >}}
 
-        subgraph "Chunk 2"
-            T2["Token 101-200"]
-        end
-
-        subgraph "Query"
-            Q1["Token 201-250"]
-        end
-
-        T1 --> |"Self-Attention"| T1
-        T2 --> |"Self-Attention"| T2
-
-        T1 --> |"Cross-Attention"| T2
-        T2 --> |"Cross-Attention"| T1
-
-        T1 --> |"Cross-Attention"| Q1
-        T2 --> |"Cross-Attention"| Q1
-    end
-```
-
-**关键观察**: Cross-Attention 对于多 chunk 场景至关重要，但也是 KV Cache 复用的主要障碍。
+后一段的 token 可以读到前一段。给两段文字单独计算 KV 再拼接，就少算了这部分上下文。
 
 ---
 
@@ -200,21 +201,9 @@ mask = create_causal_mask(seq_len, 'cuda')
 
 ### 3.4 CacheBlend 中的特殊掩码
 
-CacheBlend 使用 `LowerTriangularFromBottomRightMask`，允许 HKVD tokens 看到所有位置：
+作者原型的 xFormers 路径使用 `LowerTriangularFromBottomRightMask`。当 Q 的行数少于 K 的列数时，掩码把可见边界对齐到右下角。下面用 2 行 Q、4 列 K 展示每一行实际能看见哪些列。
 
-```mermaid
-graph TB
-    subgraph "标准因果掩码 vs CacheBlend 掩码"
-        subgraph "标准因果掩码"
-            S1["每个 token 只看前面的 tokens"]
-        end
-
-        subgraph "CacheBlend 特殊掩码"
-            S2["HKVD tokens 可以看到所有 tokens"]
-            S3["保持因果性（从右下角开始）"]
-        end
-    end
-```
+{{< mechanism "cacheblend-causal-corner" >}}
 
 ---
 
@@ -510,8 +499,6 @@ def generate_with_kv_cache(model, prompt_tokens, max_new_tokens=100):
 ---
 
 ## 总结
-
-本文深入介绍了注意力机制的核心概念：
 
 1. **Scaled Dot-Product Attention**: 基础计算公式和维度分析
 2. **Self-Attention vs Cross-Attention**: CacheBlend 关注的核心问题

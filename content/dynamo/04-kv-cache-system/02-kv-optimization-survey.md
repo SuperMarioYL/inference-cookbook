@@ -3,9 +3,9 @@ title: "优化技术综述"
 weight: 2
 ---
 
-> 本文档综述 KV Cache 的主要优化技术，包括 PagedAttention、Prefix Caching、KV Compression 和 Offloading，为理解 Dynamo 的设计提供背景。
+## 先区分本地复用、路由和卸载
 
----
+本地复用减少同一引擎的重复计算，路由选择更可能有缓存的实例，卸载涉及在层级之间移动实际数据。把这三类分别测量，可以解释“前端判断可复用，但后端仍然要等 KV”的情况。 [分层缓存与路由支持](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/docs/fern/pages/developer-guide/knowledge-base/modular-components/router/offloading-support-matrix.md)
 
 ## 1. 优化技术全景
 
@@ -279,21 +279,27 @@ graph TB
 
 为了减少 Offloading 带来的延迟，需要预取机制：
 
-```mermaid
-sequenceDiagram
-    participant GPU as GPU HBM
-    participant CPU as CPU Memory
-    participant Scheduler as 调度器
-
-    Note over Scheduler: 预测下一步需要的 KV
-
-    Scheduler->>CPU: 异步预取请求
-    CPU-->>GPU: DMA 传输
-
-    Note over GPU: 同时处理当前请求
-
-    GPU->>GPU: 使用预取的 KV
-```
+{{< trace >}}
+title: 一份主机 KV 如何提前回到设备
+actors: ["调度器", "主机池", "GPU 池", "模型"]
+steps:
+  - from: 0
+    to: 1
+    label: "查到块 K"
+    detail: "下一轮需要历史前缀 K，它的有效副本位于主机内存。"
+  - from: 0
+    to: 2
+    label: "预留设备槽"
+    detail: "为 K 的目标位置保留空间，启动异步搬运。"
+  - from: 1
+    to: 2
+    label: "写入目标槽"
+    detail: "传输进行时，前向若依赖 K 就要等待相应完成条件。"
+  - from: 2
+    to: 3
+    label: "前缀可读"
+    detail: "目标里的数据就绪，模型使用 K 计算后续位置。"
+{{< /trace >}}
 
 ---
 
@@ -358,21 +364,8 @@ Dynamo 独特的 KV-Aware 路由机制：
 
 ---
 
-## 总结
-
-KV Cache 优化技术的核心思想：
-
-1. **PagedAttention**：分页管理，消除碎片
-2. **Prefix Caching**：复用共同前缀，减少计算
-3. **GQA/MQA**：减少 KV 头数，降低内存
-4. **Offloading**：多层存储，扩展容量
-
-Dynamo 综合运用这些技术，并创新性地引入 KV-Aware 路由，在分布式场景下实现高效的 KV Cache 管理。
-
----
-
 ## 参考资料
 
-- [vLLM: Easy, Fast, and Cheap LLM Serving](https://arxiv.org/abs/2309.06180)
-- [GQA: Training Generalized Multi-Query Transformer Models](https://arxiv.org/abs/2305.13245)
-- [FlexGen: High-Throughput Generative Inference](https://arxiv.org/abs/2303.06865)
+- [Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180)
+- [GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints](https://arxiv.org/abs/2305.13245)
+- [FlexGen: High-Throughput Generative Inference of Large Language Models with a Single GPU](https://arxiv.org/abs/2303.06865)

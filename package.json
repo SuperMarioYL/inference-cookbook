@@ -10,9 +10,9 @@
   },
   "scripts": {
     "create": "hugo new",
-    "dev": "hugo server --disableFastRender --noHTTPCache",
+    "dev": "hugo server --renderToMemory --disableFastRender --noHTTPCache",
     "format": "prettier **/** -w -c",
-    "build": "hugo --gc",
+    "build": "hugo --gc --cleanDestinationDir",
     "preview": "vite preview --outDir public"
   },
   "dependencies": {

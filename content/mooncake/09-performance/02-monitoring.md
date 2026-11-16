@@ -3,10 +3,6 @@ title: "监控与可观测性"
 weight: 2
 ---
 
-[上一篇](01-benchmarking.md) | [目录](../README.md) | [下一篇](../10-deployment/01-deployment-guide.md)
-
-# 监控与可观测性
-
 ## 12.1 指标体系设计
 
 ### 12.1.1 客户端指标
@@ -455,7 +451,3 @@ graph TB
     style Prometheus fill:#E6522C
     style Grafana fill:#F46800
 ```
-
----
-
-[上一篇](01-benchmarking.md) | [目录](../README.md) | [下一篇](../10-deployment/01-deployment-guide.md)

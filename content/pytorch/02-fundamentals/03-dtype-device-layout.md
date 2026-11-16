@@ -5,7 +5,7 @@ weight: 3
 
 > 难度：中级 | 前置知识：了解 TensorImpl 基本结构、C++ 枚举类型
 
-每个 PyTorch Tensor 除了数据和形状之外，还必须回答三个基本问题：**数据是什么类型（dtype）**、**数据放在哪里（device）**、**数据按什么方式组织（layout）**。本文深入 `c10/core/` 层的源码，逐一解析 `ScalarType`、`Device`、`Layout` 和 `MemoryFormat` 的定义与设计思路。
+`dtype` 决定一个元素怎样编码，`device` 指出它在哪个设备上，`layout` 区分 strided、稀疏等表示。对普通 strided 张量，具体到某个元素的地址还要看 stride 和 storage offset。
 
 ---
 
@@ -315,7 +315,7 @@ enum class MemoryFormat : int8_t {
 };
 ```
 
-源码注释中明确指出：**MemoryFormat 不是 Tensor 的属性，而是告诉算子输出应该如何组织内存的提示。**
+算子用 `MemoryFormat` 决定输出如何排布，张量实际记录的是尺寸和 stride。
 
 ### 4.2 各格式对比
 
@@ -326,7 +326,7 @@ enum class MemoryFormat : int8_t {
 | **ChannelsLast3d** | NDHWC | `[D*H*W*C, 1, H*W*C, W*C, C]` | 3D 卷积场景 |
 | **Preserve** | 保持不变 | 取决于输入 | 避免不必要的格式转换 |
 
-ChannelsLast 格式在深度学习推理中非常重要，因为：
+对四维输入，channels-last 让同一空间位置的通道值相邻。
 1. Intel CPU 的 AVX-512 指令集对 NHWC 布局有专门优化
 2. ARM CPU（Apple M 系列等）的 NEON 指令同样偏好 NHWC
 3. 某些量化推理引擎要求输入为 NHWC 格式
@@ -442,4 +442,4 @@ x = x.to(memory_format=torch.channels_last)
 | **MemoryFormat** | `torch/headeronly/core/MemoryFormat.h`、`c10/core/MemoryFormat.h` | 指定 Strided Tensor 的维度排列（NCHW / NHWC） |
 | **TensorOptions** | `c10/core/TensorOptions.h` | 将上述属性打包成一个统一的参数对象 |
 
-这四个属性从不同维度完整定义了"一个 Tensor 应该长什么样"。理解它们是阅读 PyTorch 算子实现和性能优化代码的基础。在下一篇文章中，我们将跟踪 `torch.randn(3, 4)` 的完整调用链路，观察这些属性如何在 Tensor 创建过程中被组装和使用。
+可以在 `torch.randn(3, 4)` 返回的张量上依次打印 `dtype`、`device`、`layout` 和 `stride()`，把这些属性对应到一次实际分配。

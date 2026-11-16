@@ -49,6 +49,9 @@ jobs:
           TZ: Asia/Shanghai
         run: npm run build
 
+      - name: Check local links and heading anchors
+        run: python3 scripts/check-site-links.py public
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:

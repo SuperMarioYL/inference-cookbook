@@ -3,8 +3,6 @@ title: "P2P Store - 概述与 API 详解"
 weight: 1
 ---
 
-# P2P Store - 概述与 API 详解
-
 ## 1. 模块定位
 
 P2P Store 是 Mooncake 项目中构建在 Transfer Engine 之上的**分布式对象分发层**，专为大规模集群中节点间的临时数据共享而设计。其核心应用场景是**大模型训练 Checkpoint 的高效分发** -- 在 Moonshot AI 的 Kimi K1.5 / K2 训练流水线中，P2P Store 作为 Checkpoint 传输引擎承担了生产级工作负载。
@@ -134,43 +132,27 @@ type P2PStore struct {
 
 ### 3.2 典型工作流
 
-```mermaid
-sequenceDiagram
-    participant trainer as 训练节点
-    participant etcd as etcd
-    participant inf1 as 推理节点 1
-    participant inf2 as 推理节点 2
-    participant inf3 as 推理节点 3
-
-    trainer->>etcd: Register("model-v1", shards 元数据)
-    Note over trainer: 数据在训练节点内存中, 不发生数据传输
-
-    inf1->>etcd: GetReplica - 查询 "model-v1" 元数据
-    etcd-->>inf1: 返回 Payload (Gold 源 = 训练节点)
-    inf1->>trainer: Transfer Engine 拉取分片数据
-    trainer-->>inf1: RDMA/TCP 数据传输
-    inf1->>etcd: 更新元数据 (添加 Replica 位置)
-    Note over inf1: 推理节点 1 成为新的数据源
-
-    inf2->>etcd: GetReplica - 查询 "model-v1" 元数据
-    etcd-->>inf2: 返回 Payload (Gold + Replica 源)
-    inf2->>inf1: 从推理节点 1 拉取部分分片
-    inf2->>trainer: 从训练节点拉取部分分片
-    inf2->>etcd: 更新元数据 (添加 Replica 位置)
-
-    inf3->>etcd: GetReplica - 查询 "model-v1" 元数据
-    etcd-->>inf3: 返回 Payload (Gold + 多个 Replica)
-    inf3->>inf1: 从多个源并行拉取
-    inf3->>inf2: 从多个源并行拉取
-    inf3->>etcd: 更新元数据
-
-    Note over trainer,inf3: 级联效应 - 每个完成拉取的节点都成为数据源
-
-    trainer->>etcd: Unregister("model-v1")
-    inf1->>etcd: DeleteReplica("model-v1")
-    inf2->>etcd: DeleteReplica("model-v1")
-    inf3->>etcd: DeleteReplica("model-v1")
-```
+{{< trace >}}
+title: "一个模型对象如何从训练端到推理端"
+actors: ["训练进程", "P2P 目录", "推理进程", "传输引擎"]
+steps:
+  - from: 0
+    to: 1
+    label: "发布对象"
+    detail: "训练端登记一个可供拉取的对象和数据所在位置。"
+  - from: 2
+    to: 1
+    label: "查对象"
+    detail: "推理端使用对象名查找可用的来源。"
+  - from: 2
+    to: 3
+    label: "提交拉取"
+    detail: "推理进程准备目标缓冲，把选中的来源交给传输引擎。"
+  - from: 3
+    to: 2
+    label: "返回数据"
+    detail: "传输完成后，推理端可以校验与使用对象内容。"
+{{< /trace >}}
 
 ## 4. API 详解
 

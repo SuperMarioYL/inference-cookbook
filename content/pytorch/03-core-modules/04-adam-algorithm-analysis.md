@@ -3,7 +3,7 @@ title: "Adam 算法分析"
 weight: 4
 ---
 
-> 本文深入分析 `torch/optim/adam.py` 中 Adam 优化器的完整实现，包括数学推导、Adam vs AdamW 的区别、三种实现变体（single_tensor / multi_tensor / fused）的源码对比，以及 AMSGrad 和状态管理机制。
+Adam 为每个参与更新的参数维护一阶矩和二阶矩。两步的梯度就足以看出这些状态怎样累积，以及权重衰减加在更新的哪个位置。
 
 ## 1. 算法数学基础
 
@@ -73,24 +73,23 @@ $$\theta_t = \theta_{t-1} - \gamma \cdot \lambda \cdot \theta_{t-1} - \gamma \cd
 
 即先执行权重衰减 $\theta \leftarrow (1 - \gamma \lambda) \theta$，再执行 Adam 更新。
 
-```mermaid
-flowchart LR
-    subgraph adam["Adam - L2 正则化"]
-        direction TB
-        A1["计算梯度 g_t"] --> A2["g_t = g_t + lambda * theta"]
-        A2 --> A3["更新 m_t, v_t"]
-        A3 --> A4["偏差校正"]
-        A4 --> A5["theta -= lr * m_hat / (sqrt(v_hat) + eps)"]
-    end
-
-    subgraph adamw["AdamW - 解耦权重衰减"]
-        direction TB
-        B1["计算梯度 g_t"] --> B2["theta *= (1 - lr * lambda)"]
-        B2 --> B3["更新 m_t, v_t"]
-        B3 --> B4["偏差校正"]
-        B4 --> B5["theta -= lr * m_hat / (sqrt(v_hat) + eps)"]
-    end
-```
+{{< stateboard >}}
+title: "同一权重，两种衰减位置"
+rows: ["方法", "进矩估计的 g", "衰减后参数"]
+steps:
+  - title: "两条路径起步"
+    detail: "取 w=2，原始梯度 g=1，权重衰减系数 0.1，学习率 0.01。"
+    cells: [["Adam", "AdamW"], ["1", "1"], ["2", "2"]]
+    focus: [[0, 0], [0, 1]]
+  - title: "准备矩估计"
+    detail: "耦合式 Adam 把 λw=0.2 加到梯度；AdamW 仍把原始梯度送入矩估计。"
+    cells: [["Adam", "AdamW"], ["1.2", "1"], ["2", "2"]]
+    focus: [[1, 0], [1, 1]]
+  - title: "AdamW 单独衰减"
+    detail: "AdamW 先将参数乘以 1−0.01×0.1，得到 1.998，再应用自适应梯度更新。"
+    cells: [["Adam", "AdamW"], ["1.2", "1"], ["2", "1.998"]]
+    focus: [[2, 1]]
+{{< /stateboard >}}
 
 ### 2.3 源码实现
 

@@ -3,9 +3,9 @@ title: "vLLM 技术解析"
 weight: 2
 ---
 
-> 本文深入解析 vLLM 的核心技术，包括 PagedAttention 和调度器设计。
+## 以当前镜像选定 vLLM 源码
 
----
+Dynamo 1.6.2 的 CUDA 13 vLLM runtime 基于 vLLM 0.31.0。本文的块映射与调度思想可跨版本阅读，但集成测试、采样参数和传输配置要跟随实际镜像。 [镜像依赖版本](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/container/context.yaml)
 
 ## 1. PagedAttention 原理
 
@@ -150,25 +150,27 @@ sequenceDiagram
 
 vLLM 在每个推理步骤后重新评估调度决策：
 
-```mermaid
-sequenceDiagram
-    participant Scheduler
-    participant Engine
-    participant Req1
-    participant Req2
-    participant Req3
-
-    loop 每个推理步骤
-        Scheduler->>Engine: 选择本轮参与的请求
-        Engine->>Req1: 生成一个 token
-        Engine->>Req2: 生成一个 token
-
-        alt Req1 完成
-            Req1-->>Scheduler: 释放 KV 块
-            Scheduler->>Req3: 调度新请求
-        end
-    end
-```
+{{< trace >}}
+title: 一轮结束后谁可以进入下一批
+actors: ["引擎调度器", "批次", "等待请求"]
+steps:
+  - from: 0
+    to: 1
+    label: "选出 A、B"
+    detail: "本地调度器把两个活动请求交给 worker 执行。"
+  - from: 1
+    to: 0
+    label: "A 完成"
+    detail: "这轮结果使 A 达到停止条件，B 还有输出要生成。"
+  - from: 2
+    to: 1
+    label: "纳入 C"
+    detail: "引擎有足够预算和 KV 空间，下一轮选择等待中的 C。"
+  - from: 1
+    to: 0
+    label: "分别更新进度"
+    detail: "B 和 C 的请求状态分别更新，外部路由器不参与引擎的每一轮选批。"
+{{< /trace >}}
 
 ### 3.2 优势
 
@@ -207,17 +209,6 @@ impl AsyncEngine for VllmEngine {
 | **取消支持** | 支持请求取消 |
 | **流式输出** | 支持 Token 级流式响应 |
 | **指标集成** | 集成 KV 指标发布 |
-
----
-
-## 小结
-
-本文介绍了 vLLM 的核心技术：
-
-1. **PagedAttention**：分页 KV Cache 管理
-2. **三队列调度器**：Waiting、Running、Swapped
-3. **Continuous Batching**：迭代级动态调度
-4. **与 Dynamo 集成**：AsyncEngine 封装
 
 ---
 

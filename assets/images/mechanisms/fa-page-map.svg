@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 472 265" role="img" aria-labelledby="fa-page-map-title">
+  <title id="fa-page-map-title">逻辑位置如何落到物理 KV 页</title>
+  <desc>每页 256 个 token，本序列的页表为 [3,1]。</desc>
+<defs><marker id="fa-page-map-end" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+<text x="14" y="28" class="diagram-title" text-anchor="start">逻辑位置如何落到物理 KV 页</text>
+
+  <g data-frame="0">
+    <title>读位置 255</title>
+    <desc>255 除以 256 得逻辑页 0，余数是 255。页表第 0 项为 3。</desc>
+    <text x="18" y="71" class="label" text-anchor="start">逻辑 token</text>
+    <rect x="130" y="48" width="77" height="35" rx="4" class="fresh"/><text x="168.5" y="70.5" class="label" text-anchor="middle">255</text>
+    <text x="239" y="71" class="label" text-anchor="start">页 0，页内偏移 255</text>
+    <text x="18" y="128" class="label" text-anchor="start">逻辑页表</text>
+    <rect x="130" y="102" width="124" height="36" rx="4" class="fresh"/><text x="192" y="125" class="label" text-anchor="middle">第 0 页 → P3</text>
+    <rect x="270" y="102" width="124" height="36" rx="4" class="idle"/><text x="332" y="125" class="label" text-anchor="middle">第 1 页 → P1</text>
+    <text x="18" y="193" class="label" text-anchor="start">物理页池</text>
+    <rect x="122" y="169" width="69" height="35" rx="4" class="idle"/><text x="156.5" y="191.5" class="label" text-anchor="middle">P0</text>
+    <rect x="202" y="169" width="69" height="35" rx="4" class="idle"/><text x="236.5" y="191.5" class="label" text-anchor="middle">P1</text>
+    <rect x="282" y="169" width="69" height="35" rx="4" class="idle"/><text x="316.5" y="191.5" class="label" text-anchor="middle">P2</text>
+    <rect x="362" y="169" width="69" height="35" rx="4" class="stored"/><text x="396.5" y="191.5" class="label" text-anchor="middle">P3</text>
+    <path d="M192,141 L396,163" class="edge" marker-end="url(#fa-page-map-end)"/>
+    <text x="18" y="241" class="note" text-anchor="start">取物理页 P3 的第 255 个 token</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>跨越页边界</title>
+    <desc>位置 256 进入逻辑页 1。查页表后跳到物理页 P1 的开头。</desc>
+    <text x="18" y="71" class="label" text-anchor="start">逻辑 token</text>
+    <rect x="130" y="48" width="77" height="35" rx="4" class="fresh"/><text x="168.5" y="70.5" class="label" text-anchor="middle">256</text>
+    <text x="239" y="71" class="label" text-anchor="start">页 1，页内偏移 0</text>
+    <text x="18" y="128" class="label" text-anchor="start">逻辑页表</text>
+    <rect x="130" y="102" width="124" height="36" rx="4" class="idle"/><text x="192" y="125" class="label" text-anchor="middle">第 0 页 → P3</text>
+    <rect x="270" y="102" width="124" height="36" rx="4" class="fresh"/><text x="332" y="125" class="label" text-anchor="middle">第 1 页 → P1</text>
+    <text x="18" y="193" class="label" text-anchor="start">物理页池</text>
+    <rect x="122" y="169" width="69" height="35" rx="4" class="idle"/><text x="156.5" y="191.5" class="label" text-anchor="middle">P0</text>
+    <rect x="202" y="169" width="69" height="35" rx="4" class="stored"/><text x="236.5" y="191.5" class="label" text-anchor="middle">P1</text>
+    <rect x="282" y="169" width="69" height="35" rx="4" class="idle"/><text x="316.5" y="191.5" class="label" text-anchor="middle">P2</text>
+    <rect x="362" y="169" width="69" height="35" rx="4" class="idle"/><text x="396.5" y="191.5" class="label" text-anchor="middle">P3</text>
+    <path d="M332,141 L236,163" class="edge" marker-end="url(#fa-page-map-end)"/>
+    <text x="18" y="241" class="note" text-anchor="start">取物理页 P1 的第 0 个 token</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>页内前进一步</title>
+    <desc>257 仍在逻辑页 1，索引变成 P1 的偏移 1。</desc>
+    <text x="18" y="71" class="label" text-anchor="start">逻辑 token</text>
+    <rect x="130" y="48" width="77" height="35" rx="4" class="fresh"/><text x="168.5" y="70.5" class="label" text-anchor="middle">257</text>
+    <text x="239" y="71" class="label" text-anchor="start">页 1，页内偏移 1</text>
+    <text x="18" y="128" class="label" text-anchor="start">逻辑页表</text>
+    <rect x="130" y="102" width="124" height="36" rx="4" class="idle"/><text x="192" y="125" class="label" text-anchor="middle">第 0 页 → P3</text>
+    <rect x="270" y="102" width="124" height="36" rx="4" class="fresh"/><text x="332" y="125" class="label" text-anchor="middle">第 1 页 → P1</text>
+    <text x="18" y="193" class="label" text-anchor="start">物理页池</text>
+    <rect x="122" y="169" width="69" height="35" rx="4" class="idle"/><text x="156.5" y="191.5" class="label" text-anchor="middle">P0</text>
+    <rect x="202" y="169" width="69" height="35" rx="4" class="stored"/><text x="236.5" y="191.5" class="label" text-anchor="middle">P1</text>
+    <rect x="282" y="169" width="69" height="35" rx="4" class="idle"/><text x="316.5" y="191.5" class="label" text-anchor="middle">P2</text>
+    <rect x="362" y="169" width="69" height="35" rx="4" class="idle"/><text x="396.5" y="191.5" class="label" text-anchor="middle">P3</text>
+    <path d="M332,141 L236,163" class="edge" marker-end="url(#fa-page-map-end)"/>
+    <text x="18" y="241" class="note" text-anchor="start">取物理页 P1 的第 1 个 token</text>
+  </g>
+</svg>

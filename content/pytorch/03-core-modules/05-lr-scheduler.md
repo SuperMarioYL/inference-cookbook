@@ -3,7 +3,7 @@ title: "学习率调度器"
 weight: 5
 ---
 
-> 本文深入分析 `torch/optim/lr_scheduler.py` 中学习率调度器的实现，包括 `LRScheduler` 基类的设计、常用调度器的数学公式与源码实现，以及调度器链、Warmup 策略和 `ReduceLROnPlateau` 的特殊机制。
+在一次训练 step 里，优化器使用参数组当前的学习率。调度器更新参数组后，下一步才会用到新值。
 
 ## 1. LRScheduler 基类
 
@@ -266,7 +266,7 @@ class OneCycleLR(LRScheduler):
 
 ### 2.5 ReduceLROnPlateau - 自适应衰减
 
-与其他调度器不同，`ReduceLROnPlateau` 不是基于 epoch 计数，而是基于验证指标的表现来调整学习率。
+`ReduceLROnPlateau` 读取传给 `step(metric)` 的验证指标，根据改善幅度和连续未改善的次数调整学习率。
 
 **核心逻辑**：
 
@@ -343,7 +343,7 @@ scheduler = SequentialLR(optimizer, schedulers=[warmup, cosine], milestones=[10]
 
 ### 3.3 Warmup 模式
 
-Warmup 不是一个单独的类，而是通过组合实现的常见模式：
+可以先用 `LinearLR` 提高学习率，再用 `SequentialLR` 切换到主调度器。
 
 **线性 Warmup + 余弦退火**（最常用）：
 
@@ -437,7 +437,7 @@ def _update_param_group_val(param_group, key, val):
         param_group[key] = val  # 直接赋值
 ```
 
-当学习率是张量（用于 `capturable` 模式）时，使用 `fill_` 原地修改以保持张量引用不变。这对 CUDA Graph 至关重要。
+当学习率本身是张量，`fill_` 可以更新数值并保留原地址。重放已经捕获的 CUDA Graph 时仍能从该地址读取学习率。
 
 ## 7. 小结
 

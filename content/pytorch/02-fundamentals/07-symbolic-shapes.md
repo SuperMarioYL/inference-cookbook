@@ -5,7 +5,7 @@ weight: 7
 
 > 难度：高级 | 前置知识：了解 TensorImpl 结构、torch.compile 基本概念、Guard 机制
 
-在传统的 eager 执行模式下，Tensor 的形状总是具体的整数值。但当进入 `torch.compile` 的编译模式时，形状可能变成**符号化的** -- 它们不再是确定的数字，而是可以表示一组形状约束的符号表达式。本文深入分析 `SymInt`、`SymNode`、`SymbolicShapeMeta` 这三个核心组件，以及它们如何支撑 PyTorch 的动态形状编译。
+同一段函数先收到形状 `[4, 64]` 的输入，再收到 `[8, 64]`。捕获计算图时，Dynamo 可以用符号表示会变化的维度，并记录哪些尺寸满足这张图的约束。
 
 ---
 
@@ -440,9 +440,7 @@ def f(x):
 | **SymBool** | `c10/core/SymBool.h` | 符号化布尔值，用于表示形状比较的结果 |
 | **SymFloat** | `c10/core/SymFloat.h` | 符号化浮点值（使用场景较少） |
 
-符号化形状是 `torch.compile` 能够处理动态形状输入的基石。它的设计在两个看似矛盾的目标之间取得了精妙的平衡：
+`SymInt` 有两种常见表示。
 
-1. **Eager 模式下零开销** -- 通过 tagged pointer 和内联存储，SymInt 在 eager 模式下与 int64_t 性能完全相同
-2. **Compile 模式下完整追踪** -- 通过 SymNode 的虚函数分发，所有形状相关的计算都能被追踪并生成等价的符号表达式
-
-理解这套机制，是深入 Dynamo/Inductor 编译器内部的必备知识。
+1. 普通小整数可以直接编码在 `SymInt` 中，取值时走整数路径。
+2. 符号值关联 `SymNode`，形状运算生成表达式，必要时记录运行时要检查的约束。

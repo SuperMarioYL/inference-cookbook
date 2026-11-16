@@ -5,7 +5,7 @@ weight: 4
 
 ## 概述
 
-本文档提供 PyTorch 源码的导航地图，帮助你快速定位关键模块和文件。
+从手里的问题选入口。算子走错设备时从 Dispatcher 查起，张量之间意外共享数据时先看 Storage 和 stride。
 
 ## 源码仓库结构
 
@@ -139,14 +139,7 @@ class Module:
 | Boxing | `aten/src/ATen/core/boxing/` | 装箱机制 |
 | Native Functions | `aten/src/ATen/native/` | 原生算子实现 |
 
-**算子分发流程**：
-```
-torch.add(a, b)
-→ aten/src/ATen/core/dispatch/Dispatcher.cpp::callBoxed()
-→ c10/core/DispatchKeySet.h::computeDispatchKey()
-→ aten/src/ATen/native/BinaryOps.cpp::add()  # CPU 实现
-   或 aten/src/ATen/native/cuda/BinaryOps.cu::add()  # CUDA 实现
-```
+**定位稠密张量的 add**：在 `aten/src/ATen/native/native_functions.yaml` 搜 `add.Tensor`，查看它的 `structured_delegate: add.out`。沿 `add.out` 的 ufunc 配置找到 `aten/src/ATen/native/ufunc/add.h` 和对应构建生成物。稀疏与其他布局可以走不同的 dispatch 注册。[算子描述](https://github.com/pytorch/pytorch/blob/v2.15.0/aten/src/ATen/native/native_functions.yaml) · [add ufunc](https://github.com/pytorch/pytorch/blob/v2.15.0/aten/src/ATen/native/ufunc/add.h)
 
 ### 6. 编译器栈
 
@@ -187,7 +180,7 @@ torch.add(a, b)
 | FSDP | `torch/distributed/fsdp/fully_sharded_data_parallel.py` | 全分片数据并行 |
 | c10d | `torch/distributed/distributed_c10d.py` | 分布式通信库 |
 | ProcessGroup | `torch/csrc/distributed/c10d/ProcessGroup.hpp` | 进程组抽象 |
-| NCCL Backend | `torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp` | NCCL 后端 |
+| NCCL Backend | `torch/csrc/distributed/c10d/nccl2/` | 2.15 默认 NCCL 后端；ProcessGroupNCCL.cpp 为旧实现 |
 
 ### 8. CUDA
 
@@ -197,7 +190,7 @@ torch.add(a, b)
 | Caching Allocator | `c10/cuda/CUDACachingAllocator.cpp` | CUDA 缓存分配器 |
 | Stream | `c10/cuda/CUDAStream.h` | CUDA 流管理 |
 | Event | `c10/cuda/CUDAEvent.h` | CUDA 事件 |
-| AMP | `torch/cuda/amp/autocast_mode.py` | 自动混合精度 |
+| AMP | `torch/amp/autocast_mode.py` | 自动混合精度 |
 
 ## 快速定位技巧
 
@@ -242,7 +235,7 @@ PyTorch 使用代码生成来自动生成大量重复代码：
 | gen.py | `aten/src/ATen/native/native_functions.yaml` | `aten/src/ATen/ops/` | 算子声明和分发代码 |
 | autograd_gen.py | `tools/autograd/derivatives.yaml` | `torch/csrc/autograd/generated/` | 反向传播函数 |
 
-**重要**：修改代码前需要运行 `python setup.py develop` 重新生成代码。
+修改算子定义或导数公式后，按[源码构建说明](/pytorch/00-overview/02-build-and-dev-env/)重新运行构建，CMake 会触发对应的生成步骤。
 
 ## 调试技巧
 

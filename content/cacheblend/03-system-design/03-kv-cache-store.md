@@ -3,7 +3,7 @@ title: "KV Cache Store"
 weight: 3
 ---
 
-本文档介绍 CacheBlend 的两个核心组件：KV Cache Store（负责 KV 缓存的存储和检索）和 Fusor（负责缓存融合和选择性重计算）。
+同一份文档第二次进入提示时，Store 找出按文档保存的 KV，Fusor 在模型前向中挑选并更新受新上文影响的位置。
 
 ---
 
@@ -23,16 +23,27 @@ KV Cache Store 将 LLM 输入分割成多个文本块，每个块可以是复用
 - 如果找到匹配，复用 KV Cache
 - 如果未找到，需要计算新的 KV Cache
 
-```mermaid
-graph TB
-    subgraph "KV Cache 查找流程"
-        T["文本块"] --> H["计算 Hash"]
-        H --> L{"在 Store 中查找"}
-        L -->|"命中"| R["复用 KV Cache"]
-        L -->|"未命中"| C["计算新 KV Cache"]
-        C --> S["存储到 Store"]
-    end
-```
+{{< trace >}}
+title: "文档第一次出现与第二次出现"
+actors: ["文档 M", "内容索引", "KV Store", "推理进程"]
+steps:
+  - from: 0
+    to: 1
+    label: "查 M"
+    detail: "服务根据文档的 token 内容定位已有缓存。"
+  - from: 1
+    to: 3
+    label: "未命中"
+    detail: "第一次没有对应条目，推理进程计算 M 的 KV。"
+  - from: 3
+    to: 2
+    label: "写入 KV"
+    detail: "缓存存下本次算出的张量，供后续请求查找。"
+  - from: 1
+    to: 2
+    label: "再次查到"
+    detail: "M 再出现时，索引定位旧数据；调用方按新位置与上文决定如何融合。"
+{{< /trace >}}
 
 ### 3.3.3 LRU 驱逐策略
 
@@ -56,22 +67,32 @@ CacheBlend 支持在单一存储设备层级中存储 KV Cache：
 
 Fusor（缓存融合器）通过选择性重计算合并预计算的 KV Cache：
 
-```mermaid
-graph TB
-    subgraph "Fusor 工作流程"
-        subgraph "Layer i"
-            W["等待上一层完成"]
-            L["加载 KV Cache"]
-            R["选择性重计算"]
-            U["更新 KV Cache"]
-        end
-
-        W --> L
-        L --> R
-        R --> U
-        U --> Next["Layer i+1"]
-    end
-```
+{{< stateboard >}}
+title: "Fusor 怎样处理一层中的三段输入"
+rows: ["位置", "旧 KV", "本层结果"]
+steps:
+  - title: "加载命中文档"
+    detail: "例子中 A、B 已有缓存，Q 是新后缀。"
+    cells:
+      - ["A", "B", "Q"]
+      - ["旧A", "旧B", "·"]
+      - ["·", "·", "·"]
+    focus: [[1, 0], [1, 1]]
+  - title: "重算受影响位置"
+    detail: "检查层选择 B，新后缀 Q 也参与计算。"
+    cells:
+      - ["A", "B", "Q"]
+      - ["旧A", "旧B", "·"]
+      - ["·", "新B", "新Q"]
+    focus: [[2, 1], [2, 2]]
+  - title: "组合完整上下文"
+    detail: "当前层继续用旧 A，并使用刚得到的新 B、Q。"
+    cells:
+      - ["A", "B", "Q"]
+      - ["旧A", "旧B", "·"]
+      - ["旧A", "新B", "新Q"]
+    focus: [[2, 0], [2, 1], [2, 2]]
+{{< /stateboard >}}
 
 ### 3.4.2 层级处理流程
 

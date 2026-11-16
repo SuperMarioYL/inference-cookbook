@@ -3,8 +3,6 @@ title: "Module 07 - Expert Parallelism 概览"
 weight: 1
 ---
 
-# Module 07 - Expert Parallelism 概览
-
 ## 1. MoE 背景与 Expert Parallelism 的挑战
 
 ### 1.1 Mixture of Experts (MoE) 基础
@@ -166,33 +164,32 @@ int64_t timeout_ticks = timeout_us == -1 ? -1
 
 ### 4.3 故障恢复流程
 
-```mermaid
-sequenceDiagram
-    participant Healthy as 健康节点群
-    participant Failed as 故障节点 Rank N
-    participant New as 新节点
-
-    Healthy->>Healthy: active_ranks[N] = 0 (超时检测)
-    Healthy->>Healthy: 继续推理,跳过 Rank N 数据
-
-    Note over Failed: 节点崩溃或网络故障
-
-    New->>New: 启动新进程
-    New->>Healthy: init_process_group(is_extension=True)
-
-    loop 轮询恢复
-        Healthy->>Healthy: peer_state = get_peer_state([N])
-        alt 新节点已连接
-            Healthy->>Healthy: recover_ranks([N])
-            Healthy->>New: 同步 task_count
-        else 新节点未就绪
-            Healthy->>Healthy: 继续推理
-        end
-    end
-
-    Healthy->>Healthy: active_ranks[N] = 1
-    Note over Healthy,New: 恢复正常通信
-```
+{{< stateboard >}}
+title: "专家并行组怎样补回失效的 rank"
+rows: ["槽位", "成员", "使用状态"]
+steps:
+  - title: "正常运行"
+    detail: "示例组含 0、1、2 三个 rank 槽位。"
+    cells:
+      - ["0", "1", "2"]
+      - ["A", "B", "C"]
+      - ["启用", "启用", "启用"]
+    focus: [[2, 0], [2, 1], [2, 2]]
+  - title: "节点 B 失联"
+    detail: "弹性路径将槽 1 排除在当前可用成员之外，其余成员按组策略处理。"
+    cells:
+      - ["0", "1", "2"]
+      - ["A", "B", "C"]
+      - ["启用", "停用", "启用"]
+    focus: [[1, 1], [2, 1]]
+  - title: "新节点就位"
+    detail: "替代进程加入并完成所需的恢复与同步后，槽 1 再次参与。"
+    cells:
+      - ["0", "1", "2"]
+      - ["A", "D", "C"]
+      - ["启用", "启用", "启用"]
+    focus: [[1, 1], [2, 1]]
+{{< /stateboard >}}
 
 恢复的关键代码路径:
 
@@ -350,7 +347,3 @@ Mooncake EP 模块与 Mooncake 项目中的其他模块紧密关联:
 - **Transfer Engine**: MooncakeBackend 使用 Transfer Engine 进行跨节点 RDMA 传输
 - **EPLB**: 配合 EP 容错机制,在专家级别实现负载均衡
 - **P2P Store**: 通过 PyTorch c10d Store 进行元数据同步和连接建立
-
----
-
-> **下一篇**: [02-mooncake-backend.md](02-mooncake-backend.md) - 深入分析 MooncakeBackend 作为 PyTorch c10d 后端的实现细节

@@ -1,297 +1,36 @@
 ---
-title: "多引擎抽象层"
+title: "不同后端怎样接入同一个 Dynamo 服务"
 weight: 3
 ---
 
-> 本文介绍 Dynamo 的多引擎抽象层设计，包括 AsyncEngine Trait 和各引擎的适配实现。
+Dynamo frontend 对聊天请求提供统一的 HTTP 入口，worker 加载指定后端并负责模型执行。路由、发现与请求流可以复用。模型支持的采样功能、输入表示、KV 布局以及 P/D 交接协议仍由后端决定。
 
----
+## 先核对镜像，再选择示例
 
-## 1. 设计理念
-
-Dynamo 的核心设计理念之一是 **引擎无关性**——支持多种推理后端，通过统一接口对外暴露服务。
-
-```mermaid
-graph TB
-    subgraph abstract["抽象层"]
-        TRAIT["AsyncEngine Trait"]
-    end
-
-    subgraph engines["引擎实现"]
-        VLLM["vLLM Engine"]
-        TRTLLM["TensorRT-LLM"]
-        SGLANG["SGLang"]
-        MISTRAL["mistral.rs"]
-        LLAMA["llama.cpp"]
-    end
-
-    TRAIT --> VLLM
-    TRAIT --> TRTLLM
-    TRAIT --> SGLANG
-    TRAIT --> MISTRAL
-    TRAIT --> LLAMA
-```
-
----
-
-## 2. 引擎支持情况
-
-| 引擎 | 特点 | Feature Flag | 状态 |
-|------|------|-------------|------|
-| **vLLM** | 最成熟的开源方案，PagedAttention | `vllm` | 生产就绪 |
-| **TensorRT-LLM** | NVIDIA 官方，最高性能 | `trtllm` | 生产就绪 |
-| **SGLang** | RadixAttention，结构化生成 | `sglang` | 支持中 |
-| **mistral.rs** | Rust 原生，轻量级 | `mistralrs` | 实验中 |
-| **llama.cpp** | CPU 友好，GGUF 格式 | `llamacpp` | 实验中 |
-
----
-
-## 3. AsyncEngine Trait
-
-### 3.1 Trait 定义
-
-```rust
-#[async_trait]
-pub trait AsyncEngine<Req: Data, Resp: Data + AsyncEngineContextProvider, E: Data>:
-    Send + Sync
-{
-    async fn generate(&self, request: Req) -> Result<Resp, E>;
-}
-```
-
-### 3.2 类型关系
+| Dynamo 1.6.2 的 CUDA 13 运行时 | 复现时核对什么 |
+|---|---|
+| vLLM | 上游运行时镜像固定在 0.31.0。使用这个版本的参数、模型支持与 `NixlConnector` 交接协议。 |
+| SGLang | 此版运行时采用 0.5.21。分离部署使用 SGLang bootstrap 等信息协调，时序与 vLLM 的同步 prefill 交接不同。 |
+| TensorRT-LLM | 通过其 runtime 和适配层运行，P/D 传播后端自己的 opaque state。确认模型与硬件满足实际配方。 |
 
 ```mermaid
-classDiagram
-    class AsyncEngine~Req,Resp,E~ {
-        <<trait>>
-        +generate(request: Req) Result~Resp,E~
-    }
-
-    class VllmEngine {
-        -cancel_token: CancellationToken
-        -worker: VllmWorker
-        +generate()
-    }
-
-    class TrtllmExecutor {
-        -executor: TrtllmExecutor
-        +generate()
-        +enqueue_request()
-    }
-
-    class SglangEngine {
-        -subprocess: Process
-        +generate()
-    }
-
-    AsyncEngine <|.. VllmEngine
-    AsyncEngine <|.. TrtllmExecutor
-    AsyncEngine <|.. SglangEngine
+flowchart TB
+    C["面向客户端的消息"] --> F["Dynamo frontend"]
+    F --> V["vLLM worker"]
+    F --> S["SGLang worker"]
+    F --> T["TensorRT-LLM worker"]
 ```
 
-### 3.3 统一的输入/输出类型
+图表示可选部署方式。实际发出的请求只能交给已为该模型注册、当前能提供服务的 worker。
 
-| 类型 | 说明 |
-|------|------|
-| **Input** | `SingleIn<BackendInput>` - 已 tokenize 的请求 |
-| **Output** | `ManyOut<Annotated<LLMEngineOutput>>` - 流式输出 |
-| **Error** | `Error` - 统一错误类型 |
+## 比较同一请求在三个边界的表示
 
----
+对于带有系统指令的聊天消息，前端先按模型模板组织文本。路由器使用 token 或相应元信息选择实例，worker 再准备本地执行参数。模板一变，输入 ID 和可复用的前缀长度都可能改变。
 
-## 4. vLLM 引擎实现
+P 完成预填充后，vLLM 后端会传递远端块与连接信息；SGLang 后端使用 bootstrap 信息来协调。两种后端的 D 都需要可读的 KV，开始等待和启动传输的时机各有不同。
 
-### 4.1 VllmEngine 结构
+## 自定义 worker 从什么接口开始
 
-```rust
-pub struct VllmEngine {
-    cancel_token: CancellationToken,
-    worker: worker::VllmWorker,
-}
-```
+从自定义 endpoint 开始，可以先运行收发字符串的 echo 服务，用 client 观察注册与流式返回。接入 LLM frontend 时，还要实现对应的输入输出协议并注册模型。
 
-### 4.2 generate 实现
-
-```rust
-#[async_trait]
-impl AsyncEngine<SingleIn<BackendInput>, ManyOut<Annotated<LLMEngineOutput>>, Error>
-    for VllmEngine
-{
-    async fn generate(&self, request: SingleIn<BackendInput>)
-        -> Result<ManyOut<Annotated<LLMEngineOutput>>, Error>
-    {
-        // 1. 解包请求和上下文
-        let (request, context) = request.into_parts();
-        let ctx = context.context();
-
-        // 2. 创建响应通道
-        let (resp_tx, mut resp_rx) = tokio::sync::mpsc::channel(128);
-
-        // 3. 构造工作请求
-        let work_req = worker::WorkRequest {
-            request_id: context.id().to_string(),
-            request,
-            response_channel: resp_tx,
-        };
-
-        // 4. 入队请求
-        self.worker.enqueue_request(work_req).await?;
-
-        // 5. 构造流式响应
-        let output = stream! {
-            loop {
-                match resp_rx.recv().await {
-                    Some(out) => yield out,
-                    None => break,
-                }
-            }
-        };
-
-        Ok(ResponseStream::new(Box::pin(output), ctx))
-    }
-}
-```
-
-### 4.3 流程图
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant VllmEngine
-    participant Worker as VllmWorker
-    participant vLLM
-
-    Client->>VllmEngine: generate(request)
-    VllmEngine->>VllmEngine: 创建响应通道
-    VllmEngine->>Worker: enqueue_request()
-    Worker->>vLLM: 提交推理请求
-
-    loop Token 生成
-        vLLM-->>Worker: 生成 token
-        Worker-->>VllmEngine: 发送到通道
-        VllmEngine-->>Client: yield token
-    end
-
-    vLLM-->>Worker: 完成
-    Worker-->>VllmEngine: 关闭通道
-```
-
----
-
-## 5. TensorRT-LLM 引擎实现
-
-### 5.1 Executor 结构
-
-TensorRT-LLM 引擎直接与 C++ 库交互：
-
-```rust
-pub struct Executor {
-    inner: TrtllmExecutor,
-    // ...
-}
-```
-
-### 5.2 实现特点
-
-| 特点 | 说明 |
-|------|------|
-| **C++ 绑定** | 通过 FFI 调用 TensorRT-LLM C++ 库 |
-| **编译优化** | 使用预编译的 TensorRT 引擎 |
-| **取消支持** | 支持请求级别的取消 |
-| **状态机** | 使用 unfold 模式构造流 |
-
-### 5.3 取消处理
-
-```rust
-// 启动取消监控任务
-tokio::spawn(async move {
-    tokio::select! {
-        _ = context.stopped() => {
-            // 请求被取消
-            engine_context.cancel();
-            cancel_token.cancel();
-        }
-        _ = tx.closed() => {
-            // 响应流关闭
-        }
-    }
-});
-```
-
----
-
-## 6. 引擎选择指南
-
-```mermaid
-flowchart TD
-    START["选择推理引擎"] --> Q1{"最高性能?"}
-    Q1 --> |是| TRTLLM["TensorRT-LLM"]
-    Q1 --> |否| Q2{"需要灵活性?"}
-
-    Q2 --> |是| VLLM["vLLM"]
-    Q2 --> |否| Q3{"结构化输出?"}
-
-    Q3 --> |是| SGLANG["SGLang"]
-    Q3 --> |否| Q4{"CPU 推理?"}
-
-    Q4 --> |是| LLAMA["llama.cpp"]
-    Q4 --> |否| VLLM
-```
-
-| 场景 | 推荐引擎 | 原因 |
-|------|----------|------|
-| 生产环境，NVIDIA GPU | TensorRT-LLM | 最高性能 |
-| 快速开发，灵活配置 | vLLM | 成熟稳定 |
-| JSON 输出，正则约束 | SGLang | RadixAttention |
-| CPU 推理，边缘设备 | llama.cpp | 轻量级 |
-
----
-
-## 7. 添加新引擎
-
-### 7.1 步骤
-
-1. 实现 `AsyncEngine` Trait
-2. 添加 Feature Flag
-3. 注册到引擎工厂
-
-### 7.2 示例
-
-```rust
-#[cfg(feature = "my_engine")]
-pub mod my_engine;
-
-// my_engine/engine.rs
-pub struct MyEngine {
-    // ...
-}
-
-#[async_trait]
-impl AsyncEngine<SingleIn<BackendInput>, ManyOut<Annotated<LLMEngineOutput>>, Error>
-    for MyEngine
-{
-    async fn generate(&self, request: SingleIn<BackendInput>)
-        -> Result<ManyOut<Annotated<LLMEngineOutput>>, Error>
-    {
-        // 实现推理逻辑
-    }
-}
-```
-
----
-
-## 小结
-
-本文介绍了 Dynamo 的多引擎抽象层：
-
-1. **AsyncEngine Trait**：统一的推理引擎接口
-2. **vLLM 实现**：通过 Worker 子进程调用
-3. **TensorRT-LLM 实现**：直接 C++ 绑定
-4. **引擎选择**：根据场景选择合适的引擎
-
----
-
-## 下一篇
-
-继续阅读 [04-Worker 设计详解](04-worker-design.md)，了解 Dynamo 的 Worker 架构。
+[镜像版本](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/container/context.yaml) · [后端交接协议](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/docs/fern/pages/developer-guide/knowledge-base/concepts/system-architecture/disaggregated-serving.md) · [运行时自定义端点](https://github.com/ai-dynamo/dynamo/tree/v1.6.2/examples/custom_backend/hello_world)

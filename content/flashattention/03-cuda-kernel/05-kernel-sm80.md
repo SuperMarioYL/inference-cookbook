@@ -80,29 +80,27 @@ SM90 TMA:
 
 ### 2.3 关键差异
 
-```mermaid
-graph TB
-    subgraph sm80["SM80 - cp.async"]
-        direction TB
-        SM80_1["所有 N 个线程发起 cp.async"]
-        SM80_2["cp_async_fence()"]
-        SM80_3["cp_async_wait<Stages-2>()"]
-        SM80_4["__syncthreads()"]
-        SM80_5["线程被占用，无法计算"]
-        SM80_1 --> SM80_2 --> SM80_3 --> SM80_4
-        SM80_1 -.-> SM80_5
-    end
-
-    subgraph sm90["SM90 - TMA"]
-        direction TB
-        SM90_1["1 个线程配置 TMA"]
-        SM90_2["TMA 引擎自动传输"]
-        SM90_3["Pipeline Barrier 通知"]
-        SM90_4["其余线程自由计算"]
-        SM90_1 --> SM90_2 --> SM90_3
-        SM90_1 -.-> SM90_4
-    end
-```
+{{< trace >}}
+title: "一块输入怎样从全局内存到矩阵乘"
+actors: ["发起者", "异步拷贝", "共享内存", "矩阵乘"]
+steps:
+  - from: 0
+    to: 1
+    label: "发起拷贝"
+    detail: "SM80 可由线程执行 cp.async 指令，安排所需片段的搬运。"
+  - from: 1
+    to: 2
+    label: "填充共享缓冲"
+    detail: "处理同一 tile 的线程在相应同步点确认数据已就绪。"
+  - from: 2
+    to: 3
+    label: "提供操作数"
+    detail: "计算方从共享布局取得其 MMA 片段，开始本轮计算。"
+  - from: 0
+    to: 2
+    label: "Hopper 的对照"
+    detail: "采用 TMA 的 SM90 路径可由指定线程为整个 tile 发起传输，经 barrier 交给消费者。"
+{{< /trace >}}
 
 | 维度 | SM80 cp.async | SM90 TMA |
 |------|-------------|---------|
@@ -344,26 +342,23 @@ using SmemLayoutQ = decltype(
 
 ### 7.1 端到端性能对比
 
-```mermaid
-graph LR
-    subgraph perf["性能对比（相对值）"]
-        subgraph sm80_perf["SM80 (A100)"]
-            direction TB
-            SP1["基准 1.0×"]
-            SP2["受限于 __syncthreads 频率"]
-            SP3["受限于 164KB 共享内存"]
-        end
-
-        subgraph sm90_perf["SM90 (H100)"]
-            direction TB
-            HP1["通常 1.5~2.5×"]
-            HP2["细粒度 Pipeline 同步"]
-            HP3["228KB 共享内存 + TMA"]
-        end
-
-        sm80_perf -->|"架构升级"| sm90_perf
-    end
-```
+{{< stateboard >}}
+title: "同一个形状怎样比较两代实现"
+rows: ["实验", "输入与精度", "计时口径"]
+steps:
+  - title: "先建立参照"
+    detail: "选相同 B、序列长度、Q/KV 头数、头维、mask 和 FP16 输入，两边先对照同一份输出。"
+    cells: [["核对输出"], ["相同形状"], ["·"]]
+    focus: [[1, 0]]
+  - title: "分别测热态"
+    detail: "在 A100 与 H100 上记录各自的软件包与内核，分别暖机，然后用 CUDA events 采样。"
+    cells: [["测 A、B"], ["FP16"], ["热态时间"]]
+    focus: [[2, 0]]
+  - title: "解释差异"
+    detail: "用 Nsight 查看内核数、DRAM 流量与 Tensor Core 活动，再把差异关联到具体 tile 和搬运路径。"
+    cells: [["读 profile"], ["相同形状"], ["按内核分解"]]
+    focus: [[2, 0]]
+{{< /stateboard >}}
 
 ### 7.2 分块大小对比
 
@@ -383,14 +378,12 @@ SM90 通常使用更大的 kBlockM（得益于更大的共享内存和 Warp Grou
 
 ### 7.3 适用场景总结
 
-| 场景 | SM80 表现 | SM90 表现 | 原因 |
-|------|----------|----------|------|
-| 小 batch, 短序列 | 良好 | 一般 | Warp Specialization 开销相对较高 |
-| 大 batch, 长序列 | 受限 | 优异 | Pipeline 和 TMA 优势充分发挥 |
-| 小 headdim (≤64) | 良好 | 优异 | SM90 的 Q_in_regs + IntraWGOverlap |
-| 大 headdim (256) | 受限 | 良好 | SM90 的 Slice MMA + 更大 SRAM |
-| FP8 | 不支持 | 优异 | Hopper 原生 FP8 Tensor Core |
-| PagedKV | cp.async | cp.async（回退） | 两者类似，SM90 回退到 cp.async |
+| 输入变化 | 应在 trace 中查什么 |
+|---|---|
+| 单 token decode 或很小的 batch | 可并行的工作项、split 数和合并开销 |
+| 长序列且 causal | 实际处理的块数、对角边界上的遮蔽与末块利用率 |
+| 大 head dimension | 每个线程的寄存器使用、共享内存占用和活跃线程块数 |
+| 使用 paged KV | 选中的访存实现、页大小、页表和块内访问模式 |
 
 ### 7.4 设计哲学对比
 
@@ -413,12 +406,12 @@ SM80 和 SM90 的 Flash Attention 实现体现了两代 GPU 架构的根本差�
 
 - **SM90**：硬件辅助的异步编程模型，Producer-Consumer 分离通过 TMA 和 Pipeline 实现加载与计算的完全重叠。GMMA 的异步特性进一步允许计算间的重叠（IntraWGOverlap）。
 
-Flash Attention 充分利用了每代架构的优势，SM90 版本的实现复杂度虽然更高，但性能收益显著——在大多数工作负载下能获得 1.5~2.5 倍的加速。
+对同一输入，记录被选中的块大小、搬运指令及同步等待时间，才能将实际延迟差异定位到对应实现。
 
 ---
 
 ## 导航
 
-- 上一篇：[反向内核实现解析](04-backward-kernel-impl.md)
-- 下一篇：[API 参考](../04-python-api/01-api-reference.md)
-- [返回目录](../README.md)
+- 上一篇：[反向内核实现解析](/flashattention/03-cuda-kernel/04-backward-kernel-impl/)
+- 下一篇：[API 参考](/flashattention/04-python-api/01-api-reference/)
+- [返回目录](/flashattention/00-overview/overview/)

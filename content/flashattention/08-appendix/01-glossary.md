@@ -16,7 +16,7 @@ weight: 1
 ## A-D
 
 ### Attention Sink
-注意力沉积。指在滑动窗口注意力中，保留序列开头若干 token 的注意力连接，即使它们不在窗口范围内。由 `sink_token_length` 参数控制。常用于流式推理场景。
+注意力沉积。指在滑动窗口注意力中，保留序列开头若干 token 的注意力连接，即使它们不在窗口范围内。`sink_token_length` 在所读版本中是 Hopper 内部 mask 结构的字段，FA2 的公开 `flash_attn_func` 没有这一参数。FA4 的 `learnable_sink` 则是参与归一化的每头 sink logit，与保留开头若干真实 token 的窗口语义不同。[Hopper mask](https://github.com/Dao-AILab/flash-attention/blob/fa4-v4.0.0.beta39/hopper/mask.h) · [FA4 接口](https://github.com/Dao-AILab/flash-attention/blob/fa4-v4.0.0.beta39/flash_attn/cute/interface.py)
 
 ### AppendKV
 追加 KV。在推理中将新的 K/V token 追加到已有的 KV Cache 中。`flash_attn_with_kvcache` 通过 `k` 和 `v` 参数实现原地更新。
@@ -161,6 +161,6 @@ Warp 专化。Hopper 架构的编程模型，将同一 Thread Block 中的 Warp 
 
 ## 导航
 
-- 上一篇：[性能测试](../07-usage-tutorial/04-benchmarking.md)
-- 下一篇：[论文阅读指南](02-paper-reading-guide.md)
-- [返回目录](../README.md)
+- 上一篇：[性能测试](/flashattention/07-usage-tutorial/04-benchmarking/)
+- 下一篇：[论文阅读指南](/flashattention/08-appendix/02-paper-reading-guide/)
+- [返回目录](/flashattention/00-overview/overview/)

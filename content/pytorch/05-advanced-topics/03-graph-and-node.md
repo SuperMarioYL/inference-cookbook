@@ -3,7 +3,7 @@ title: "Graph 和 Node 深度解析"
 weight: 3
 ---
 
-> 本文深入解析 `torch.fx` 的两个核心类 `Graph` 和 `Node`。Graph 采用双向链表结构管理节点序列，Node 通过 6 种 opcode 表达计算图中的所有操作。文章涵盖数据结构设计、Use-Def 自动追踪机制、图构建 API 与变更操作，帮助读者掌握 FX 图的底层运作原理。
+FX 用 `Node` 表示一次取输入、调用或返回，用 `Graph` 维护执行顺序。改写图时，还要将使用旧输出的节点重新接到新输出。
 
 ---
 
@@ -359,40 +359,23 @@ static PyObject* NodeBase__update_args_kwargs(
 
 ### 6.2 追踪流程图
 
-```mermaid
-flowchart TB
-    subgraph trigger["触发条件"]
-        A["node.args = new_args"]
-        B["node.kwargs = new_kwargs"]
-        C["Node.__init__(args, kwargs)"]
-    end
-
-    subgraph step1["Step 1 - 清除旧关系"]
-        D["遍历 self._input_nodes 中每个 old_node"]
-        E["从 old_node.users 中删除 self"]
-        F["清空 self._input_nodes"]
-    end
-
-    subgraph step2["Step 2 - 建立新关系"]
-        G["递归遍历 new_args 和 new_kwargs"]
-        H{"是 Node 类型?"}
-        I["self._input_nodes[node] = None"]
-        J["node.users[self] = None"]
-        K["跳过非 Node 值"]
-    end
-
-    A --> D
-    B --> D
-    C --> D
-    D --> E --> F --> G
-    G --> H
-    H -->|"是"| I --> J
-    H -->|"否"| K
-
-    style trigger fill:#E8F4FD,stroke:#2196F3
-    style step1 fill:#FCE4EC,stroke:#E91E63
-    style step2 fill:#E8F5E9,stroke:#4CAF50
-```
+{{< stateboard >}}
+title: "FX 怎样维护使用者集合"
+rows: ["节点 x 的用户", "节点 y 的用户", "z 的输入"]
+steps:
+  - title: "建立两个输入"
+    detail: "图中先只有 placeholder x、y，尚无运算使用它们。"
+    cells: [["无"], ["无"], ["·"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "创建 z=neg(x)"
+    detail: "把 x 作为 z 的输入，FX 会将 z 记录进 x.users。"
+    cells: [["z"], ["无"], ["x"]]
+    focus: [[0, 0], [2, 0]]
+  - title: "改为 neg(y)"
+    detail: "通过 Node 的参数接口把 z 的输入替换为 y，用户关系也随之移动。"
+    cells: [["无"], ["z"], ["y"]]
+    focus: [[0, 0], [1, 0], [2, 0]]
+{{< /stateboard >}}
 
 ### 6.3 all_input_nodes 属性
 
@@ -618,35 +601,9 @@ def node_copy(
 
 ### 8.5 变更操作流程
 
-```mermaid
-flowchart TB
-    subgraph modify["图变更操作"]
-        direction TB
-        OP1["inserting_before / inserting_after\n设置插入点"]
-        OP2["create_node / call_function ...\n在插入点创建新节点"]
-        OP3["replace_all_uses_with\n将旧节点的所有引用替换为新节点"]
-        OP4["erase_node\n删除无 users 的旧节点"]
-    end
+以 x→neg→output 为例。先建立 abs，再把 output 的输入改到新节点。
 
-    OP1 --> OP2
-    OP2 --> OP3
-    OP3 --> OP4
-
-    subgraph example["示例 - 将 relu 替换为 gelu"]
-        E1["with graph.inserting_after(relu_node):"]
-        E2["    gelu = graph.call_function(torch.nn.functional.gelu, relu_node.args)"]
-        E3["relu_node.replace_all_uses_with(gelu)"]
-        E4["graph.erase_node(relu_node)"]
-    end
-
-    OP1 -.-> E1
-    OP2 -.-> E2
-    OP3 -.-> E3
-    OP4 -.-> E4
-
-    style modify fill:#FFF3E0,stroke:#FF9800
-    style example fill:#E8F5E9,stroke:#4CAF50
-```
+{{< mechanism "torch-fx-uses" >}}
 
 ---
 
@@ -802,13 +759,13 @@ analyze_graph(traced.graph)
 
 **本模块后续文章：**
 
-- [Tracer 符号追踪机制](./02-tracer-symbolic-trace.md) -- `symbolic_trace` 如何将 Python 代码转为 Graph
-- [GraphModule 与代码生成](./03-graph-module-codegen.md) -- Graph 如何生成可执行的 Python 代码
-- [FX Pass 编写实战](./04-fx-pass-writing.md) -- 基于 Graph 变换的优化 Pass 编写指南
-- [SubgraphMatcher 子图匹配](./05-subgraph-matcher.md) -- 模式匹配与子图替换
+- [Tracer 符号追踪机制](https://github.com/pytorch/pytorch/blob/v2.15.0/torch/fx/_symbolic_trace.py) -- `symbolic_trace` 如何将 Python 代码转为 Graph
+- [GraphModule 与代码生成](https://github.com/pytorch/pytorch/blob/v2.15.0/torch/fx/graph_module.py) -- Graph 如何生成可执行的 Python 代码
+- [FX Pass 编写实战](https://docs.pytorch.org/docs/2.15/fx.html) -- 基于 Graph 变换的优化 Pass 编写指南
+- [SubgraphMatcher 子图匹配](https://github.com/pytorch/pytorch/blob/v2.15.0/torch/fx/passes/utils/matcher_utils.py) -- 模式匹配与子图替换
 
 **关联模块：**
 
-- [Module 0 - 架构总览](../module-00-overview/00-architecture-overview.md) -- PyTorch 整体架构中 FX 的位置
-- [Module 8 - Dynamo](../module-08-dynamo/00-dynamo-overview.md) -- Dynamo 如何利用 FX Graph 作为后端 IR
-- [Module 9 - Inductor](../module-09-inductor/00-inductor-overview.md) -- Inductor 编译器如何消费 FX Graph
+- [Module 0 - 架构总览](/pytorch/00-overview/01-architecture-overview/) -- PyTorch 整体架构中 FX 的位置
+- [Module 8 - Dynamo](/pytorch/05-advanced-topics/04-dynamo-tutorial/) -- Dynamo 如何利用 FX Graph 作为后端 IR
+- [Module 9 - Inductor](/pytorch/05-advanced-topics/07-inductor-overview/) -- Inductor 编译器如何消费 FX Graph

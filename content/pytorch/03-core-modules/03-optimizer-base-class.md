@@ -3,7 +3,7 @@ title: "Optimizer 基类设计"
 weight: 3
 ---
 
-> 本文深入分析 `torch/optim/optimizer.py` 中 `Optimizer` 基类的实现，涵盖初始化流程、参数组管理、状态维护、序列化机制、Hook 系统以及性能优化策略。
+同一个优化器可以给两组参数使用不同的学习率。`param_groups` 保存各组的超参数，`state` 记录与单个参数相关的动量等状态。
 
 ## 1. 整体架构
 
@@ -301,7 +301,7 @@ def _use_grad_for_differentiable(func):
 **关键行为**：
 - 当 `differentiable=False`（默认）时，`step()` 在 `no_grad` 上下文中执行，这是因为大多数情况下不需要对优化器步骤求导。
 - 当 `differentiable=True` 时（用于 meta-learning），`step()` 在 `enable_grad` 上下文中执行，使得参数更新本身可以被 autograd 追踪。
-- `graph_break()` 调用确保 `torch.compile` 在此处切断计算图。这对 Inductor 的性能优化至关重要（见注释中关于 functionalization 和 epilogue 的说明）。
+- `graph_break()` 在这里划出图边界。跟踪编译后的参数更新时，可以分别检查边界两侧的图。
 
 ## 6. `state_dict` / `load_state_dict` - 序列化
 

@@ -6,4 +6,4 @@ description: >
   与 vLLM、SGLang 等主流推理框架的集成方案
 ---
 
-本部分详细说明如何将 Mooncake 与现有推理框架集成,包括 API 使用和集成模式。
+先选需要交接同一个请求，还是让不同请求共享已算好的前缀，再选对应 connector。vLLM 和 SGLang 各有直传与 Store 接入说明。[vLLM](./01-vllm-integration.md) · [SGLang](./02-sglang-integration.md)

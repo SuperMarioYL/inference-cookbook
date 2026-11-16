@@ -3,7 +3,7 @@ title: "通信基础"
 weight: 1
 ---
 
-> 本文档介绍分布式系统通信的基础概念，为理解 Dynamo 的三平面架构提供背景知识。
+RPC 适合传递与当前调用相关的请求和响应，发布订阅适合推送可异步处理的状态变化，设备内存复制还涉及传输完成与所有权。下面用这些区别解释 [Dynamo 1.6.2 的通信平面](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/docs/fern/pages/developer-guide/knowledge-base/concepts/system-architecture/architecture.md)。
 
 ---
 
@@ -115,27 +115,27 @@ graph TB
 
 ### 3.1 消息队列的作用
 
-```mermaid
-graph LR
-    subgraph producer["生产者"]
-        P1["Producer 1"]
-        P2["Producer 2"]
-    end
-
-    subgraph queue["消息队列"]
-        Q["Queue<br/>缓冲 & 持久化"]
-    end
-
-    subgraph consumer["消费者"]
-        C1["Consumer 1"]
-        C2["Consumer 2"]
-    end
-
-    P1 --> Q
-    P2 --> Q
-    Q --> C1
-    Q --> C2
-```
+{{< stateboard >}}
+title: 生产和消费短时不同速
+rows: ["消息队列", "正在处理"]
+steps:
+  - title: "生产两项"
+    detail: "生产者连续写入 A、B，消费者暂时空闲。"
+    cells: [["A", "B"], ["·", "·"]]
+    focus: [[0, 0], [0, 1]]
+  - title: "取出 A"
+    detail: "消费者开始处理 A，队列里还剩 B。"
+    cells: [["B", "·"], ["A", "·"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "C 抵达"
+    detail: "A 仍在计算，队列保存后来的 C。"
+    cells: [["B", "C"], ["A", "·"]]
+    focus: [[0, 1]]
+  - title: "继续消费"
+    detail: "A 处理完后轮到 B，C 等待下一次读取。"
+    cells: [["C", "·"], ["B", "·"]]
+    focus: [[0, 0], [1, 0]]
+{{< /stateboard >}}
 
 ### 3.2 核心功能
 
@@ -250,55 +250,18 @@ graph TB
 
 ## 6. 与 Dynamo 的关联
 
-### 6.1 三平面架构预览
-
-Dynamo 将通信需求分为三个独立的平面：
+### 三类运行时流量
 
 ```mermaid
-graph TB
-    subgraph control["控制平面"]
-        E["etcd"]
-        E --> REG["服务注册"]
-        E --> DISC["服务发现"]
-        E --> LEASE["租约管理"]
-    end
-
-    subgraph event["事件平面"]
-        N["NATS"]
-        N --> PUB["发布订阅"]
-        N --> QUEUE["工作队列"]
-        N --> METRICS["指标收集"]
-    end
-
-    subgraph data["数据平面"]
-        D["NIXL/TCP"]
-        D --> KV["KV Cache 传输"]
-        D --> STREAM["流式响应"]
-    end
+flowchart LR
+    W["Worker"] --> D["发现服务与成员注册"]
+    FE["Frontend"] --> RPC["请求与响应"]
+    RPC --> W
+    W --> E["KV 事件与遥测"]
+    E --> R["路由索引"]
 ```
 
-### 6.2 技术选型理由
-
-| 平面 | 技术 | 选型理由 |
-|------|------|----------|
-| 控制 | etcd | 强一致性、Watch 支持、成熟稳定 |
-| 事件 | NATS | 高性能、轻量级、多模式支持 |
-| 数据 | NIXL | RDMA 支持、GPU 直传、零拷贝 |
-
----
-
-## 总结
-
-分布式通信的核心概念：
-
-1. **通信模式**：请求-响应、发布-订阅、广播
-2. **服务发现**：动态寻址、健康检查、负载均衡
-3. **消息队列**：异步解耦、流量削峰、可靠传递
-4. **高性能传输**：RDMA、零拷贝、低延迟
-
-理解这些基础概念，是深入学习 Dynamo 三平面架构的前提。
-
----
+从发现得到成员地址后，运行时默认用 TCP 传递请求，以 ZMQ 发布事件。这两者可独立改为 NATS。跨 GPU 的 KV 由后端及其连接器传输。排查缺块时应看连接器的完成通知。具体部署条件见[通信平面](/dynamo/05-distributed-communication/02-three-plane-architecture/)。
 
 ## 参考资料
 

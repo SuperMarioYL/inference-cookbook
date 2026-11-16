@@ -3,20 +3,9 @@ title: "投机解码"
 weight: 4
 ---
 
-## 概述
+## 草稿与目标模型各做什么
 
-### 本章学习目标
-- 理解推测解码的原理
-- 掌握 SGLang 支持的推测方法
-- 了解 EAGLE 和 NGRAM 实现
-- 学习配置和调优
-
-### 前置知识要求
-- 了解 LLM 自回归生成
-- 熟悉 Decode 阶段特点
-- 理解并行计算概念
-
----
+目标模型负责验证候选并提交输出，草稿质量与每轮验证开销共同决定速度。EAGLE 部署需要选与目标模型匹配的草稿权重，然后记录实际提交长度；仅看到草稿模型成功加载还不足以解释加速。 [草稿算法与参数](https://github.com/sgl-project/sglang/blob/v0.5.23/docs/docs/advanced_features/speculative_decoding.mdx)
 
 ## 推测解码原理
 
@@ -64,29 +53,31 @@ graph TB
 
 ### 完整流程
 
-```mermaid
-sequenceDiagram
-    participant D as Draft 模型
-    participant T as Target 模型
-
-    Note over D,T: 推测解码循环
-
-    D->>D: 生成 k 个候选 token
-    D-->>T: [d1, d2, d3, d4]
-
-    T->>T: 并行验证所有位置
-    T-->>T: 计算每个位置的概率
-
-    alt 全部接受
-        T->>T: 接受 [d1, d2, d3, d4]
-        Note over T: 加速 4x
-    else 部分接受
-        T->>T: 接受 [d1, d2]
-        T->>T: 拒绝 [d3, d4]
-        T->>T: 采样新 token t3
-        Note over T: 加速 2x
-    end
-```
+{{< trace >}}
+title: 四个草稿 token 演算一次验证
+actors: ["草稿模型", "目标模型", "已提交序列"]
+steps:
+  - from: 0
+    to: 1
+    label: "提出 A B C D"
+    detail: "四个候选以同一段已确认前缀为起点。"
+  - from: 1
+    to: 1
+    label: "检查四处"
+    detail: "目标模型计算相应位置的分布。"
+  - from: 1
+    to: 2
+    label: "接受 A B"
+    detail: "示例前两个候选通过验证，加入本轮提交序列。"
+  - from: 1
+    to: 2
+    label: "第三处改为 X"
+    detail: "第三个候选被拒绝，用验证算法的替代 token X 收尾。"
+  - from: 2
+    to: 0
+    label: "从 A B X 继续"
+    detail: "原草稿 D 依赖已被替换的 C，下一轮从已提交前缀重新起草。"
+{{< /trace >}}
 
 ### 验证机制
 
@@ -146,7 +137,7 @@ graph TB
 基于 N-gram 统计的推测：
 
 ```python
-def ngram_speculate(context, n=3):
+def ngram_speculate(context, n=3, k=4):
     """使用 N-gram 推测"""
     # 查找历史中的匹配
     suffix = context[-n:]
@@ -160,24 +151,33 @@ def ngram_speculate(context, n=3):
 特点：
 - 无额外模型
 - 对重复文本有效
-- 零计算开销
+- 在已有 token 序列里查找候选，目标模型仍需验证
 
 ---
 
 ## EAGLE 实现
 
+下面采用 0.5.23 文档给出的目标模型和草稿权重，需要具有读取对应 Llama 模型的权限。显式设置候选预算时也要配套设置推测步数与分支宽度。[参数处理](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/arg_groups/speculative_hook.py)
+
 ### 配置
 
 ```bash
-# 启用 EAGLE
-python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+python3 -m sglang.launch_server \
+    --model meta-llama/Meta-Llama-3-8B-Instruct \
     --speculative-algorithm EAGLE \
-    --speculative-eagle-path /path/to/eagle/weights \
-    --speculative-num-draft-tokens 5
+    --speculative-draft-model-path lmsys/sglang-EAGLE-LLaMA3-Instruct-8B \
+    --speculative-num-steps 3 \
+    --speculative-eagle-topk 4 \
+    --speculative-num-draft-tokens 16 \
+    --speculative-token-map thunlp/LLaMA3-Instruct-8B-FR-Spec/freq_32768.pt \
+    --mem-fraction-static 0.7 \
+    --cuda-graph-max-bs-decode 8 \
+    --dtype float16
 ```
 
-### 核心代码
+### 简化的执行过程
+
+下例用伪代码区分草稿生成与验证。实际候选可以组成一棵树。
 
 ```python
 class EAGLESpeculator:
@@ -215,7 +215,7 @@ class EAGLESpeculator:
 ```bash
 # 启用 NGRAM
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --speculative-algorithm NGRAM \
     --speculative-num-draft-tokens 4
 ```
@@ -247,39 +247,11 @@ class NGRAMSpeculator:
 
 ---
 
-## 性能分析
+## 如何由接受长度计算每个输出 token 的成本
 
-### 加速比
+记录每轮最终提交的输出 token 数，以及 proposal、verify 和控制流的总耗时。假设常规解码平均每个 token 需 10 ms，而一次投机轮耗时 16 ms 并平均提交 2 个 token；同一负载下，教学估算是每个输出 token 8 ms、速度比 1.25。若只平均提交 1 个，成本上升到 16 ms。这个算例用于解释为何接受率高也不必然获得线性加速。
 
-```
-加速比 = 平均接受长度 / (Draft 开销 + 验证开销)
-
-理想情况 (接受率 100%):
-- 推测 5 tokens -> 加速 ~4x
-
-实际情况 (接受率 60-80%):
-- 推测 5 tokens -> 加速 ~2-3x
-```
-
-### 影响因素
-
-| 因素 | 影响 |
-|------|------|
-| Draft 质量 | 接受率 |
-| 推测长度 | 潜在加速 |
-| 验证开销 | 实际加速 |
-| 任务类型 | 接受率 |
-
-### 任务适配性
-
-| 任务 | EAGLE 加速 | NGRAM 加速 |
-|------|-----------|-----------|
-| 代码生成 | 2-3x | 1.5-2x |
-| 翻译 | 2x | 1.2x |
-| 摘要 | 1.8x | 1.1x |
-| 创意写作 | 1.5x | 1.0x |
-
----
+把代码、翻译和摘要请求分组，固定目标模型与采样设置，各自记录接受长度分布和端到端延迟。相同草稿长度下，EAGLE 额外执行草稿模型，n-gram 花时间查询已有序列。
 
 ## 高级配置
 
@@ -401,26 +373,3 @@ graph TB
 | 实时翻译 | 不推荐 | - |
 
 ---
-
-## 小结
-
-### 要点回顾
-
-1. **原理**：小模型预测，大模型验证
-2. **方法**：EAGLE（高质量）、NGRAM（零开销）
-3. **加速**：实际 2-3x，取决于接受率
-4. **适用**：代码、重复文本效果好
-
-### 对比总结
-
-| 方法 | 需要额外模型 | 接受率 | 开销 |
-|------|-------------|--------|------|
-| EAGLE | 是 | 高 | 中 |
-| NGRAM | 否 | 中 | 低 |
-
-### 下一章预告
-
-在模块六《分布式与并行篇》中，我们将：
-- 了解张量并行原理
-- 学习流水线并行
-- 掌握专家并行

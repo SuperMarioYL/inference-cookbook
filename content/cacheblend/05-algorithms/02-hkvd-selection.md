@@ -3,7 +3,7 @@ title: "HKVD 选择算法"
 weight: 2
 ---
 
-本文档详细介绍 CacheBlend 中 HKVD（High KV Divergence）Token 选择算法的原理与实现。该算法是 CacheBlend 的核心创新之一，通过识别 KV Cache 偏差最大的 Token 进行选择性重计算。
+手册里有四个可复用位置，只够重算其中一个。原型在检查层对每个位置的新旧 V 求平方差，选择分数最高的位置，再加上本次查询的后缀。
 
 ---
 
@@ -64,29 +64,11 @@ if status in [1]:
 
 ## 5.2.3 算法详解
 
-```mermaid
-graph TB
-    subgraph hkvd["HKVD 选择算法"]
-        Input["输入: value, value_old, suffix_len, recomp_ratio"]
+{{< mechanism "cacheblend-hkvd-bars" >}}
 
-        Step1["1. 计算前缀长度<br>prefix_len = total_len - suffix_len"]
-        Step2["2. 计算 L2 差异<br>diff[i] = Σ(V[i] - V_old[i])²"]
-        Step3["3. Top-K 选择<br>topk_num = prefix_len × recomp_ratio"]
-        Step4["4. 排序索引"]
-        Step5["5. 合并后缀索引<br>保证后缀 token 被保留"]
-        Step6["6. 过滤 Query"]
-        Step7["7. 保存到 imp_indices"]
+## 5.2.4 原型用 V 计算偏差
 
-        Input --> Step1 --> Step2 --> Step3 --> Step4 --> Step5 --> Step6 --> Step7
-
-        Output["输出: imp_indices, filtered_query, attn_bias"]
-        Step7 --> Output
-    end
-```
-
-## 5.2.4 为什么使用 Value 差异而不是 Key 差异？
-
-从代码可以看出，HKVD 选择使用的是 Value 的差异：
+HKVD 选择使用的是 Value 的差异：
 
 ```python
 temp_diff = torch.sum((value[:-last_len,:,:] - value_old[:-last_len,:,:])**2, dim=[1,2])

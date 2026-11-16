@@ -3,9 +3,9 @@ title: "Pipeline 架构"
 weight: 5
 ---
 
-> 本文介绍 Dynamo 的 Pipeline 架构，包括 AsyncEngine Trait 体系、Pipeline 类型系统、Source/Sink/Operator 模式以及 Context 上下文传递。
+## 沿请求方向读数据，沿响应方向读结果
 
----
+一次请求可以依次经过多个操作，响应又可能由一个异步流分段到达。将请求类型、响应项类型和取消状态分别写出，可以在多阶段处理里区分“下游没收到输入”和“上游还没消费输出”。 [Pipeline 源码](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/runtime/src/pipeline.rs)
 
 ## 1. AsyncEngine Trait 体系
 
@@ -66,18 +66,27 @@ classDiagram
 
 Context 提供了对流的控制能力：
 
-```mermaid
-stateDiagram-v2
-    [*] --> Live: 创建
-    Live --> Stopped: stop_generating()
-    Live --> Killed: kill()
-    Stopped --> Killed: kill()
-    Stopped --> [*]: 正常完成
-    Killed --> [*]: 立即终止
-
-    note right of Stopped: 完成当前 Token<br/>不再生成新 Token
-    note right of Killed: 立即停止<br/>丢弃所有未发送的 Token
-```
+{{< trace >}}
+title: 客户端取消时谁结束流
+actors: ["客户端", "上游阶段", "下游阶段"]
+steps:
+  - from: 0
+    to: 1
+    label: "请求开始"
+    detail: "上游为这次生成建立携带取消状态的上下文。"
+  - from: 1
+    to: 2
+    label: "传递上下文"
+    detail: "下游执行工作并持续产出响应项。"
+  - from: 0
+    to: 1
+    label: "中断请求"
+    detail: "客户端断开，取消信号沿处理链向下游传播。"
+  - from: 2
+    to: 2
+    label: "释放本次工作"
+    detail: "下游在自己的取消检查点退出，剩余资源随调用生命周期清理。"
+{{< /trace >}}
 
 | 方法 | 说明 |
 |------|------|
@@ -323,38 +332,31 @@ graph LR
 
 ### 5.2 请求处理流程
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant Frontend as Frontend Source
-    participant Processor as Processor Operator
-    participant Worker as Worker Engine
-
-    Client->>Frontend: HTTP Request
-    Frontend->>Processor: Context<Request>
-
-    Note over Processor: Tokenization
-    Note over Processor: Apply Chat Template
-
-    Processor->>Worker: Context<TokenizedRequest>
-
-    loop Token Generation
-        Worker-->>Processor: Context<Token>
-        Processor-->>Frontend: Context<Response>
-        Frontend-->>Client: SSE Event
-    end
-```
-
----
-
-## 小结
-
-本文介绍了 Dynamo 的 Pipeline 架构：
-
-1. **AsyncEngine**：核心推理引擎抽象
-2. **Pipeline 类型**：Unary、Client Streaming、Server Streaming、Bidirectional
-3. **Source/Sink/Operator**：数据流处理模式
-4. **Context**：携带请求数据和元信息
+{{< trace >}}
+title: 同一请求的去程与回程
+actors: ["调用方", "前端", "处理阶段", "Worker"]
+steps:
+  - from: 0
+    to: 1
+    label: "输入消息"
+    detail: "一次聊天请求进入 frontend，保留请求上下文。"
+  - from: 1
+    to: 2
+    label: "准备模型输入"
+    detail: "处理阶段把输入组织成当前后端接受的格式。"
+  - from: 2
+    to: 3
+    label: "交给实例"
+    detail: "选中的模型 worker 执行推理。"
+  - from: 3
+    to: 2
+    label: "逐段产生结果"
+    detail: "流中可以先后出现多项输出，处理阶段继续携带原请求标识。"
+  - from: 1
+    to: 0
+    label: "写回连接"
+    detail: "前端把每一段可见结果发回发起请求的连接。"
+{{< /trace >}}
 
 ---
 

@@ -3,21 +3,11 @@ title: "PyTorch 源码架构全景"
 weight: 1
 ---
 
-## 概述
+`torch.add(a, b)` 只写了一行。换一张设备、打开梯度记录，执行这行代码时经过的内核就可能不同。读 PyTorch 2.15 源码，可以沿这次加法找三个入口。
 
-PyTorch 作为当前最主流的深度学习框架之一，其源码规模庞大、模块繁多。要系统地理解它，首先需要建立一个清晰的架构心智模型。本篇将从最高层的视角出发，解析 PyTorch 的三层架构设计 —— Python 层、C++ 绑定层、核心 C++ 层 —— 并梳理各层之间的通信机制与依赖关系，帮助读者在后续深入阅读各模块源码前建立全局认知。
+## 从 Python 调用到设备内核
 
-本篇是整个源码分析系列的第一篇，也是最重要的一篇。后续所有模块分析都建立在这里的架构认知之上。
-
-## 前置知识
-
-- 具备 PyTorch 基本使用经验（能编写简单的训练循环）
-- 了解 Python 与 C/C++ 的基本交互概念（如 CPython Extension）
-- 对深度学习基本概念有所了解（张量、梯度、反向传播）
-
-## 核心概念 - PyTorch 三层架构
-
-PyTorch 的源码可以划分为三个清晰的层次，每一层有明确的职责边界。理解这三层的分工与协作，是理解整个代码库的基础。
+Python 端接收张量，绑定层把参数交给 ATen。Dispatcher 根据算子和分发键找到实现，CPU 或设备内核读取张量的底层存储。下面的目录图标出了沿途会遇到的模块。
 
 ```mermaid
 flowchart TB
@@ -157,31 +147,17 @@ PyTorch 的一个重要特色是大量使用代码生成。`torchgen/` 读取 `a
 
 ## 三层之间的通信机制
 
-理解三层架构不仅要知道每层做什么，还要理解它们如何协作。以下通过一个具体例子 —— `torch.add(a, b)` 的调用链 —— 来展示这个过程。
+给两个 CPU 张量做逐元素加法。Python 代码只需要 `torch.add(a, b)`，下面沿一次普通的 float32 调用跟到结果。
 
-```mermaid
-sequenceDiagram
-    participant User as "用户 Python 代码"
-    participant TorchPy as "torch/ (Python 层)"
-    participant Csrc as "torch/csrc/ (绑定层)"
-    participant Dispatch as "c10 Dispatcher"
-    participant ATen as "ATen native kernel"
-
-    User->>TorchPy: torch.add(a, b)
-    TorchPy->>Csrc: 通过自动生成的 Python 绑定调用
-    Note over Csrc: THPVariable_add<br/>自动生成的包装函数
-    Csrc->>Dispatch: 调用 Dispatcher::call()
-    Note over Dispatch: 根据 DispatchKeySet<br/>选择正确的 kernel
-    Dispatch->>ATen: 路由到具体 kernel
-    Note over ATen: 如 at::native::add<br/>CPU 或 CUDA 实现
-
-    alt Autograd 模式开启
-        Dispatch-->>Csrc: 先经过 Autograd Key
-        Note over Csrc: 记录反向传播信息<br/>然后再分发到实际 kernel
-    end
-
-    ATen-->>User: 返回结果 Tensor
-```
+{{< trace >}}
+title: 两个 CPU 张量相加
+actors: ["Python", "算子绑定", "Dispatcher", "CPU 内核"]
+steps:
+  - {from: 0, to: 1, label: "传入 a、b", detail: "a 为 [1, 2, 3]，b 为 [4, 5, 6]。绑定层将参数对应到 aten::add.Tensor 的签名。"}
+  - {from: 1, to: 2, label: "调用 aten::add", detail: "分发器结合输入张量和线程当前的分发键选择实现。"}
+  - {from: 2, to: 3, label: "执行 CPU 加法", detail: "两组输入在 CPU 上。内核依次计算 1+4、2+5、3+6，并将三个结果写入输出。"}
+  - {from: 3, to: 0, label: "返回结果", detail: "Python 调用得到 [5, 7, 9]。需要记录梯度时，自动求导包装层还会为输出接上反向图。"}
+{{< /trace >}}
 
 ### 通信机制的关键细节
 
@@ -251,7 +227,7 @@ flowchart BT
 
 ## 实战示例 - 追踪一个简单操作的完整链路
 
-以一个最简单的操作为例，帮助读者建立从用户代码到底层执行的完整直觉：
+给前面那两个张量赋值，打印算子的实际输出。
 
 ```python
 import torch
@@ -299,7 +275,7 @@ ATen Kernel: aten/src/ATen/native/
     CUDA: 启动 GPU kernel
 ```
 
-下面通过代码定位关键源文件，帮助读者亲自验证这条链路：
+在对应版本的源码树中，可以从这些入口定位刚才的调用。
 
 **Python 层入口** - Tensor 的 `__add__` 方法：
 ```
@@ -399,13 +375,13 @@ PyTorch 的三层架构是理解其源码的钥匙。回顾要点：
 3. **代码生成驱动一致性** - `torchgen/` 从单一声明源（`native_functions.yaml`）生成跨层代码
 4. **Python 负责灵活性，C++ 负责性能** - 两种语言各取所长
 
-掌握这个架构全景后，读者可以进入后续模块的深度分析。建议先阅读 [Module 1 - Tensor 与 Storage](../module-01-tensor-storage/) 了解最底层的数据结构，或者跳到 [Module 3 - NN Module](../module-03-nn-module/) 从最熟悉的用户 API 开始深入。
+掌握这个架构全景后，读者可以进入后续模块的深度分析。建议先阅读 [Module 1 - Tensor 与 Storage](/pytorch/01-introduction/01-tensor-basics-tutorial/) 了解最底层的数据结构，或者跳到 [Module 3 - NN Module](/pytorch/03-core-modules/01-module-core-mechanism/) 从最熟悉的用户 API 开始深入。
 
 ## 延伸阅读
 
-- **本系列下一篇**: [01-build-and-dev-setup.md](01-build-and-dev-setup.md) - 环境搭建与开发工作流
-- **Module 1**: [Tensor 与 Storage 系统](../module-01-tensor-storage/) - 深入 TensorImpl 和内存管理
-- **Module 5**: [算子分发系统](../module-05-dispatch/) - Dispatcher 的完整工作机制
-- **Module 6**: [TorchDynamo](../module-06-dynamo/) - torch.compile 的图捕获原理
+- **本系列下一篇**: [01-build-and-dev-setup.md](/pytorch/00-overview/02-build-and-dev-env/) - 环境搭建与开发工作流
+- **Module 1**: [Tensor 与 Storage 系统](/pytorch/01-introduction/01-tensor-basics-tutorial/) - 深入 TensorImpl 和内存管理
+- **Module 5**: [算子分发系统](/pytorch/03-core-modules/07-dispatcher-core/) - Dispatcher 的完整工作机制
+- **Module 6**: [TorchDynamo](/pytorch/05-advanced-topics/04-dynamo-tutorial/) - torch.compile 的图捕获原理
 - **PyTorch 官方设计文档**: PyTorch RFC 和 dev-discuss 论坛中有大量架构讨论
 - **PyTorch 官方 C++ 文档**: https://pytorch.org/cppdocs/ - LibTorch API 参考

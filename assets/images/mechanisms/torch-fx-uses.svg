@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 472 230" role="img" aria-labelledby="torch-fx-uses-title">
+  <title id="torch-fx-uses-title">替换 FX 节点的使用者</title>
+  <desc>上方弧线表示 output 当前读取哪个中间结果。</desc>
+<defs><marker id="torch-fx-uses-end" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+<text x="14" y="28" class="diagram-title" text-anchor="start">替换 FX 节点的使用者</text>
+
+  <g data-frame="0">
+    <title>原图</title>
+    <desc>对 x 求负，output 读取 neg 的结果。</desc>
+    <text x="17" y="67" class="label" text-anchor="start">图节点</text>
+    <text x="17" y="175" class="label" text-anchor="start">实际输入边</text>
+    <rect x="17" y="89" width="81" height="34" rx="4" class="idle"/><text x="57.5" y="111" class="label" text-anchor="middle">x</text>
+    <rect x="115" y="89" width="81" height="34" rx="4" class="idle"/><text x="155.5" y="111" class="label" text-anchor="middle">neg</text>
+    <rect x="326" y="89" width="99" height="34" rx="4" class="idle"/><text x="375.5" y="111" class="label" text-anchor="middle">output</text>
+    <path d="M99,107 L111,107" class="edge" marker-end="url(#torch-fx-uses-end)"/>
+    <path d="M155 89 V76 H375 V86" class="edge" marker-end="url(#torch-fx-uses-end)"/>
+    <text x="18" y="212" class="note" text-anchor="start">output 读取 neg(x)</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>插入 abs</title>
+    <desc>图中现在同时有 neg(x) 和 abs(x)，插入本身不会改变返回值。</desc>
+    <text x="17" y="67" class="label" text-anchor="start">图节点</text>
+    <text x="17" y="175" class="label" text-anchor="start">实际输入边</text>
+    <rect x="17" y="89" width="81" height="34" rx="4" class="idle"/><text x="57.5" y="111" class="label" text-anchor="middle">x</text>
+    <rect x="115" y="89" width="81" height="34" rx="4" class="idle"/><text x="155.5" y="111" class="label" text-anchor="middle">neg</text>
+    <rect x="220" y="89" width="81" height="34" rx="4" class="fresh"/><text x="260.5" y="111" class="label" text-anchor="middle">abs</text>
+    <rect x="326" y="89" width="99" height="34" rx="4" class="idle"/><text x="375.5" y="111" class="label" text-anchor="middle">output</text>
+    <path d="M99,107 L111,107" class="edge" marker-end="url(#torch-fx-uses-end)"/>
+    <path d="M58 125 V142 H260 V128" class="edge" marker-end="url(#torch-fx-uses-end)"/>
+    <path d="M155 89 V76 H375 V86" class="edge" marker-end="url(#torch-fx-uses-end)"/>
+    <text x="18" y="212" class="note" text-anchor="start">abs(x) 已插入，output 仍读取 neg</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>迁移使用者</title>
+    <desc>旧节点的使用者改为引用 abs；此时 neg 可以移除。</desc>
+    <text x="17" y="67" class="label" text-anchor="start">图节点</text>
+    <text x="17" y="175" class="label" text-anchor="start">实际输入边</text>
+    <rect x="17" y="89" width="81" height="34" rx="4" class="idle"/><text x="57.5" y="111" class="label" text-anchor="middle">x</text>
+    <rect x="115" y="89" width="81" height="34" rx="4" class="idle"/><text x="155.5" y="111" class="label" text-anchor="middle">neg</text>
+    <rect x="220" y="89" width="81" height="34" rx="4" class="idle"/><text x="260.5" y="111" class="label" text-anchor="middle">abs</text>
+    <rect x="326" y="89" width="99" height="34" rx="4" class="fresh"/><text x="375.5" y="111" class="label" text-anchor="middle">output</text>
+    <path d="M99,107 L111,107" class="edge" marker-end="url(#torch-fx-uses-end)"/>
+    <path d="M58 125 V142 H260 V128" class="edge" marker-end="url(#torch-fx-uses-end)"/>
+    <path d="M261 89 V76 H375 V86" class="edge" marker-end="url(#torch-fx-uses-end)"/>
+    <text x="18" y="212" class="note" text-anchor="start">旧引用已改到 abs；neg 没有用户</text>
+  </g>
+  <g data-frame="3" display="none">
+    <title>删除旧节点</title>
+    <desc>erase_node 去掉已无用户的 neg，随后 lint 和 recompile。</desc>
+    <text x="17" y="67" class="label" text-anchor="start">图节点</text>
+    <text x="17" y="175" class="label" text-anchor="start">实际输入边</text>
+    <rect x="17" y="89" width="81" height="34" rx="4" class="idle"/><text x="57.5" y="111" class="label" text-anchor="middle">x</text>
+    <rect x="220" y="89" width="81" height="34" rx="4" class="idle"/><text x="260.5" y="111" class="label" text-anchor="middle">abs</text>
+    <rect x="326" y="89" width="99" height="34" rx="4" class="fresh"/><text x="375.5" y="111" class="label" text-anchor="middle">output</text>
+    <path d="M58 125 V142 H260 V128" class="edge" marker-end="url(#torch-fx-uses-end)"/>
+    <path d="M261 89 V76 H375 V86" class="edge" marker-end="url(#torch-fx-uses-end)"/>
+    <text x="18" y="212" class="note" text-anchor="start">移除 neg，再生成 GraphModule.forward</text>
+  </g>
+</svg>

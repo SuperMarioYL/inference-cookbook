@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 452 250" role="img" aria-labelledby="vllm-blocks-title">
+  <title id="vllm-blocks-title">两条请求如何共享前 32 个 token</title>
+  <desc>块长 16。P0 和 P1 保存共同前缀，P2 保存请求 B 的后缀。</desc>
+  <defs><marker id="vllm-blocks-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" class="arrowhead"/></marker></defs>
+  <text x="15" y="28" class="diagram-title" text-anchor="start">两条请求如何共享前 32 个 token</text>
+  <text x="16" y="84" class="label" text-anchor="start">物理块</text>
+  <text x="16" y="125" class="label" text-anchor="start">引用数</text>
+  <text x="16" y="179" class="label" text-anchor="start">token</text>
+  <text x="16" y="226" class="note" text-anchor="start">每块 16 个 token</text>
+  <g data-frame="0">
+    <title>A 写满两个块</title>
+    <desc>A 的前 32 个 token 写入 P0、P1。每个物理块都有一个请求引用。</desc>
+    <rect x="111" y="59" width="89" height="37" rx="5" class="stored"/>
+    <text x="155.5" y="82.5" class="label" text-anchor="middle">P0</text>
+    <rect x="212" y="59" width="89" height="37" rx="5" class="stored"/>
+    <text x="256.5" y="82.5" class="label" text-anchor="middle">P1</text>
+    <rect x="313" y="59" width="115" height="37" rx="5" class="idle"/>
+    <text x="370.5" y="82.5" class="label" text-anchor="middle">可分配</text>
+    <text x="156" y="124" class="number" text-anchor="middle">1</text>
+    <text x="257" y="124" class="number" text-anchor="middle">1</text>
+    <text x="370" y="124" class="number" text-anchor="middle">0</text>
+    <rect x="111" y="155" width="89" height="37" rx="5" class="stored"/>
+    <text x="155.5" y="178.5" class="label" text-anchor="middle">1–16</text>
+    <rect x="212" y="155" width="89" height="37" rx="5" class="stored"/>
+    <text x="256.5" y="178.5" class="label" text-anchor="middle">17–32</text>
+    <rect x="313" y="155" width="115" height="37" rx="5" class="idle"/>
+    <text x="370.5" y="178.5" class="label" text-anchor="middle">—</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>B 命中共同前缀</title>
+    <desc>B 的前 32 个 token 相同。A、B 同时引用 P0 和 P1，B 从第 33 个 token 开始写自己的块。</desc>
+    <rect x="111" y="59" width="89" height="37" rx="5" class="stored"/>
+    <text x="155.5" y="82.5" class="label" text-anchor="middle">P0</text>
+    <rect x="212" y="59" width="89" height="37" rx="5" class="stored"/>
+    <text x="256.5" y="82.5" class="label" text-anchor="middle">P1</text>
+    <rect x="313" y="59" width="115" height="37" rx="5" class="fresh"/>
+    <text x="370.5" y="82.5" class="label" text-anchor="middle">P2</text>
+    <text x="156" y="124" class="number" text-anchor="middle">2</text>
+    <text x="257" y="124" class="number" text-anchor="middle">2</text>
+    <text x="370" y="124" class="number" text-anchor="middle">1</text>
+    <rect x="111" y="155" width="89" height="37" rx="5" class="stored"/>
+    <text x="155.5" y="178.5" class="label" text-anchor="middle">1–16</text>
+    <rect x="212" y="155" width="89" height="37" rx="5" class="stored"/>
+    <text x="256.5" y="178.5" class="label" text-anchor="middle">17–32</text>
+    <rect x="313" y="155" width="115" height="37" rx="5" class="fresh"/>
+    <text x="370.5" y="178.5" class="label" text-anchor="middle">33… 新后缀</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>A 结束</title>
+    <desc>A 释放它的引用。P0、P1 仍由 B 持有，引用数各减一。</desc>
+    <rect x="111" y="59" width="89" height="37" rx="5" class="stored"/>
+    <text x="155.5" y="82.5" class="label" text-anchor="middle">P0</text>
+    <rect x="212" y="59" width="89" height="37" rx="5" class="stored"/>
+    <text x="256.5" y="82.5" class="label" text-anchor="middle">P1</text>
+    <rect x="313" y="59" width="115" height="37" rx="5" class="fresh"/>
+    <text x="370.5" y="82.5" class="label" text-anchor="middle">P2</text>
+    <text x="156" y="124" class="number" text-anchor="middle">1</text>
+    <text x="257" y="124" class="number" text-anchor="middle">1</text>
+    <text x="370" y="124" class="number" text-anchor="middle">1</text>
+    <rect x="111" y="155" width="89" height="37" rx="5" class="stored"/>
+    <text x="155.5" y="178.5" class="label" text-anchor="middle">1–16</text>
+    <rect x="212" y="155" width="89" height="37" rx="5" class="stored"/>
+    <text x="256.5" y="178.5" class="label" text-anchor="middle">17–32</text>
+    <rect x="313" y="155" width="115" height="37" rx="5" class="fresh"/>
+    <text x="370.5" y="178.5" class="label" text-anchor="middle">33… 新后缀</text>
+  </g>
+  <g data-frame="3" display="none">
+    <title>两个请求都已结束</title>
+    <desc>引用数降为零，P0、P1 可以重新分配。在块被收回改写前，缓存索引仍可命中它们。</desc>
+    <rect x="111" y="59" width="89" height="37" rx="5" class="stored"/>
+    <text x="155.5" y="82.5" class="label" text-anchor="middle">P0</text>
+    <rect x="212" y="59" width="89" height="37" rx="5" class="stored"/>
+    <text x="256.5" y="82.5" class="label" text-anchor="middle">P1</text>
+    <rect x="313" y="59" width="115" height="37" rx="5" class="idle"/>
+    <text x="370.5" y="82.5" class="label" text-anchor="middle">可分配</text>
+    <text x="156" y="124" class="number" text-anchor="middle">0</text>
+    <text x="257" y="124" class="number" text-anchor="middle">0</text>
+    <text x="370" y="124" class="number" text-anchor="middle">0</text>
+    <rect x="111" y="155" width="89" height="37" rx="5" class="idle"/>
+    <text x="155.5" y="178.5" class="label" text-anchor="middle">1–16</text>
+    <rect x="212" y="155" width="89" height="37" rx="5" class="idle"/>
+    <text x="256.5" y="178.5" class="label" text-anchor="middle">17–32</text>
+    <rect x="313" y="155" width="115" height="37" rx="5" class="idle"/>
+    <text x="370.5" y="178.5" class="label" text-anchor="middle">—</text>
+  </g>
+</svg>

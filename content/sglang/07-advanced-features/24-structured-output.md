@@ -3,20 +3,9 @@ title: "结构化输出"
 weight: 1
 ---
 
-## 概述
+## 约束如何进入每个采样步骤
 
-### 本章学习目标
-- 理解结构化输出的原理
-- 掌握 JSON Schema 约束
-- 了解正则表达式约束
-- 学习语法约束实现
-
-### 前置知识要求
-- 了解 JSON Schema
-- 熟悉正则表达式
-- 理解 LLM 采样
-
----
+先固定小型 JSON schema，检查响应能否按该 schema 解码，再观察首次编译约束与后续请求的差异。此版默认 XGrammar；不同 grammar backend 对正则、EBNF 等约束的支持范围需要分别核对。 [约束后端与示例](https://github.com/sgl-project/sglang/blob/v0.5.23/docs/docs/advanced_features/structured_outputs.mdx)
 
 ## 结构化输出原理
 
@@ -163,26 +152,27 @@ function_regex = r"def [a-z_]+\([^)]*\):\n    .*"
 
 ### 有限状态机 (FSM)
 
-```mermaid
-graph LR
-    subgraph fsm["JSON FSM"]
-        S0["开始"]
-        S1["{"]
-        S2["键名"]
-        S3[":"]
-        S4["值"]
-        S5[","]
-        S6["}"]
-
-        S0 --> S1
-        S1 --> S2
-        S2 --> S3
-        S3 --> S4
-        S4 --> S5
-        S5 --> S2
-        S4 --> S6
-    end
-```
+{{< stateboard >}}
+title: 用一个布尔值看约束如何变化
+rows: ["已读前缀", "可选片段", "下一状态"]
+steps:
+  - title: "根位置"
+    detail: "以 JSON 布尔值为简化语法，只展示按字符考察 true 的一条路径。"
+    cells: [["空"], ["t 或 f"], ["待开始"]]
+    focus: [[1, 0]]
+  - title: "读到 t"
+    detail: "布尔值的另一条 false 分支已排除，下一字符须为 r。"
+    cells: [["t"], ["r"], ["继续"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "读到 tr"
+    detail: "下一字符为 u。实际后端把允许的字符前缀映射到词表 token 的掩码。"
+    cells: [["tr"], ["u"], ["继续"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "完成 true"
+    detail: "读到最后一个 e 后，此处已经构成完整布尔值。"
+    cells: [["true"], ["可结束"], ["完成"]]
+    focus: [[0, 0], [2, 0]]
+{{< /stateboard >}}
 
 ### Token 掩码计算
 
@@ -213,10 +203,12 @@ class JSONConstraint:
         return logits + mask
 ```
 
-### SGLang 实现
+### 语法状态如何限制采样
+
+在 0.5.23 中，grammar manager 负责请求级语法的获取与准备，XGrammar backend 则实现约束状态与 token 掩码的具体操作。下面用伪代码描述采样的依赖顺序。[Grammar manager](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/constrained/grammar_manager.py) · [XGrammar backend](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/constrained/xgrammar_backend.py)
 
 ```python
-# sglang/srt/sampling/grammar.py
+# 教学用的状态与掩码接口
 
 class GrammarSampler:
     def __init__(self, grammar, tokenizer):
@@ -307,8 +299,8 @@ class IncrementalJSONParser:
 ```bash
 # 启用语法约束
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
-    --enable-grammar
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
+    --grammar-backend xgrammar
 ```
 
 ### API 调用
@@ -431,26 +423,10 @@ Draft7Validator.check_schema(schema)
 
 ---
 
-## 小结
-
-### 要点回顾
-
-1. **原理**：FSM + Token 掩码
-2. **类型**：JSON Schema、正则表达式
-3. **优化**：预编译、批量计算、增量解析
-4. **使用**：response_format 参数
-
-### 支持的约束
+## 各类语法约束
 
 | 类型 | 说明 |
 |------|------|
 | json_schema | JSON 结构约束 |
 | regex | 正则表达式约束 |
 | choice | 选择约束 |
-
-### 下一章预告
-
-在下一章《LoRA 支持》中，我们将：
-- 了解 LoRA 原理
-- 学习多适配器加载
-- 掌握动态切换

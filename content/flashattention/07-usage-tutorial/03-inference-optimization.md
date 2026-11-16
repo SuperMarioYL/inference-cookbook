@@ -214,56 +214,52 @@ out, softmax_lse = flash_attn_with_kvcache(
 
 连续 KV Cache 要求为每个序列预分配最大长度的内存。当 batch 中序列长度差异大时，造成大量浪费。Paged KV Cache（灵感来自操作系统的虚拟内存）将 Cache 分成固定大小的页，按需分配：
 
-```mermaid
-graph TB
-    subgraph continuous["连续 KV Cache"]
-        C1["序列 0: [████████░░░░░░░░]<br/>实际长度 8, 分配 16"]
-        C2["序列 1: [████░░░░░░░░░░░░]<br/>实际长度 4, 分配 16"]
-        C3["内存利用率 = 12/32 = 37.5%"]
-    end
+为了看清页内空槽，这里把页长缩小到四个 token。下节的 FA2 CUDA 接口使用实际支持的页长。
 
-    subgraph paged["Paged KV Cache"]
-        P1["页池: [Page0][Page1][Page2][Page3]..."]
-        P2["序列 0 → Page0, Page1 (8 token)"]
-        P3["序列 1 → Page2 (4 token)"]
-        P4["内存利用率 ≈ 100%"]
-    end
-```
+{{< stateboard >}}
+title: "两条不等长序列怎样占用页池"
+rows: ["页号", "已用位置", "空槽"]
+steps:
+  - title: "A 写入四个 token"
+    detail: "用每页四槽的教学模型，A0 到 A3 填满 P0。"
+    cells: [["P0", "P1", "P2"], ["A×4", "·", "·"], ["0", "4", "4"]]
+    focus: [[1, 0]]
+  - title: "B 写入两个 token"
+    detail: "为 B 分配 P1，B0、B1 占前两槽；P1 内余下两槽仍归 B 的末页。"
+    cells: [["P0", "P1", "P2"], ["A×4", "B×2", "·"], ["0", "2", "4"]]
+    focus: [[1, 1], [2, 1]]
+  - title: "A 继续生成"
+    detail: "A4 落到新分配的 P2。A 的页表为 [P0,P2]；B 的 P1 不必移动。"
+    cells: [["P0", "P1", "P2"], ["A×4", "B×2", "A×1"], ["0", "2", "3"]]
+    focus: [[1, 2], [2, 2]]
+{{< /stateboard >}}
 
-### 4.2 使用方式
+### 4.2 初始化页表与追加 token
+
+FA2 的 `flash_attn_with_kvcache` 接受 `int32` 的逻辑到物理块编号。这个例子从空 cache 开始，两条序列各占一页；故意让第一条使用物理页 1，第二条使用物理页 0。内核写入 K/V，写入后的长度由调用方维护。
 
 ```python
-page_size = 256  # 每页的 token 数
-max_num_pages = 1000  # 页池大小
+import torch
+from flash_attn import flash_attn_with_kvcache
 
-# 创建页池（所有序列共享）
-k_cache_paged = torch.zeros(max_num_pages, page_size, num_heads_kv, head_dim,
-                           device='cuda', dtype=torch.float16)
-v_cache_paged = torch.zeros(max_num_pages, page_size, num_heads_kv, head_dim,
-                           device='cuda', dtype=torch.float16)
-
-# 页表：每个序列映射到哪些页
-max_blocks_per_seq = 16  # 每个序列最多使用的页数
-block_table = torch.zeros(batch_size, max_blocks_per_seq, dtype=torch.int32, device='cuda')
-
-# 分配页给序列
-block_table[0] = torch.tensor([0, 1, 2, -1, ...])  # 序列 0 使用页 0, 1, 2
-block_table[1] = torch.tensor([3, 4, -1, -1, ...])  # 序列 1 使用页 3, 4
-
+device = "cuda"
+page_size, heads, dim = 256, 4, 64
+k_cache = torch.zeros(2, page_size, heads, dim, device=device, dtype=torch.float16)
+v_cache = torch.zeros_like(k_cache)
+block_table = torch.tensor([[1], [0]], dtype=torch.int32, device=device)
+lengths = torch.zeros(2, dtype=torch.int32, device=device)
+q, k, v = [torch.randn(2, 1, heads, dim, device=device, dtype=k_cache.dtype) for _ in range(3)]
 out = flash_attn_with_kvcache(
-    q, k_cache_paged, v_cache_paged,
-    k=k_new, v=v_new,
-    cache_seqlens=cache_seqlens,
-    block_table=block_table,
-    causal=True,
+    q, k_cache, v_cache, k=k, v=v, cache_seqlens=lengths,
+    block_table=block_table, causal=True,
 )
+lengths += k.size(1)
+torch.testing.assert_close(k_cache[1, 0], k[0, 0])
+torch.testing.assert_close(k_cache[0, 0], k[1, 0])
+torch.testing.assert_close(out, v)
 ```
 
-### 4.3 与 vLLM 集成
-
-Paged KV Cache 的设计与 vLLM 的 PagedAttention 兼容。页大小（`page_block_size`）需要匹配。Flash Attention 内部使用 `PagedKVManager` 处理页表查找和间接寻址。
-
----
+两条序列此时都只看得到各自的一个新 token，因此输出等于 V。继续生成前先判断将写入的位置是否已有物理页。FA2 此接口要求每页 token 数是 256 的倍数；接入服务框架还要核对页布局、dtype、KV 头数与设备，页表概念相同并不保证缓存可直接传递。[FA2 参数检查](https://github.com/Dao-AILab/flash-attention/blob/v2.8.3.post2/csrc/flash_attn/flash_api.cpp)
 
 ## 5. 自回归生成实现
 
@@ -373,29 +369,23 @@ out = flash_attn_with_kvcache(
 
 Decode 阶段（seqlen_q=1）的计算量小，单个 Thread Block 无法充分利用 GPU。Flash Decoding 将 KV 序列分成多个 split，每个 split 由独立的 Thread Block 并行处理，然后合并结果：
 
-```mermaid
-graph TD
-    subgraph split["Split-KV 并行"]
-        S1["Split 0<br/>KV[0:256]"]
-        S2["Split 1<br/>KV[256:512]"]
-        S3["Split 2<br/>KV[512:768]"]
-        S4["Split 3<br/>KV[768:1024]"]
-    end
-
-    subgraph combine["Combine Kernel"]
-        C["Online Softmax 合并<br/>4 个部分结果"]
-    end
-
-    subgraph output["最终输出"]
-        O["O = softmax(QK^T)V"]
-    end
-
-    S1 --> C
-    S2 --> C
-    S3 --> C
-    S4 --> C
-    C --> O
-```
+{{< stateboard >}}
+title: "两个 split 的输出怎样合并"
+rows: ["split", "归一化权重和", "局部输出"]
+steps:
+  - title: "第一个 split"
+    detail: "为便于手算，两段使用同一分数基准。第一段的未归一化权重之和为 1，局部输出为 2。"
+    cells: [["A", "B"], ["1", "·"], ["2", "·"]]
+    focus: [[1, 0], [2, 0]]
+  - title: "第二个 split"
+    detail: "第二段权重和为 3，局部输出为 6。两段局部输出不能按相同权重平均。"
+    cells: [["A", "B"], ["1", "3"], ["2", "6"]]
+    focus: [[1, 1], [2, 1]]
+  - title: "归并两个结果"
+    detail: "归一化系数为 1/4 与 3/4，全局 O=2×1/4+6×3/4=5。实际实现可用局部 LSE 对齐尺度。"
+    cells: [["A", "B"], ["0.25", "0.75"], ["0.5", "4.5"]]
+    focus: [[2, 0], [2, 1]]
+{{< /stateboard >}}
 
 ### 6.2 使用方式
 
@@ -425,22 +415,17 @@ out = flash_attn_with_kvcache(
 )
 ```
 
-### 6.3 自动决策逻辑
+### 6.3 FA2 怎样决定 split 数
 
-Flash Attention 的 `num_splits_heuristic`（`hopper/heuristics.h`）考虑：
-
-1. **SM 占用率**：如果 batch × heads 已经接近 SM 数量的 80%，不 split
-2. **L2 Cache**：如果单个 KV head 的数据超过 L2 缓存（~50MB），进行 split
-3. **最优效率**：找到使 SM 利用率最高的 split 数
-4. **最小 split**：在效率达到最优的 85% 以上时，选择最小的 split 数
-
----
+`num_splits=0` 时，FA2 的 `num_splits_heuristic` 查看 batch、Q 头与行块构成的并行工作量，以及 K 的块数和可用 SM 数。工作量已经达到判定阈值时会选择 1；否则在有效候选中选达到最佳估计效率 85% 的最小 split 数，以减少额外读写。Hopper 的 `hopper/heuristics.h` 属于另一套实现，其启发式条件需要独立阅读。[FA2 分发与启发式](https://github.com/Dao-AILab/flash-attention/blob/v2.8.3.post2/csrc/flash_attn/flash_api.cpp)
 
 ## 7. FP8 推理
 
 ### 7.1 基本用法
 
 ```python
+from flash_attn_3.flash_attn_interface import flash_attn_func
+
 # FP8 推理（仅限 H100/H200）
 q_fp8 = q.to(torch.float8_e4m3fn)
 k_fp8 = k.to(torch.float8_e4m3fn)
@@ -472,7 +457,7 @@ v_cache_fp8 = torch.zeros(batch_size, max_seqlen, num_heads_kv, head_dim,
                           device='cuda', dtype=torch.float8_e4m3fn)
 ```
 
-> 详见 [FP8 支持](../06-advanced-features/04-fp8-support.md)
+> 详见 [FP8 支持](/flashattention/06-advanced-features/04-fp8-support/)
 
 ---
 
@@ -532,6 +517,6 @@ torch.cuda.synchronize()
 
 ## 导航
 
-- 上一篇：[训练集成](02-training-integration.md)
-- 下一篇：[性能测试](04-benchmarking.md)
-- [返回目录](../README.md)
+- 上一篇：[训练集成](/flashattention/07-usage-tutorial/02-training-integration/)
+- 下一篇：[性能测试](/flashattention/07-usage-tutorial/04-benchmarking/)
+- [返回目录](/flashattention/00-overview/overview/)

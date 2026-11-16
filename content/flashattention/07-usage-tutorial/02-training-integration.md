@@ -309,14 +309,14 @@ rotary = RotaryEmbedding(
 Flash Attention 原生支持 BF16/FP16，与 PyTorch AMP 无缝配合：
 
 ```python
-from torch.cuda.amp import autocast
+from torch.amp import autocast
 
 # 方式一：直接使用 BF16 输入
 q = q.to(torch.bfloat16)
 out = flash_attn_func(q, k, v)
 
 # 方式二：使用 AMP autocast
-with autocast(dtype=torch.bfloat16):
+with autocast(device_type="cuda", dtype=torch.bfloat16):
     out = model(x)
 ```
 
@@ -537,6 +537,6 @@ block = Block(
 
 ## 导航
 
-- 上一篇：[基础用法](01-basic-usage.md)
-- 下一篇：[推理优化](03-inference-optimization.md)
-- [返回目录](../README.md)
+- 上一篇：[基础用法](/flashattention/07-usage-tutorial/01-basic-usage/)
+- 下一篇：[推理优化](/flashattention/07-usage-tutorial/03-inference-optimization/)
+- [返回目录](/flashattention/00-overview/overview/)

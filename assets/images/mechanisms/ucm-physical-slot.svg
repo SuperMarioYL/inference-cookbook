@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 464 254" role="img" aria-labelledby="ucm-physical-slot-title">
+  <title id="ucm-physical-slot-title">连续的 token 怎样落到分散的设备块</title>
+  <desc>上方按 token 顺序排列，下面展示三个不连续的物理块号。</desc>
+  <text x="15" y="27" text-anchor="start" class="diagram-title">连续的 token 怎样落到分散的设备块</text>
+  <g data-frame="0">
+    <title>已有两块</title>
+    <desc>每块容纳 16 个 token。逻辑块 0、1 已经分别位于物理块 3、7。</desc>
+    <text x="16" y="60" text-anchor="start" class="subhead">请求的逻辑顺序</text>
+    <text x="16" y="173" text-anchor="start" class="subhead">设备块池</text>
+    <rect x="56" y="72" width="90" height="34" rx="5" class="stored"/>
+    <text x="101.0" y="94.0" text-anchor="middle" class="label">0–15</text>
+    <rect x="187" y="72" width="90" height="34" rx="5" class="stored"/>
+    <text x="232.0" y="94.0" text-anchor="middle" class="label">16–31</text>
+    <rect x="318" y="72" width="90" height="34" rx="5" class="idle"/>
+    <text x="363.0" y="94.0" text-anchor="middle" class="label">待增长</text>
+    <rect x="24" y="184" width="80" height="34" rx="5" class="idle"/>
+    <text x="64.0" y="206.0" text-anchor="middle" class="label">块 1</text>
+    <rect x="180" y="184" width="80" height="34" rx="5" class="stored"/>
+    <text x="220.0" y="206.0" text-anchor="middle" class="label">块 3</text>
+    <rect x="367" y="184" width="80" height="34" rx="5" class="stored"/>
+    <text x="407.0" y="206.0" text-anchor="middle" class="label">块 7</text>
+    <path d="M 101 107 C 101 132 220 141 220 181" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="1.6" opacity="0.68" stroke-dasharray="4 3"/>
+    <path d="M 232 107 C 232 132 407 141 407 181" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="1.6" opacity="0.68" stroke-dasharray="4 3"/>
+    <text x="16" y="241" text-anchor="start" class="note">逻辑块 0、1 分别映射到物理块 3、7。</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>增长到 token 32</title>
+    <desc>新增位置需要逻辑块 2。设备池中的可用块可以位于不同地址。</desc>
+    <text x="16" y="60" text-anchor="start" class="subhead">请求的逻辑顺序</text>
+    <text x="16" y="173" text-anchor="start" class="subhead">设备块池</text>
+    <rect x="56" y="72" width="90" height="34" rx="5" class="stored"/>
+    <text x="101.0" y="94.0" text-anchor="middle" class="label">0–15</text>
+    <rect x="187" y="72" width="90" height="34" rx="5" class="stored"/>
+    <text x="232.0" y="94.0" text-anchor="middle" class="label">16–31</text>
+    <rect x="318" y="72" width="90" height="34" rx="5" class="fresh"/>
+    <text x="363.0" y="94.0" text-anchor="middle" class="label">32–47</text>
+    <rect x="24" y="184" width="80" height="34" rx="5" class="idle"/>
+    <text x="64.0" y="206.0" text-anchor="middle" class="label">块 1</text>
+    <rect x="180" y="184" width="80" height="34" rx="5" class="stored"/>
+    <text x="220.0" y="206.0" text-anchor="middle" class="label">块 3</text>
+    <rect x="367" y="184" width="80" height="34" rx="5" class="stored"/>
+    <text x="407.0" y="206.0" text-anchor="middle" class="label">块 7</text>
+    <path d="M 101 107 C 101 132 220 141 220 181" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="1.6" opacity="0.68" stroke-dasharray="4 3"/>
+    <path d="M 232 107 C 232 132 407 141 407 181" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="1.6" opacity="0.68" stroke-dasharray="4 3"/>
+    <text x="16" y="241" text-anchor="start" class="note">token 32 越过第二块末尾，申请下一个设备块。</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>写入块表</title>
+    <desc>引擎把物理块 1 分给逻辑块 2。模型沿映射找到本次回填或写入的地址。</desc>
+    <text x="16" y="60" text-anchor="start" class="subhead">请求的逻辑顺序</text>
+    <text x="16" y="173" text-anchor="start" class="subhead">设备块池</text>
+    <rect x="56" y="72" width="90" height="34" rx="5" class="stored"/>
+    <text x="101.0" y="94.0" text-anchor="middle" class="label">0–15</text>
+    <rect x="187" y="72" width="90" height="34" rx="5" class="stored"/>
+    <text x="232.0" y="94.0" text-anchor="middle" class="label">16–31</text>
+    <rect x="318" y="72" width="90" height="34" rx="5" class="fresh"/>
+    <text x="363.0" y="94.0" text-anchor="middle" class="label">32–47</text>
+    <rect x="24" y="184" width="80" height="34" rx="5" class="fresh"/>
+    <text x="64.0" y="206.0" text-anchor="middle" class="label">块 1</text>
+    <rect x="180" y="184" width="80" height="34" rx="5" class="stored"/>
+    <text x="220.0" y="206.0" text-anchor="middle" class="label">块 3</text>
+    <rect x="367" y="184" width="80" height="34" rx="5" class="stored"/>
+    <text x="407.0" y="206.0" text-anchor="middle" class="label">块 7</text>
+    <path d="M 101 107 C 101 132 220 141 220 181" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="1.6" opacity="0.68" stroke-dasharray="4 3"/>
+    <path d="M 232 107 C 232 132 407 141 407 181" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="1.6" opacity="0.68" stroke-dasharray="4 3"/>
+    <path d="M 363 107 C 363 132 64 141 64 181" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="3" opacity="1" stroke-dasharray="none"/>
+    <circle cx="64" cy="176" r="5" class="packet" data-dx="299" data-dy="-67"/>
+    <text x="16" y="241" text-anchor="start" class="note">逻辑块 2 映射到物理块 1；token 32 写在块内偏移 0。</text>
+  </g>
+</svg>

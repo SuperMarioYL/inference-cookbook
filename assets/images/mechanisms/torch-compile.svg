@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 452 250" role="img" aria-labelledby="torch-compile-title">
+  <title id="torch-compile-title">同一个函数调用三次</title>
+  <desc>固定其他输入属性，仅改变最后一次调用的形状。</desc>
+  <defs><marker id="torch-compile-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" class="arrowhead"/></marker></defs>
+  <text x="15" y="28" class="diagram-title" text-anchor="start">同一个函数调用三次</text>
+
+  <g data-frame="0">
+    <title>首次编译</title>
+    <desc>输入是一维长度 4 的张量。后端得到图 A，供后续匹配的调用使用。</desc>
+    <text x="16" y="69" class="number" text-anchor="start">f(x) = x.sin() + 1</text>
+    <text x="16" y="101" class="note" text-anchor="start">dynamic=False，其余输入条件相同</text>
+    <rect x="15" y="129" width="101" height="43" rx="5" class="fresh"/>
+    <text x="65.5" y="155.5" class="label" text-anchor="middle">x 形状 [4]</text>
+    <path d="M 120 151 L 158 151" class="edge" marker-end="url(#torch-compile-arrow)"/>
+    <rect x="164" y="129" width="112" height="43" rx="5" class="idle"/>
+    <text x="220.0" y="155.5" class="label" text-anchor="middle">guard 检查</text>
+    <path d="M 280 151 L 312 151" class="edge" marker-end="url(#torch-compile-arrow)"/>
+    <rect x="318" y="129" width="118" height="43" rx="5" class="fresh"/>
+    <text x="377.0" y="155.5" class="label" text-anchor="middle">编译图 A</text>
+    <text x="16" y="218" class="note" text-anchor="start">缓存内没有匹配的已编译结果</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>相同条件命中</title>
+    <desc>第二个张量的值可以不同。设备、类型、形状等 guard 仍然满足时可复用图 A。</desc>
+    <text x="16" y="69" class="number" text-anchor="start">f(x) = x.sin() + 1</text>
+    <text x="16" y="101" class="note" text-anchor="start">dynamic=False，其余输入条件相同</text>
+    <rect x="15" y="129" width="101" height="43" rx="5" class="fresh"/>
+    <text x="65.5" y="155.5" class="label" text-anchor="middle">x 形状 [4]</text>
+    <path d="M 120 151 L 158 151" class="edge" marker-end="url(#torch-compile-arrow)"/>
+    <rect x="164" y="129" width="112" height="43" rx="5" class="idle"/>
+    <text x="220.0" y="155.5" class="label" text-anchor="middle">guard 检查</text>
+    <path d="M 280 151 L 312 151" class="edge" marker-end="url(#torch-compile-arrow)"/>
+    <rect x="318" y="129" width="118" height="43" rx="5" class="stored"/>
+    <text x="377.0" y="155.5" class="label" text-anchor="middle">复用图 A</text>
+    <text x="16" y="218" class="note" text-anchor="start">输入条件相同，guard 通过</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>静态形状发生变化</title>
+    <desc>第三次输入长度为 8。这里关闭了动态形状，原形状 guard 失败，触发另一次编译。</desc>
+    <text x="16" y="69" class="number" text-anchor="start">f(x) = x.sin() + 1</text>
+    <text x="16" y="101" class="note" text-anchor="start">dynamic=False，其余输入条件相同</text>
+    <rect x="15" y="129" width="101" height="43" rx="5" class="fresh"/>
+    <text x="65.5" y="155.5" class="label" text-anchor="middle">x 形状 [8]</text>
+    <path d="M 120 151 L 158 151" class="edge" marker-end="url(#torch-compile-arrow)"/>
+    <rect x="164" y="129" width="112" height="43" rx="5" class="idle"/>
+    <text x="220.0" y="155.5" class="label" text-anchor="middle">guard 检查</text>
+    <path d="M 280 151 L 312 151" class="edge" marker-end="url(#torch-compile-arrow)"/>
+    <rect x="318" y="129" width="118" height="43" rx="5" class="fresh"/>
+    <text x="377.0" y="155.5" class="label" text-anchor="middle">编译图 B</text>
+    <text x="16" y="218" class="note" text-anchor="start">形状变化，原 guard 失配</text>
+  </g>
+</svg>

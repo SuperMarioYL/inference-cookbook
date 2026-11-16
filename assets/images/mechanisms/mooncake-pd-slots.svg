@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 464 254" role="img" aria-labelledby="mooncake-pd-slots-title">
+  <title id="mooncake-pd-slots-title">源块 11、12 怎样填入目标块 31、32</title>
+  <desc>上排是 P 的物理块，下排是 D 已经持有或刚分配的目标位置。</desc>
+  <text x="15" y="27" text-anchor="start" class="diagram-title">源块 11、12 怎样填入目标块 31、32</text>
+  <g data-frame="0">
+    <title>先扣除 D 的本地前缀</title>
+    <desc>提示有 48 个 token，每块 16 个。D 已有第一块，仍需接收 32 个 token。</desc>
+    <text x="16" y="75" text-anchor="start" class="subhead">P 源块</text>
+    <text x="16" y="188" text-anchor="start" class="subhead">D 目标</text>
+    <rect x="85" y="52" width="84" height="38" rx="5" class="idle"/>
+    <text x="127.0" y="76.0" text-anchor="middle" class="label">P 7</text>
+    <text x="127" y="111" text-anchor="middle" class="note">0–15</text>
+    <rect x="83" y="165" width="88" height="38" rx="5" class="stored"/>
+    <text x="127.0" y="189.0" text-anchor="middle" class="label">本地命中</text>
+    <rect x="219" y="52" width="84" height="38" rx="5" class="stored"/>
+    <text x="261.0" y="76.0" text-anchor="middle" class="label">P 11</text>
+    <text x="261" y="111" text-anchor="middle" class="note">16–31</text>
+    <rect x="217" y="165" width="88" height="38" rx="5" class="idle"/>
+    <text x="261.0" y="189.0" text-anchor="middle" class="label">D 31</text>
+    <rect x="343" y="52" width="84" height="38" rx="5" class="stored"/>
+    <text x="385.0" y="76.0" text-anchor="middle" class="label">P 12</text>
+    <text x="385" y="111" text-anchor="middle" class="note">32–47</text>
+    <rect x="341" y="165" width="88" height="38" rx="5" class="idle"/>
+    <text x="385.0" y="189.0" text-anchor="middle" class="label">D 32</text>
+    <text x="16" y="237" text-anchor="start" class="note">D 已命中前 16 个 token，后两块等待填充。</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>对齐源与目的</title>
+    <desc>P 保留源块表的后两项。D 发出目标 31、32 和注册区域，在本例中两对完整范围可以合并。</desc>
+    <text x="16" y="75" text-anchor="start" class="subhead">P 源块</text>
+    <text x="16" y="188" text-anchor="start" class="subhead">D 目标</text>
+    <rect x="85" y="52" width="84" height="38" rx="5" class="idle"/>
+    <text x="127.0" y="76.0" text-anchor="middle" class="label">P 7</text>
+    <text x="127" y="111" text-anchor="middle" class="note">0–15</text>
+    <rect x="83" y="165" width="88" height="38" rx="5" class="stored"/>
+    <text x="127.0" y="189.0" text-anchor="middle" class="label">本地命中</text>
+    <rect x="219" y="52" width="84" height="38" rx="5" class="stored"/>
+    <text x="261.0" y="76.0" text-anchor="middle" class="label">P 11</text>
+    <text x="261" y="111" text-anchor="middle" class="note">16–31</text>
+    <rect x="217" y="165" width="88" height="38" rx="5" class="idle"/>
+    <text x="261.0" y="189.0" text-anchor="middle" class="label">D 31</text>
+    <rect x="343" y="52" width="84" height="38" rx="5" class="stored"/>
+    <text x="385.0" y="76.0" text-anchor="middle" class="label">P 12</text>
+    <text x="385" y="111" text-anchor="middle" class="note">32–47</text>
+    <rect x="341" y="165" width="88" height="38" rx="5" class="idle"/>
+    <text x="385.0" y="189.0" text-anchor="middle" class="label">D 32</text>
+    <path d="M 261 116 V 156" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="1" stroke-dasharray="3 3"/>
+    <path d="M257 151 L261 159 L265 151" class="edge"/>
+    <path d="M 385 116 V 156" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="1" stroke-dasharray="3 3"/>
+    <path d="M381 151 L385 159 L389 151" class="edge"/>
+    <text x="16" y="237" text-anchor="start" class="note">源、目的两边连续；本例可以合成 512 字节。</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>写入并确认完成</title>
+    <desc>P 写入目的范围，随后返回交接结果。D 等全部必需传输成功后才让模型使用相应块。</desc>
+    <text x="16" y="75" text-anchor="start" class="subhead">P 源块</text>
+    <text x="16" y="188" text-anchor="start" class="subhead">D 目标</text>
+    <rect x="85" y="52" width="84" height="38" rx="5" class="idle"/>
+    <text x="127.0" y="76.0" text-anchor="middle" class="label">P 7</text>
+    <text x="127" y="111" text-anchor="middle" class="note">0–15</text>
+    <rect x="83" y="165" width="88" height="38" rx="5" class="stored"/>
+    <text x="127.0" y="189.0" text-anchor="middle" class="label">本地命中</text>
+    <rect x="219" y="52" width="84" height="38" rx="5" class="stored"/>
+    <text x="261.0" y="76.0" text-anchor="middle" class="label">P 11</text>
+    <text x="261" y="111" text-anchor="middle" class="note">16–31</text>
+    <rect x="217" y="165" width="88" height="38" rx="5" class="stored"/>
+    <text x="261.0" y="189.0" text-anchor="middle" class="label">D 31</text>
+    <rect x="343" y="52" width="84" height="38" rx="5" class="stored"/>
+    <text x="385.0" y="76.0" text-anchor="middle" class="label">P 12</text>
+    <text x="385" y="111" text-anchor="middle" class="note">32–47</text>
+    <rect x="341" y="165" width="88" height="38" rx="5" class="stored"/>
+    <text x="385.0" y="189.0" text-anchor="middle" class="label">D 32</text>
+    <path d="M 261 116 V 156" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="1" stroke-dasharray="none"/>
+    <path d="M257 151 L261 159 L265 151" class="edge"/>
+    <circle cx="261" cy="149" r="5" class="packet" data-dx="0" data-dy="-31"/>
+    <path d="M 385 116 V 156" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="1" stroke-dasharray="none"/>
+    <path d="M381 151 L385 159 L389 151" class="edge"/>
+    <circle cx="385" cy="149" r="5" class="packet" data-dx="0" data-dy="-31"/>
+    <text x="16" y="237" text-anchor="start" class="note">收到成功结果后，D 报告这两个目标块可用。</text>
+  </g>
+</svg>

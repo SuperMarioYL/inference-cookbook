@@ -3,7 +3,7 @@ title: "TensorImpl 深度解析"
 weight: 1
 ---
 
-> 本文面向有一定 C++ 基础的读者，深入分析 PyTorch 中每个 Python `Tensor` 背后的 C++ 实现核心 -- `TensorImpl`。
+对一个张量做转置后，它的形状和 stride 改了，底层数据可以仍在原处。PyTorch 用 `TensorImpl` 记录视图的这些属性。
 > 源码位置: `c10/core/TensorImpl.h`
 
 ---
@@ -511,7 +511,7 @@ PyTorch 对 `TensorImpl` 的内存大小有严格的编译期检查。源码尾�
 | `key_set_` | 8 |
 | 位域标志 | 约 3-4 字节 |
 
-整个 `TensorImpl` 的大小被严格控制在一个合理的范围内，这对于需要同时存在大量小 Tensor 的场景（如 NLP 中的 token embedding 列表）非常重要。
+创建许多小张量时，每个张量各自持有的元数据也会累积成一笔内存开销。
 
 ---
 
@@ -533,5 +533,5 @@ PyTorch 对 `TensorImpl` 的内存大小有严格的编译期检查。源码尾�
 
 ---
 
-> **上一篇**: [Tensor 基础教程](./00-tensor-basics-tutorial.md)
-> **下一篇**: [Storage 与 Allocator 体系解析](./02-storage-and-allocator.md)
+> **上一篇**: [Tensor 基础教程](/pytorch/01-introduction/01-tensor-basics-tutorial/)
+> **下一篇**: [Storage 与 Allocator 体系解析](/pytorch/02-fundamentals/02-storage-and-allocator/)

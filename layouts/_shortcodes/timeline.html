@@ -1,0 +1,53 @@
+{{- $chart := transform.Unmarshal (trim .Inner " \n\t\r") -}}
+{{- $tracks := $chart.tracks -}}
+{{- $steps := $chart.steps -}}
+{{- $end := float (index (last 1 $chart.ticks) 0) -}}
+{{- $id := printf "timeline-%d" .Ordinal -}}
+{{- $left := 78 -}}
+{{- $extent := 390 -}}
+{{- $bottom := add 32 (mul 38 (len $tracks)) -}}
+<figure id="fig-{{ $chart.title | anchorize }}" class="mechanism timeline-figure" data-mechanism>
+  <div class="figure-heading" id="{{ $id }}-title">{{ $chart.title }}</div>
+  <div class="diagram-viewport">
+    <svg viewBox="0 0 490 {{ add $bottom 38 }}" role="img" aria-labelledby="{{ $id }}-title">
+      <text x="8" y="20" class="axis-label">{{ $chart.unit }}</text>
+      {{ range $chart.ticks }}
+        {{ $x := add $left (mul $extent (div (float .) $end)) }}
+        <path class="lifeline" d="M{{ $x }} 25 V{{ $bottom }}"/>
+        <text class="axis-label" x="{{ $x }}" y="19" text-anchor="middle">{{ . }}</text>
+      {{ end }}
+      <defs><g id="{{ $id }}-bars">
+        {{ range $r, $track := $tracks }}
+          {{ $y := add 33 (mul $r 38) }}
+          {{ range $track.bars }}
+            {{ $x := add $left (mul $extent (div (float (index . 0)) $end)) }}
+            {{ $w := mul $extent (div (sub (float (index . 1)) (float (index . 0))) $end) }}
+            <rect x="{{ add $x 1 }}" y="{{ $y }}" width="{{ sub $w 2 }}" height="27" rx="3"/>
+          {{ end }}
+        {{ end }}
+      </g></defs>
+      <use href="#{{ $id }}-bars" class="time-pending"/>
+      {{ range $i, $step := $steps }}
+        {{ $x := add $left (mul $extent (div (float $step.at) $end)) }}
+        <g data-frame="{{ $i }}"{{ if $i }} display="none"{{ end }}>
+          <clipPath id="{{ $id }}-seen-{{ $i }}"><rect x="{{ $left }}" y="26" width="{{ sub $x $left }}" height="{{ $bottom }}"/></clipPath>
+          <use href="#{{ $id }}-bars" clip-path="url(#{{ $id }}-seen-{{ $i }})" class="time-elapsed"/>
+          <g class="time-cursor" data-x="{{ $x }}">
+            <line x1="{{ $x }}" x2="{{ $x }}" y1="25" y2="{{ add $bottom 5 }}"/>
+            <path d="M{{ sub $x 5 }} {{ add $bottom 13 }} l5 -8 l5 8Z"/>
+          </g>
+        </g>
+      {{ end }}
+      {{ range $r, $track := $tracks }}
+        {{ $y := add 53 (mul $r 38) }}
+        <text x="8" y="{{ $y }}" class="row-label">{{ $track.name }}</text>
+        {{ range $track.bars }}
+          {{ $middle := div (add (float (index . 0)) (float (index . 1))) 2 }}
+          <text x="{{ add $left (mul $extent (div $middle $end)) }}" y="{{ $y }}" text-anchor="middle">{{ index . 2 }}</text>
+        {{ end }}
+      {{ end }}
+    </svg>
+  </div>
+  <figcaption>{{ partial "figures/controls.html" $steps }}</figcaption>
+</figure>
+{{- .Page.Store.Set "hasMechanism" true -}}

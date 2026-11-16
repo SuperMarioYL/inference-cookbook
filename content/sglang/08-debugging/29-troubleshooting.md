@@ -3,20 +3,9 @@ title: "问题排查"
 weight: 3
 ---
 
-## 概述
+## 复现时保留哪几项运行条件
 
-### 本章学习目标
-- 掌握 OOM 问题排查
-- 学习性能问题诊断
-- 了解启动问题解决
-- 熟悉调优 checklist
-
-### 前置知识要求
-- 了解 GPU 内存管理
-- 熟悉 Python 调试
-- 掌握 Linux 基础命令
-
----
+记录 SGLang 版本、模型、完整启动参数、第一条失败日志及故障前最后一个成功请求。先用固定模型最小服务区分驱动/依赖与长请求/并发问题，再逐项加入原部署选项。 [0.5.23 故障问答](https://github.com/sgl-project/sglang/blob/v0.5.23/docs/docs/references/faq.mdx)
 
 ## OOM 问题排查
 
@@ -52,22 +41,22 @@ nvidia-smi --query-gpu=memory.used,memory.free,memory.total --format=csv
 ```bash
 # 方案 1: 减少内存分配比例
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
-    --mem-fraction-static 0.7  # 默认 0.88
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
+    --mem-fraction-static 0.7  # 示例值，未指定时按设备预留空间计算
 
 # 方案 2: 使用量化
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --quantization fp8
 
 # 方案 3: 限制批次大小
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --max-running-requests 16
 
 # 方案 4: 限制序列长度
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --context-length 4096
 ```
 
@@ -187,7 +176,7 @@ graph TB
 
 ```bash
 # 启用 CUDA Graph
---cuda-graph-max-bs 32
+--cuda-graph-max-bs-decode 32
 
 # 启用推测解码
 --speculative-algorithm EAGLE
@@ -217,7 +206,7 @@ def check_gpu_utilization():
 
 # 2. 检查是否有等待
 # 增加预处理线程
---tokenizer-threads 4
+--tokenizer-worker-num 4
 
 # 3. 确保请求足够
 # 客户端增加并发
@@ -276,7 +265,7 @@ kill -9 <PID>
 # 错误：ModuleNotFoundError
 # 解决：重新安装依赖
 
-pip install sglang[all] --upgrade
+uv pip install --prerelease=allow 'sglang==0.5.23'
 
 # 错误：版本不兼容
 # 解决：使用正确的 Python 版本
@@ -357,7 +346,7 @@ headers = {"Content-Type": "application/json"}
 ### 内存优化
 
 ```
-□ 使用合适的 --mem-fraction-static (默认 0.88)
+□ 使用合适的 --mem-fraction-static （按设备与负载选择）
 □ 启用量化 (--quantization fp8/int8/int4)
 □ 限制 --context-length
 □ 限制 --max-running-requests
@@ -377,7 +366,7 @@ headers = {"Content-Type": "application/json"}
 ### 延迟优化
 
 ```
-□ 启用 CUDA Graph (--cuda-graph-max-bs)
+□ 启用 CUDA Graph (--cuda-graph-max-bs-decode)
 □ 使用 torch.compile (--enable-torch-compile)
 □ 启用推测解码 (--speculative-algorithm)
 □ 使用 FlashInfer attention
@@ -402,29 +391,29 @@ headers = {"Content-Type": "application/json"}
 
 ```bash
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --mem-fraction-static 0.85 \
     --max-running-requests 32 \
-    --cuda-graph-max-bs 16
+    --cuda-graph-max-bs-decode 16
 ```
 
 ### 中规模部署 (多 GPU, 70B 模型)
 
 ```bash
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-70B-Instruct \
+    --model-path meta-llama/Llama-3.1-70B-Instruct \
     --tp 4 \
     --mem-fraction-static 0.88 \
     --max-running-requests 64 \
     --chunked-prefill-size 8192 \
-    --cuda-graph-max-bs 32
+    --cuda-graph-max-bs-decode 32
 ```
 
 ### 高吞吐部署
 
 ```bash
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --max-running-requests 256 \
     --chunked-prefill-size 16384 \
     --schedule-policy lpm \
@@ -435,9 +424,9 @@ python -m sglang.launch_server \
 
 ```bash
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --max-running-requests 16 \
-    --cuda-graph-max-bs 16 \
+    --cuda-graph-max-bs-decode 16 \
     --speculative-algorithm EAGLE \
     --speculative-num-draft-tokens 5
 ```
@@ -537,9 +526,7 @@ graph TB
 
 ---
 
-## 小结
-
-### 问题分类
+## 按症状查找原因
 
 | 类别 | 常见问题 | 解决方向 |
 |------|---------|---------|
@@ -547,47 +534,4 @@ graph TB
 | 性能 | 吞吐低 | 批处理、缓存 |
 | 延迟 | 响应慢 | CUDA Graph、推测解码 |
 | 启动 | 加载失败 | 检查路径、依赖 |
-
-### 排查流程
-
-```mermaid
-graph LR
-    ISSUE["发现问题"]
-    CLASSIFY["分类问题"]
-    DIAGNOSE["诊断原因"]
-    SOLUTION["应用方案"]
-    VERIFY["验证效果"]
-
-    ISSUE --> CLASSIFY --> DIAGNOSE --> SOLUTION --> VERIFY
-```
-
-### 资源参考
-
-- SGLang GitHub Issues
-- SGLang Discord 社区
-- 官方文档
-
----
-
-## 教程总结
-
-恭喜您完成了 SGLang 原理机制教程的全部学习！
-
-### 学习路径回顾
-
-1. **入门篇**：了解 SGLang 基础和架构
-2. **核心架构篇**：深入三进程设计
-3. **内存与缓存篇**：掌握 KV Cache 和 RadixAttention
-4. **批处理与调度篇**：理解连续批处理机制
-5. **性能优化篇**：学习 CUDA Graph、量化等优化
-6. **分布式与并行篇**：了解 TP/PP/EP 并行策略
-7. **高级特性篇**：掌握结构化输出、LoRA、多模态
-8. **实战调试篇**：学会调试和问题排查
-
-### 进阶建议
-
-- 阅读 SGLang 源码
-- 参与社区讨论
-- 尝试贡献代码
-- 关注最新更新
 

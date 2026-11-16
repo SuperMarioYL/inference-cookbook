@@ -3,20 +3,9 @@ title: "专家并行"
 weight: 3
 ---
 
-## 概述
+## 把 MoE token 送到负责的专家
 
-### 本章学习目标
-- 理解 MoE 模型和专家并行
-- 掌握 SGLang 的 EP 实现
-- 了解负载均衡策略
-- 学习 DeepSeek 优化
-
-### 前置知识要求
-- 了解 MoE 架构
-- 熟悉张量并行
-- 理解路由机制
-
----
+EP 重新分布专家参数和需要执行的 token。测量一次 dispatch 时同时记录各 rank 接收的 token 数、最慢专家、all-to-all 后端和回收结果的 combine；平均值会掩盖热点。启动参数应结合模型和集体通信后端选择。 [0.5.23 EP 部署](https://github.com/sgl-project/sglang/blob/v0.5.23/docs/docs/advanced_features/expert_parallelism.mdx)
 
 ## MoE 基础
 
@@ -95,28 +84,7 @@ graph TB
 
 ### EP 数据流
 
-```mermaid
-sequenceDiagram
-    participant G0 as GPU 0
-    participant G1 as GPU 1
-
-    Note over G0,G1: 专家并行
-
-    G0->>G0: 路由计算
-    G1->>G1: 路由计算
-
-    G0->>G1: All-to-All (发送到目标专家)
-    G1->>G0: All-to-All
-
-    G0->>G0: 专家计算 (Expert 0-3)
-    G1->>G1: 专家计算 (Expert 4-7)
-
-    G0->>G1: All-to-All (返回结果)
-    G1->>G0: All-to-All
-
-    G0->>G0: 组合输出
-    G1->>G1: 组合输出
-```
+{{< mechanism "sglang-expert-exchange" >}}
 
 ---
 
@@ -127,9 +95,9 @@ sequenceDiagram
 ```bash
 # 启用专家并行
 python -m sglang.launch_server \
-    --model deepseek-ai/DeepSeek-V3 \
+    --model-path deepseek-ai/DeepSeek-V3 \
     --tensor-parallel-size 8 \
-    --moe-ep-size 8
+    --ep-size 8
 ```
 
 ### 初始化
@@ -339,21 +307,19 @@ config = {
 ```bash
 # DeepSeek-V3
 python -m sglang.launch_server \
-    --model deepseek-ai/DeepSeek-V3 \
+    --model-path deepseek-ai/DeepSeek-V3 \
     --tensor-parallel-size 8 \
-    --moe-ep-size 8 \
-    --enable-ep-moe
+    --ep-size 8
 ```
 
 ### TP + EP 组合
 
 ```bash
-# 16 GPU 配置
-# TP=8 (机内), EP=2 (跨机)
+# 示例：在 TP 通信组内划分专家并行，实际可用布局取决于模型和所选后端
 python -m sglang.launch_server \
-    --model deepseek-ai/DeepSeek-V3 \
+    --model-path deepseek-ai/DeepSeek-V3 \
     --tensor-parallel-size 8 \
-    --moe-ep-size 2
+    --ep-size 2
 ```
 
 ---
@@ -380,26 +346,10 @@ All-to-All 通信量:
 
 ---
 
-## 小结
-
-### 要点回顾
-
-1. **MoE**：稀疏激活，扩展参数量
-2. **EP**：专家分布到不同 GPU
-3. **通信**：All-to-All 分发和收集
-4. **均衡**：辅助损失 + 容量限制
-
-### 对比
+## TP 和 EP 的通信对象
 
 | 特性 | TP | EP |
 |------|----|----|
 | 模型类型 | 稠密 | MoE |
 | 通信 | AllReduce | All-to-All |
 | 均衡 | 自动 | 需优化 |
-
-### 下一章预告
-
-在模块七《高级特性篇》中，我们将：
-- 了解结构化输出
-- 学习 LoRA 支持
-- 掌握多模态推理

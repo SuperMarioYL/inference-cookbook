@@ -3,20 +3,9 @@ title: "Detokenizer"
 weight: 4
 ---
 
-## 概述
+## 为什么一次采样未必立刻产生可发送的字
 
-### 本章学习目标
-- 理解 DetokenizerManager 的职责
-- 掌握增量 Detokenization 机制
-- 了解流式文本输出实现
-- 学习特殊 Token 处理
-
-### 前置知识要求
-- 了解 Tokenization 基础
-- 熟悉 BPE/SentencePiece 等算法
-- 理解流式输出概念
-
----
+模型输出 token 边界与用户可见的 Unicode 字符、停止字符串边界可能不同。跟踪同一请求相邻两次输出的 token ID 和已发文本位置，可以区分模型尚未生成、反分词尚未确认和 HTTP 层缓冲。 [0.5.23 增量解码](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/managers/detokenizer_manager.py)
 
 ## DetokenizerManager 职责
 
@@ -271,21 +260,7 @@ Token 2: [0xad]        -> 与 Token 1 合并 -> "中"
 
 ### 处理策略
 
-```mermaid
-graph TB
-    subgraph handle["不完整字符处理"]
-        DECODE["解码文本"]
-        CHECK{"以 � 结尾?"}
-        WAIT["等待更多 tokens"]
-        OUTPUT["输出文本"]
-        UPDATE["更新偏移"]
-
-        DECODE --> CHECK
-        CHECK -->|"是"| WAIT
-        CHECK -->|"否"| OUTPUT
-        OUTPUT --> UPDATE
-    end
-```
+{{< mechanism "sglang-utf8-tail" >}}
 
 ```python
 # 检查不完整字符
@@ -525,26 +500,10 @@ sequenceDiagram
 
 ---
 
-## 小结
-
-### 要点回顾
-
-1. **增量解码**：只解码新增 tokens，提高效率
-2. **不完整字符**：使用环绕缓冲区处理 UTF-8 边界问题
-3. **批量优化**：分组批量解码提升性能
-4. **状态管理**：DecodeStatus 跟踪每个请求的解码进度
-
-### 关键数据结构
+## 反分词的状态对象
 
 | 结构 | 用途 |
 |------|------|
 | `DecodeStatus` | 增量解码状态 |
 | `BatchTokenIDOut` | Scheduler 输出 |
 | `BatchStrOut` | Detokenizer 输出 |
-
-### 下一章预告
-
-在下一章《ModelRunner 详解》中，我们将：
-- 了解模型加载和初始化
-- 学习 ForwardBatch 构建
-- 掌握前向计算流程

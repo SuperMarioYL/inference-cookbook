@@ -34,9 +34,9 @@ PyTorch 中每一个算子（operator）在被调用之前，都必须经历两�
 
 | 前置篇目 | 核心概念 |
 |---------|---------|
-| [00-dispatch-tutorial.md](./00-dispatch-tutorial.md) | Dispatch 机制基本概念、整体架构 |
-| [01-dispatch-key-system.md](./01-dispatch-key-system.md) | DispatchKey 枚举、DispatchKeySet 位运算、优先级排序 |
-| [02-dispatcher-core.md](./02-dispatcher-core.md) | Dispatcher 单例、OperatorHandle、调度表查找、call/redispatch 流程 |
+| [00-dispatch-tutorial.md](/pytorch/03-core-modules/06-dispatch-key-system/) | Dispatch 机制基本概念、整体架构 |
+| [01-dispatch-key-system.md](/pytorch/03-core-modules/06-dispatch-key-system/) | DispatchKey 枚举、DispatchKeySet 位运算、优先级排序 |
+| [02-dispatcher-core.md](/pytorch/03-core-modules/07-dispatcher-core/) | Dispatcher 单例、OperatorHandle、调度表查找、call/redispatch 流程 |
 
 核心前置概念速查：
 
@@ -522,7 +522,7 @@ flowchart LR
 以 `aten::add.Tensor` 为例，生成的注册代码大致如下：
 
 ```cpp
-// 生成文件: build/aten/src/ATen/RegisterCPU.cpp (简化)
+// 生成文件: build/aten/src/ATen/RegisterCPU_0.cpp (简化)
 TORCH_LIBRARY_IMPL(aten, CPU, m) {
     m.impl("add.Tensor",
         TORCH_FN(at::native::structured_add_out::call));
@@ -830,9 +830,9 @@ print(torch.ops.aten.add.Tensor._schema)
 
 ## 延伸阅读
 
-- [04 - 调度表计算与内核查找](./04-dispatch-table-computation.md) - 注册完成后 `dispatchTable_` 如何被计算和查询
-- [05 - Autograd 与功能键调度](./05-autograd-dispatch.md) - Autograd 如何通过 Dispatcher 实现前向/反向分离
-- [module-01 - Tensor 基础](../module-01-tensor/README.md) - Tensor 如何携带 DispatchKeySet
-- [module-06 - torch.compile](../module-06-compile/README.md) - fake tensor 和 meta 实现在编译中的作用
+- [04 - 调度表计算与内核查找](/pytorch/03-core-modules/07-dispatcher-core/) - 注册完成后 `dispatchTable_` 如何被计算和查询
+- [05 - Autograd 与功能键调度](/pytorch/04-code-walkthrough/02-dispatch-codepath-debug/) - Autograd 如何通过 Dispatcher 实现前向/反向分离
+- [module-01 - Tensor 基础](/pytorch/01-introduction/01-tensor-basics-tutorial/) - Tensor 如何携带 DispatchKeySet
+- [module-06 - torch.compile](/pytorch/05-advanced-topics/01-compiler-stack-overview/) - fake tensor 和 meta 实现在编译中的作用
 - [PyTorch 官方文档 - Custom Operators](https://pytorch.org/docs/stable/library.html) - `torch.library` 的官方教程
 - [PyTorch 官方文档 - Extending Dispatcher](https://pytorch.org/tutorials/advanced/extend_dispatcher.html) - 为自定义后端扩展调度器

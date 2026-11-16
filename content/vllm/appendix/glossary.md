@@ -3,6 +3,7 @@ title: "术语表"
 weight: 1
 ---
 
+读到 **V1** 时，要先区分引擎架构、模型执行器和 attention backend。vLLM 0.33.0 中 V1 引擎可以选择不同的 GPU model runner，attention 实现还取决于平台与模型。对照源码入口可查[固定版本代码索引](/vllm/appendix/code-map/)和[运行器架构](https://github.com/vllm-project/vllm/blob/v0.33.0/docs/design/model_runner_v2.md)。
 
 本术语表按字母顺序列出了 vLLM 文档中使用的关键术语及其解释。
 
@@ -223,7 +224,7 @@ Transformer 中的解码器层数量。
 ## P
 
 ### PagedAttention
-vLLM 的核心创新，将 KV Cache 分成固定大小的块进行非连续存储，减少显存碎片。
+vLLM 将 KV 分块存放，通过块表访问非连续的物理位置。
 
 ### Pipeline Parallelism（流水线并行）
 将模型的层分配到不同设备的并行策略，适用于多节点部署。

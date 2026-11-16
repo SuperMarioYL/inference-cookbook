@@ -4,7 +4,7 @@ slug: "overview"
 weight: 0
 ---
 
-本文档系列基于 Flash Attention v2.8.3 源码进行深度技术解析，涵盖理论基础、核心算法、CUDA 内核实现、Python API、高级特性与使用教程。共 **9 个模块、32 篇文章**，从理论到实践全面解析 Flash Attention 的设计与实现。
+本栏按注意力原理、分代内核和调用方组织。第一次运行请从[快速开始](/flashattention/00-overview/03-quick-start/)选择与设备匹配的软件包。已有 profile 的读者可以直接对照[源码架构](/flashattention/00-overview/02-architecture-overview/)定位实现。
 
 ## 文档总览
 
@@ -182,10 +182,6 @@ graph TD
 
 ---
 
-## 技术信息
+## 源码与论文
 
-- **目标版本**：Flash Attention v2.8.3
-- **GPU 架构**：NVIDIA Hopper (SM90) 为主，兼顾 Ampere (SM80)
-- **文档语言**：中文（技术术语保留英文原文）
-- **总字数**：约 200,000 字
-- **Mermaid 图**：70+ 张
+[软件包与当前阅读基线](/flashattention/) · [FA1–FA4 论文阅读指南](/flashattention/08-appendix/02-paper-reading-guide/)

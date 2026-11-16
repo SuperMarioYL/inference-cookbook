@@ -3,20 +3,9 @@ title: "流水线并行"
 weight: 2
 ---
 
-## 概述
+## 可切层数与流水线空隙
 
-### 本章学习目标
-- 理解流水线并行的原理
-- 掌握微批次调度策略
-- 了解气泡优化技术
-- 学习 TP+PP 组合使用
-
-### 前置知识要求
-- 了解张量并行
-- 熟悉流水线概念
-- 理解模型层结构
-
----
+PP 把不同层分到不同 stage，请求必须按依赖顺序通过这些 stage。前一级把激活传到后一级后，这个微批才能继续。流水线填满时，最慢一级的计算和传输决定下一个微批多久能过去。 [0.5.23 流水线限制](https://github.com/sgl-project/sglang/blob/v0.5.23/docs/docs/advanced_features/pipeline_parallelism.mdx)
 
 ## 流水线并行原理
 
@@ -53,71 +42,43 @@ graph LR
 |------|----|----|
 | 切分方式 | 层内 | 层间 |
 | 通信模式 | AllReduce | Point-to-Point |
-| 内存效率 | 需同步所有 GPU | 可流水线 |
-| 适用规模 | 单机 | 跨机 |
+| 设备持有的权重 | 各层中分给本 rank 的权重分片 | 分给本 stage 的若干层 |
+| 布置时先看什么 | 集合通信经过哪些链路 | 哪两个相邻 stage 要传激活 |
 
 ---
 
-## 气泡问题
+## 流水线怎样填满，又怎样排空
 
-### 朴素 PP
+假设每一级前向都占一个时隙，传输耗时忽略。单个微批需要顺序走三个时隙。下图再加入 M1、M2、M3，观察同一列的三块 GPU 各在算什么。
 
-```mermaid
-gantt
-    title 朴素流水线（大量气泡）
-    dateFormat X
-    axisFormat %s
-
-    section GPU 0
-    Forward: f0, 0, 1
-    Idle: idle0, 1, 4
-    Backward: b0, 4, 5
-
-    section GPU 1
-    Idle: idle1a, 0, 1
-    Forward: f1, 1, 2
-    Idle: idle1b, 2, 4
-    Backward: b1, 4, 5
-
-    section GPU 2
-    Idle: idle2a, 0, 2
-    Forward: f2, 2, 3
-    Idle: idle2b, 3, 4
-    Backward: b2, 4, 5
-```
-
-**问题**：GPU 大量空闲等待。
-
-### 微批次流水线
-
-```mermaid
-gantt
-    title 微批次流水线（减少气泡）
-    dateFormat X
-    axisFormat %s
-
-    section GPU 0
-    F0: f0, 0, 1
-    F1: f1, 1, 2
-    F2: f2, 2, 3
-    F3: f3, 3, 4
-
-    section GPU 1
-    Wait: w1, 0, 1
-    F0: f0_1, 1, 2
-    F1: f1_1, 2, 3
-    F2: f2_1, 3, 4
-    F3: f3_1, 4, 5
-
-    section GPU 2
-    Wait: w2, 0, 2
-    F0: f0_2, 2, 3
-    F1: f1_2, 3, 4
-    F2: f2_2, 4, 5
-    F3: f3_2, 5, 6
-```
-
----
+{{< timeline >}}
+title: 四个微批次依次穿过三个 stage
+unit: 时隙
+ticks: [0, 1, 2, 3, 4, 5, 6]
+tracks:
+  - name: GPU 0
+    bars: [[0, 1, "M0"], [1, 2, "M1"], [2, 3, "M2"], [3, 4, "M3"]]
+  - name: GPU 1
+    bars: [[1, 2, "M0"], [2, 3, "M1"], [3, 4, "M2"], [4, 5, "M3"]]
+  - name: GPU 2
+    bars: [[2, 3, "M0"], [3, 4, "M1"], [4, 5, "M2"], [5, 6, "M3"]]
+steps:
+  - at: 1
+    title: GPU 0 交出 M0
+    detail: 如果只发 M0，第二个时隙 GPU 0 就会闲下来。
+  - at: 2
+    title: M1 接上
+    detail: GPU 1 计算 M0，GPU 0 同时计算 M1。
+  - at: 3
+    title: 三个 stage 都在工作
+    detail: 这一格从上到下分别处理 M2、M1、M0。M0 的结果先出来。
+  - at: 4
+    title: 最后一个微批进入流水线
+    detail: GPU 0 完成 M3 后没有新输入，后两级还有工作。
+  - at: 6
+    title: M3 通过最后一级
+    detail: 四个微批共做 12 段前向。填充和排空合计留下 6 个空闲的 GPU 时隙。
+{{< /timeline >}}
 
 ## SGLang 实现
 
@@ -126,12 +87,12 @@ gantt
 ```bash
 # PP=2
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-70B-Instruct \
+    --model-path meta-llama/Llama-3.1-70B-Instruct \
     --pipeline-parallel-size 2
 
 # TP=2, PP=2
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-70B-Instruct \
+    --model-path meta-llama/Llama-3.1-70B-Instruct \
     --tensor-parallel-size 2 \
     --pipeline-parallel-size 2
 ```
@@ -184,45 +145,9 @@ def forward_pp(self, input_ids, positions, forward_batch):
 
 ## 调度策略
 
-### 1F1B (One Forward One Backward)
+### 选择微批次大小
 
-推理场景下，主要关注前向调度：
-
-```mermaid
-gantt
-    title 1F1B 调度
-    dateFormat X
-    axisFormat %s
-
-    section GPU 0
-    B0-F: 0, 1
-    B1-F: 1, 2
-    B2-F: 2, 3
-    B3-F: 3, 4
-
-    section GPU 1
-    Wait: 0, 1
-    B0-F: 1, 2
-    B1-F: 2, 3
-    B2-F: 3, 4
-    B3-F: 4, 5
-```
-
-### 微批次大小选择
-
-```python
-def get_optimal_microbatch_size(batch_size, pp_size):
-    """计算最优微批次大小"""
-    # 微批次数 >= PP size 可减少气泡
-    num_microbatches = max(pp_size, batch_size // optimal_size)
-
-    # 平衡通信和计算
-    microbatch_size = batch_size // num_microbatches
-
-    return microbatch_size
-```
-
----
+上图的三个 stage 处理四个等长微批，理想化的忙碌比例是 $12/(3\times6)=2/3$。微批更多，填充与排空的空隙所占比例会下降。分得过小，每次矩阵乘能并行处理的 token 也会变少。实际选值时，同时看最慢 stage 的前向耗时、相邻设备传激活的耗时，以及一轮完成的 token 数。
 
 ## 激活传递
 
@@ -312,7 +237,7 @@ graph TB
 # GPU 0,1 -> Stage 0
 # GPU 2,3 -> Stage 1
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-70B-Instruct \
+    --model-path meta-llama/Llama-3.1-70B-Instruct \
     --tensor-parallel-size 2 \
     --pipeline-parallel-size 2
 ```
@@ -359,40 +284,24 @@ python -m sglang.launch_server \
 # 70B on 8 GPU
 # TP=4 (NVLink 连接), PP=2
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-70B-Instruct \
+    --model-path meta-llama/Llama-3.1-70B-Instruct \
     --tensor-parallel-size 4 \
     --pipeline-parallel-size 2
 
 # 405B on 16 GPU (2 nodes)
 # 每节点 TP=8, 跨节点 PP=2
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-405B-Instruct \
+    --model-path meta-llama/Llama-3.1-405B-Instruct \
     --tensor-parallel-size 8 \
     --pipeline-parallel-size 2
 ```
 
 ---
 
-## 小结
-
-### 要点回顾
-
-1. **原理**：层间切分，顺序执行
-2. **气泡**：微批次流水线减少空闲
-3. **通信**：Point-to-Point 传递激活
-4. **组合**：TP 机内，PP 跨机
-
-### 对比
+## TP 和 PP 的通信位置
 
 | 特性 | TP | PP |
 |------|----|----|
 | 通信开销 | 高（AllReduce） | 低（P2P） |
 | 气泡 | 无 | 有（可优化） |
 | 扩展性 | 受限于 NVLink | 可跨机 |
-
-### 下一章预告
-
-在下一章《专家并行》中，我们将：
-- 了解 MoE 模型结构
-- 学习专家并行原理
-- 掌握负载均衡

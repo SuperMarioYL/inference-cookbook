@@ -4,7 +4,6 @@ weight: 3
 ---
 
 
-> **阅读时间**: 约 15 分钟
 > **前置要求**: [UcmSparseBase 接口](./02-base-interface.md)
 
 ---
@@ -35,28 +34,33 @@ graph TB
 
 ### 1.2 算法流程
 
-```mermaid
-flowchart TB
-    subgraph offline["离线阶段"]
-        O1["预计算 Block 表示"]
-        O2["构建索引"]
-    end
-    subgraph online["在线阶段"]
-        ON1["接收 Query"]
-        ON2["计算 Query 表示"]
-        ON3["检索 Top-K Blocks"]
-        ON4["加载选中的 KV"]
-        ON5["稀疏注意力计算"]
-    end
-    offline --> online
-    ON1 --> ON2 --> ON3 --> ON4 --> ON5
-```
+{{< trace >}}
+title: "一条 query 怎样找到两个历史块"
+actors: ["历史块", "块表示", "检索", "本层注意力"]
+steps:
+  - from: 0
+    to: 1
+    label: "保存表示"
+    detail: "为参与检索的历史块准备较小的表示。"
+  - from: 1
+    to: 2
+    label: "与 query 比较"
+    detail: "检索阶段对当前 query 和这些表示进行匹配。"
+  - from: 2
+    to: 3
+    label: "交付候选"
+    detail: "被选中的块与必须保留的窗口一起确定本层可用数据范围。"
+  - from: 0
+    to: 3
+    label: "读取 KV"
+    detail: "注意力算子读取选中的实际 KV，得到这一步的输出。"
+{{< /trace >}}
 ---
 ## 2. 核心组件
 
 ### 2.1 ESA 类结构
 
-**代码位置**: `ucm/sparse/esa/esa.py`
+[v0.9.1 实现](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/sparse/esa/esa.py)
 
 ```python
 class ESA(UcmSparseBase):
@@ -91,7 +95,7 @@ class ReqMeta:
     num_scheduled_tokens: int
     num_computed_tokens: int
     vllm_block_ids: List[int]
-    ucm_block_hashes: List[str]  # MD5 哈希
+    ucm_block_hashes: List[str]  # 缓存块标识，具体编码由适配路径决定
     selected_blocks: List[int]   # 选中的块索引
 ```
 
@@ -176,7 +180,7 @@ def select_top_k_blocks(
 
 ### 4.1 架构
 
-**代码位置**: `ucm/sparse/esa/retrieval/retrieval_worker.py`
+[v0.9.1 实现](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/sparse/esa/retrieval/retrieval_worker.py)
 
 ```mermaid
 graph TB
@@ -247,62 +251,16 @@ class RetrievalWorker:
 
 ---
 
-## 5. 配置参数
+## 5. 实际配置和示例
 
-### 5.1 参数说明
+`examples/offline_inference_esa.py` 为模型建立真实的 vLLM 配置，再把 `ucm_sparse_config.ESA` 交给工厂。该示例的起始窗口 1、本地窗口 2、最少 4 块、选择比例 0.3 和检索步长 5 是该实验配置；窗口、比率和可用上下文一起决定能选多少块。准备模型、LongBench 数据集和存储目录后从固定版本仓库运行：
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `sparse_ratio` | 0.3 | 选择的 Block 比例 |
-| `local_window_sz` | 2 | 局部窗口大小（始终包含） |
-| `init_window_sz` | 1 | 起始窗口大小（Sink Token） |
-| `min_blocks` | 4 | 最小选择 Block 数 |
-| `retrieval_stride` | 5 | 检索步长 |
-| `retrieval_workers` | 4 | 检索线程数 |
-### 5.2 配置示例
-```yaml
-ucm_sparse_config:
-  ESA:
-    # 稀疏比例
-    sparse_ratio: 0.3
-    # 窗口设置
-    local_window_sz: 2
-    init_window_sz: 1
-    # 最小 Block 数
-    min_blocks: 4
-
-    # 检索设置
-    retrieval_stride: 5
-    retrieval_workers: 4
-    retrieval_cache_size: 10000
+```bash
+python examples/offline_inference_esa.py
 ```
 
----
+分别检查 `ESA.request_begin` 的元数据、`attention_begin` 中实际选择的块与本层注意力输出。若请求还处于分块 prefill，要区别“这一调度步的长度”和“完整请求的长度”。[上游示例](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/examples/offline_inference_esa.py) · [算法实现](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/sparse/esa/esa.py)
 
-## 6. 使用示例
-
-### 6.1 基本使用
-
-```python
-from ucm.sparse.factory import UcmSparseFactory
-from ucm.sparse.base import UcmSparseRole
-
-esa = UcmSparseFactory.create_sparse_method(
-    "ESA",
-    UcmSparseRole.WORKER,
-    {
-        "sparse_ratio": 0.3,
-        "local_window_sz": 2
-    }
-)
-# 注册 KV Cache
-esa.register_kv_caches(kv_caches)
-
-q, k, v, output = esa.attention_begin(layer_idx, query, key, value, metadata)
-# ... 执行注意力计算 ...
-output = esa.attention_finished(layer_idx, output)
-```
----
 ## 7. 性能特点
 
 ### 7.1 复杂度分析

@@ -192,40 +192,29 @@ else:
 
 ### 3.3 前向传播路径
 
-`MHA.forward()`（`flash_attn/modules/mha.py:573-704`）有多条执行路径，由配置决定：
+`MHA.forward()`（`flash_attn/modules/mha.py:573-704`）根据自注意力、交叉注意力及推理配置选择执行路径。下例取其中的等长自注意力分支。
 
-```mermaid
-graph TD
-    Input["x: (B, S, D)"] --> Check{"cross_attn?<br/>num_heads_kv != num_heads?"}
-
-    Check -->|"标准 MHA"| Wqkv["Wqkv(x) → (B,S,3,H,D)"]
-    Check -->|"Cross-Attn"| WqWkv["Wq(x), Wkv(x_kv)"]
-    Check -->|"GQA/MQA"| WqkvGQA["Wqkv(x) → 分离 Q, KV"]
-
-    Wqkv --> RotaryCheck{"rotary_emb_dim > 0?"}
-    WqWkv --> RotaryCheck2{"rotary_emb_dim > 0?"}
-    WqkvGQA --> RotaryCheck2
-
-    RotaryCheck -->|"是"| Rotary["rotary_emb(qkv)"]
-    RotaryCheck -->|"否"| InfCheck{"inference_params?"}
-    Rotary --> InfCheck
-
-    RotaryCheck2 -->|"是"| Rotary2["rotary_emb(q, kv)"]
-    RotaryCheck2 -->|"否"| InfCheck2{"inference_params?"}
-    Rotary2 --> InfCheck2
-
-    InfCheck -->|"训练"| SelfAttn["inner_attn(qkv)"]
-    InfCheck -->|"推理"| KVCache["_update_kvcache_attention"]
-
-    InfCheck2 -->|"训练"| CrossAttn["inner_cross_attn(q, kv)"]
-    InfCheck2 -->|"推理"| KVCache
-
-    SelfAttn --> OutProj["out_proj: (B,S,H,D) → (B,S,D)"]
-    CrossAttn --> OutProj
-    KVCache --> OutProj
-
-    OutProj --> Return["返回 out (或 out, x)"]
-```
+{{< trace >}}
+title: "一批隐藏状态如何经过自注意力层"
+actors: ["隐藏状态", "QKV 投影", "注意力", "输出投影"]
+steps:
+  - from: 0
+    to: 1
+    label: "输入 [B,S,D]"
+    detail: "以等长批次、自注意力和相同 Q/KV 头数为例。"
+  - from: 1
+    to: 2
+    label: "分出 Q、K、V"
+    detail: "投影输出可整理为 [B,S,3,H,d]，其中 H×d=D。打包接口按第三维区分三种向量。"
+  - from: 2
+    to: 3
+    label: "合并每个头"
+    detail: "各个头在序列维完成注意力，每个位置得到 [H,d] 的结果，reshape 回 D。"
+  - from: 3
+    to: 0
+    label: "写出新表示"
+    detail: "输出线性层混合来自不同头的信息，返回 [B,S,D]。"
+{{< /trace >}}
 
 ### 3.4 推理快速路径
 
@@ -730,6 +719,6 @@ mixer_cls = partial(
 
 ## 导航
 
-- 上一篇：[Autograd 集成与编译支持](02-autograd-integration.md)
-- 下一篇：[前向调用链追踪](../05-code-walkthrough/01-forward-call-trace.md)
-- [返回目录](../README.md)
+- 上一篇：[Autograd 集成与编译支持](/flashattention/04-python-api/02-autograd-integration/)
+- 下一篇：[前向调用链追踪](/flashattention/05-code-walkthrough/01-forward-call-trace/)
+- [返回目录](/flashattention/00-overview/overview/)

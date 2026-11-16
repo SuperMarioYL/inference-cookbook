@@ -3,20 +3,10 @@ title: "Transfer Engine 代码调试追踪"
 weight: 5
 ---
 
-# Transfer Engine 代码调试追踪
-
-本文档提供 Mooncake Transfer Engine (TE) 核心操作的端到端代码调试追踪,涵盖 RDMA Write 完整链路、内存注册流程和拓扑发现机制。每个追踪包含文件/行号引用、GDB 断点、日志配置和 Mermaid 序列图。
+要定位一次没有按预期完成的 RDMA 写入，先区分任务提交、注册内存和拓扑选路。下文用精简的 C++ 片段说明关键操作，并链接 v0.3.14 的实际源码；GDB 按符号定位，使用与运行进程相同的带调试符号构建。
 
 ---
 
-## 目录
-
-- [调试环境准备](#调试环境准备)
-- [Debug Trace 1 - RDMA Write 端到端追踪](#debug-trace-1---rdma-write-端到端追踪)
-- [Debug Trace 2 - 内存注册流程](#debug-trace-2---内存注册流程)
-- [Debug Trace 3 - 拓扑发现机制](#debug-trace-3---拓扑发现机制)
-
----
 
 ## 调试环境准备
 
@@ -51,7 +41,7 @@ export GLOG_vmodule="rdma_transport=2,transfer_engine_impl=2,topology=2"
 | `MC_MAX_WR` | 每个 QP 最大 WR 数量 | 取决于硬件 |
 | `MC_RETRY_CNT` | 传输重试次数 | `3` |
 | `MC_PATH_ROUNDROBIN` | 是否启用路径轮询 | `false` |
-| `MC_TRACE` | 启用详细追踪日志 | `0` |
+| `MC_LOG_LEVEL` | 设置为 `TRACE` 启用经典 TE 的详细追踪 | 见配置解析 |
 
 ---
 
@@ -65,7 +55,7 @@ RDMA Write 的完整路径: `TransferEngine::submitTransfer` -> `TransferEngineI
 
 #### 步骤 1 - TransferEngine::submitTransfer 入口
 
-**文件**: `mooncake-transfer-engine/src/transfer_engine.cpp:108-111`
+[v0.3.14 源码](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/transfer_engine.cpp)
 
 ```cpp
 Status TransferEngine::submitTransfer(
@@ -78,17 +68,15 @@ Status TransferEngine::submitTransfer(
 
 **GDB 断点**:
 ```gdb
-b transfer_engine.cpp:109
-# 查看 batch 信息
-p batch_id
-p entries.size()
-p entries[0].opcode
-p entries[0].length
+break mooncake::TransferEngine::submitTransfer
+continue
+info args
+bt 4
 ```
 
 #### 步骤 2 - RdmaTransport::submitTransfer 任务分解
 
-**文件**: `mooncake-transfer-engine/src/transport/rdma_transport/rdma_transport.cpp:430-446`
+[v0.3.14 源码](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/transport/rdma_transport/rdma_transport.cpp)
 
 ```cpp
 Status RdmaTransport::submitTransfer(
@@ -111,14 +99,15 @@ Status RdmaTransport::submitTransfer(
 
 **GDB 断点**:
 ```gdb
-b rdma_transport.cpp:431
-p batch_desc.batch_size
-p batch_desc.task_list.size()
+break mooncake::RdmaTransport::submitTransfer
+continue
+info args
+bt 4
 ```
 
 #### 步骤 3 - submitTransferTask Slice 分割与设备选择
 
-**文件**: `mooncake-transfer-engine/src/transport/rdma_transport/rdma_transport.cpp:448-500+`
+[v0.3.14 源码](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/transport/rdma_transport/rdma_transport.cpp)
 
 ```cpp
 Status RdmaTransport::submitTransferTask(
@@ -177,17 +166,10 @@ Status RdmaTransport::submitTransferTask(
 
 **GDB 断点**:
 ```gdb
-# Slice 创建
-b rdma_transport.cpp:477
-p slice->length
-p slice->opcode
-p offset
-p request.length
-
-# 设备选择
-b rdma_transport.cpp:468
-p request_buffer_id
-p request_device_id
+break mooncake::RdmaTransport::submitTransferTask
+continue
+info args
+bt 4
 ```
 
 #### 步骤 4 - RdmaContext::submitPostSend 发送 RDMA 请求
@@ -210,58 +192,39 @@ RdmaContext 使用独立的轮询线程持续调用 `ibv_poll_cq` 检查完成�
 
 **GDB 断点 - 完成路径**:
 ```gdb
-# 在 TransferEngine 层检查状态
-b transfer_engine.cpp:139
-# getBatchTransferStatus
+break mooncake::RdmaTransport::getTransferStatus
+continue
+info args
+bt 4
 ```
 
 ### RDMA Write 序列图
 
-```mermaid
-sequenceDiagram
-    participant App as ["Application"]
-    participant TE as ["TransferEngine (transfer_engine.cpp)"]
-    participant TEI as ["TransferEngineImpl"]
-    participant RT as ["RdmaTransport (rdma_transport.cpp)"]
-    participant SC as ["SliceCache"]
-    participant RC as ["RdmaContext"]
-    participant HW as ["RDMA HCA Hardware"]
-
-    App->>TE: submitTransfer(batch_id, entries) - L108
-    TE->>TEI: submitTransfer(batch_id, entries)
-    TEI->>RT: submitTransfer(batch_id, entries) - L430
-
-    RT->>RT: 容量检查 - L433
-    RT->>RT: submitTransferTask(task_list) - L448
-
-    loop 每个 TransferRequest
-        RT->>RT: selectDevice() 选择本地设备 - L468
-        loop offset = 0 to request.length (步长 kBlockSize)
-            RT->>SC: allocate() 获取 Slice - L477
-            SC-->>RT: Slice*
-            RT->>RT: 填充 Slice 字段 (addr, length, opcode)
-            RT->>RT: selectDevice() 选择目标设备
-            RT->>RT: slices_to_post[context].push_back(slice)
-        end
-    end
-
-    loop 每个 RdmaContext
-        RT->>RC: submitPostSend(slices)
-        RC->>RC: 查找或建立 RemoteEndpoint
-        RC->>RC: 构建 ibv_send_wr
-        RC->>HW: ibv_post_send()
-    end
-
-    loop CQ 轮询线程
-        RC->>HW: ibv_poll_cq()
-        HW-->>RC: ibv_wc (completion)
-        RC->>RC: 更新 Slice::status
-        RC->>RC: 更新 Task 完成计数
-    end
-
-    App->>TE: getBatchTransferStatus(batch_id)
-    TE-->>App: TransferStatus::COMPLETED
-```
+{{< trace >}}
+title: "一笔 RDMA 写从提交到完成"
+actors: ["应用", "传输引擎", "RDMA 线程", "RNIC"]
+steps:
+  - from: 0
+    to: 1
+    label: "提交批次"
+    detail: "调用者提交源地址、目的地址、长度和传输方向。"
+  - from: 1
+    to: 2
+    label: "分派 slice"
+    detail: "引擎将适合 RDMA 的任务交给 transport 和 worker。"
+  - from: 2
+    to: 3
+    label: "提交工作请求"
+    detail: "worker 为 slice 准备工作请求并提交给设备。"
+  - from: 3
+    to: 2
+    label: "返回 completion"
+    detail: "worker 从完成队列取回结果，并据此更新对应 slice 状态。"
+  - from: 1
+    to: 0
+    label: "查询批次状态"
+    detail: "应用查询整个批次是否成功，再决定能否复用有关缓冲。"
+{{< /trace >}}
 
 ---
 
@@ -275,7 +238,7 @@ sequenceDiagram
 
 #### 步骤 1 - TransferEngine::registerLocalMemory 入口
 
-**文件**: `mooncake-transfer-engine/src/transfer_engine.cpp:78-84`
+[v0.3.14 源码](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/transfer_engine.cpp)
 
 ```cpp
 int TransferEngine::registerLocalMemory(void* addr, size_t length,
@@ -291,7 +254,7 @@ int TransferEngine::registerLocalMemory(void* addr, size_t length,
 
 #### 步骤 2 - RdmaTransport::registerLocalMemoryInternal
 
-**文件**: `mooncake-transfer-engine/src/transport/rdma_transport/rdma_transport.cpp:182-300`
+[v0.3.14 源码](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/transport/rdma_transport/rdma_transport.cpp)
 
 ```cpp
 int RdmaTransport::registerLocalMemoryInternal(void* addr, size_t length,
@@ -322,7 +285,7 @@ MCIbRelaxedOrderingEnabled = has_ibv_reg_mr_iova2();
 
 #### 步骤 3 - 大内存预触摸 (Pre-touch)
 
-**文件**: `mooncake-transfer-engine/src/transport/rdma_transport/rdma_transport.cpp:197-206`
+[v0.3.14 源码](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/transport/rdma_transport/rdma_transport.cpp)
 
 ```cpp
 // 当内存 >= 4GB 且 CPU 核心数 >= 4 时执行并行预触摸
@@ -339,7 +302,7 @@ if (do_pre_touch) {
 
 #### 步骤 4 - 并行/串行 MR 注册
 
-**文件**: `mooncake-transfer-engine/src/transport/rdma_transport/rdma_transport.cpp:217-261`
+[v0.3.14 源码](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/transport/rdma_transport/rdma_transport.cpp)
 
 ```cpp
 // 并行注册判断
@@ -373,27 +336,20 @@ if (use_parallel_reg) {
 
 **GDB 断点**:
 ```gdb
-# 查看注册参数
-b rdma_transport.cpp:225
-p addr
-p length
-p access_rights
-p context_list_.size()
-p use_parallel_reg
-
-# 注册耗时
-b rdma_transport.cpp:269
-p reg_duration_ms
+break mooncake::RdmaTransport::registerLocalMemory
+continue
+info args
+bt 4
 ```
 
-**详细追踪日志** (需设置 `MC_TRACE=1`):
+**详细追踪日志** (经典 TE 设置 `MC_LOG_LEVEL=TRACE`，下列为示意):
 ```
 LOG(INFO): registerMemoryRegion: addr=0x..., length=..., contexts=4, parallel=true, duration=523ms
 ```
 
 #### 步骤 5 - 收集 lkey/rkey 并更新元数据
 
-**文件**: `mooncake-transfer-engine/src/transport/rdma_transport/rdma_transport.cpp:278-298`
+[v0.3.14 源码](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/transport/rdma_transport/rdma_transport.cpp)
 
 ```cpp
 // 收集所有 context 的 lkey/rkey
@@ -420,56 +376,27 @@ int rc = metadata_->addLocalMemoryBuffer(buffer_desc, update_metadata);
 
 ### 内存注册序列图
 
-```mermaid
-sequenceDiagram
-    participant App as ["Application / Store Client"]
-    participant TE as ["TransferEngine (transfer_engine.cpp)"]
-    participant RT as ["RdmaTransport (rdma_transport.cpp)"]
-    participant RC1 as ["RdmaContext #0"]
-    participant RC2 as ["RdmaContext #1"]
-    participant ML as ["MemoryLocation"]
-    participant MD as ["TransferMetadata"]
-
-    App->>TE: registerLocalMemory(addr, length, location) - L78
-    TE->>RT: registerLocalMemoryInternal() - L182
-
-    RT->>RT: 设置 access_rights (含 Relaxed Ordering) - L189
-
-    alt length >= 4GB 且 cores >= 4
-        RT->>RT: preTouchMemory(addr, length) - L202
-        Note over RT: 多线程并行触摸页面
-    end
-
-    alt 并行注册模式
-        par 并行 ibv_reg_mr
-            RT->>RC1: registerMemoryRegion(addr, length, ar) - L236
-            RC1->>RC1: ibv_reg_mr()
-            RC1-->>RT: ret_codes[0] = 0
-        and
-            RT->>RC2: registerMemoryRegion(addr, length, ar) - L236
-            RC2->>RC2: ibv_reg_mr()
-            RC2-->>RT: ret_codes[1] = 0
-        end
-    else 串行注册模式
-        RT->>RC1: registerMemoryRegion() - L253
-        RC1-->>RT: OK
-        RT->>RC2: registerMemoryRegion() - L253
-        RC2-->>RT: OK
-    end
-
-    RT->>RT: 收集 lkey/rkey - L278
-
-    alt location == "*" (Wildcard)
-        RT->>ML: getMemoryLocation(addr, length) - L287
-        ML-->>RT: "cpu:0" 或 "cuda:1"
-    end
-
-    RT->>MD: addLocalMemoryBuffer(buffer_desc) - L297
-    MD-->>RT: OK
-
-    RT-->>TE: 0 (成功)
-    TE-->>App: 0 (成功)
-```
+{{< trace >}}
+title: "两张网卡注册同一段内存"
+actors: ["应用", "RDMA 后端", "上下文 A", "上下文 B", "元数据"]
+steps:
+  - from: 0
+    to: 1
+    label: "给定内存范围"
+    detail: "应用提供基址、长度和所在内存位置。"
+  - from: 1
+    to: 2
+    label: "在 A 注册"
+    detail: "A 的设备上下文建立该范围的内存区域与访问键。"
+  - from: 1
+    to: 3
+    label: "在 B 注册"
+    detail: "使用 B 的路径需要 B 自己可用的注册信息。"
+  - from: 1
+    to: 4
+    label: "更新描述"
+    detail: "transport 汇总成功注册的信息，使后续传输能选择匹配的设备和访问键。"
+{{< /trace >}}
 
 ---
 
@@ -477,13 +404,13 @@ sequenceDiagram
 
 ### 概述
 
-拓扑发现用于建立内存位置 (CPU NUMA 节点 / GPU 设备) 与 RDMA 网卡 (HCA) 之间的亲和关系。这对于选择最优传输路径至关重要: 优先使用与源/目标内存位于同一 NUMA 节点或 PCI 交换机下的 HCA,可以显著降低延迟。
+拓扑发现给 CPU 内存或 GPU 缓冲区找到相近的 RDMA 网卡。比较两张 HCA 时，先看路径是否跨 NUMA 节点或 PCIe 交换机，再用相同的块大小测量。
 
 ### 调用链路详解
 
 #### 步骤 1 - Topology::discover 入口
 
-**文件**: `mooncake-transfer-engine/src/topology.cpp:261-273`
+[v0.3.14 源码](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/topology.cpp)
 
 ```cpp
 int Topology::discover(const std::vector<std::string>& filter) {
@@ -515,16 +442,15 @@ int Topology::discover(const std::vector<std::string>& filter) {
 
 **GDB 断点**:
 ```gdb
-b topology.cpp:261
-p filter.size()
-# 查看发现的所有 HCA
-b topology.cpp:272
-p matrix_.size()
+break mooncake::Topology::discover
+continue
+info args
+bt 4
 ```
 
 #### 步骤 2 - listInfiniBandDevices 枚举 RDMA 设备
 
-**文件**: `mooncake-transfer-engine/src/topology.cpp:44-89`
+[v0.3.14 源码](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/topology.cpp)
 
 ```cpp
 static std::vector<InfinibandDevice> listInfiniBandDevices(
@@ -564,15 +490,15 @@ static std::vector<InfinibandDevice> listInfiniBandDevices(
 
 **GDB 断点**:
 ```gdb
-b topology.cpp:61
-p device_name
-p pci_bus_id
-p numa_node
+break mooncake::Topology::discover
+continue
+info args
+bt 4
 ```
 
 #### 步骤 3 - discoverCpuTopology CPU NUMA 亲和性
 
-**文件**: `mooncake-transfer-engine/src/topology.cpp:91-126`
+[v0.3.14 源码](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/topology.cpp)
 
 ```cpp
 static std::vector<TopologyEntry> discoverCpuTopology(
@@ -606,7 +532,7 @@ static std::vector<TopologyEntry> discoverCpuTopology(
 
 #### 步骤 4 - discoverCudaTopology GPU PCI 亲和性
 
-**文件**: `mooncake-transfer-engine/src/topology.cpp:171-231`
+[v0.3.14 源码](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/topology.cpp)
 
 ```cpp
 static std::vector<TopologyEntry> discoverCudaTopology(
@@ -646,7 +572,7 @@ static std::vector<TopologyEntry> discoverCudaTopology(
 
 #### 步骤 5 - Topology::resolve 构建索引矩阵
 
-**文件**: `mooncake-transfer-engine/src/topology.cpp:382-419`
+[v0.3.14 源码](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/topology.cpp)
 
 ```cpp
 int Topology::resolve() {
@@ -677,7 +603,7 @@ int Topology::resolve() {
 
 #### 步骤 6 - Topology::selectDevice 运行时设备选择
 
-**文件**: `mooncake-transfer-engine/src/topology.cpp:334-380`
+[v0.3.14 源码](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/topology.cpp)
 
 ```cpp
 int Topology::selectDevice(const std::string storage_type, int retry_count) {
@@ -713,10 +639,10 @@ int Topology::selectDevice(const std::string storage_type, int retry_count) {
 
 **GDB 断点**:
 ```gdb
-b topology.cpp:354
-p storage_type
-p entry.preferred_hca.size()
-p entry.avail_hca.size()
+break mooncake::Topology::selectDevice
+continue
+info args
+bt 4
 ```
 
 ### 拓扑发现序列图
@@ -729,9 +655,9 @@ sequenceDiagram
     participant IB as ["ibv_get_device_list"]
     participant CUDA as ["CUDA Runtime"]
 
-    TEI->>Topo: discover(filter) - L261
+    TEI->>Topo: discover(filter)
 
-    Topo->>IB: ibv_get_device_list() - L49
+    Topo->>IB: ibv_get_device_list()
     IB-->>Topo: ibv_device** (N devices)
 
     loop 每个 IB device
@@ -742,7 +668,7 @@ sequenceDiagram
     end
 
     Note over Topo: discoverCpuTopology()
-    Topo->>Sysfs: readdir /sys/devices/system/node/ - L93
+    Topo->>Sysfs: readdir /sys/devices/system/node/
     loop 每个 NUMA node
         Topo->>Topo: 匹配 HCA numa_node == node_id
         Topo->>Topo: 分类为 preferred / available
@@ -750,16 +676,16 @@ sequenceDiagram
 
     opt USE_CUDA 编译
         Note over Topo: discoverCudaTopology()
-        Topo->>CUDA: cudaGetDeviceCount() - L175
+        Topo->>CUDA: cudaGetDeviceCount()
         loop 每个 GPU
-            Topo->>CUDA: cudaDeviceGetPCIBusId() - L180
-            Topo->>Sysfs: isSameNumaNode() - L160
-            Topo->>Sysfs: getPciDistance() - L130
+            Topo->>CUDA: cudaDeviceGetPCIBusId()
+            Topo->>Sysfs: isSameNumaNode()
+            Topo->>Sysfs: getPciDistance()
             Topo->>Topo: 按 PCI 距离排序 HCA
         end
     end
 
-    Topo->>Topo: resolve() - 构建 resolved_matrix_ - L382
+    Topo->>Topo: resolve() - 构建 resolved_matrix_
     Note over Topo: HCA 名称 -> 整数索引映射
     Topo-->>TEI: 0 (成功)
 ```

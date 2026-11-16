@@ -1,0 +1,18 @@
+{{ define "main" }}
+<main class="row justify-content-center">
+  <article class="col-md-12 col-lg-10 col-xl-8 py-4">
+    <h1>{{ .Title }}</h1>
+    {{ .Content }}
+    <nav aria-label="{{ .Title }}目录">
+      <ul class="list-unstyled">
+        {{ range .Sections.ByWeight }}
+          <li class="my-2"><a href="{{ .RelPermalink }}">{{ .LinkTitle }}</a></li>
+        {{ end }}
+        {{ range .RegularPages.ByWeight }}
+          <li class="my-2"><a href="{{ .RelPermalink }}">{{ .LinkTitle }}</a></li>
+        {{ end }}
+      </ul>
+    </nav>
+  </article>
+</main>
+{{ end }}

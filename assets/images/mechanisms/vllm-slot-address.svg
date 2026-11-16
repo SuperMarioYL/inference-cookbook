@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 472 245" role="img" aria-labelledby="vllm-slot-address-title">
+  <title id="vllm-slot-address-title">逻辑位置怎样换成物理槽位</title>
+  <desc>块表为 5、2、8、12。按商查表，按余数确定块内位置。</desc>
+  <text x="16" y="29" class="diagram-title" text-anchor="start">逻辑位置怎样换成物理槽位</text>
+  <text x="17" y="75" class="label" text-anchor="start">逻辑块号</text>
+  <text x="17" y="124" class="label" text-anchor="start">物理块号</text>
+  <path d="M139 82 L139 97" class="edge"/>
+  <path d="M218 82 L218 97" class="edge"/>
+  <path d="M297 82 L297 97" class="edge"/>
+  <path d="M376 82 L376 97" class="edge"/>
+  <g data-frame="0">
+    <title>查位置 15</title>
+    <desc>每块 16 个槽，位置从 0 计数。查逻辑块 0 得物理块 5，带入偏移 15，得到槽位 95。</desc>
+    <rect x="108" y="51" width="62" height="30" rx="5" class="fresh"/><text x="139.0" y="71.0" class="label" text-anchor="middle">0</text>
+    <rect x="108" y="98" width="62" height="36" rx="5" class="stored"/><text x="139.0" y="121.0" class="label" text-anchor="middle">5</text>
+    <rect x="187" y="51" width="62" height="30" rx="5" class="idle"/><text x="218.0" y="71.0" class="label" text-anchor="middle">1</text>
+    <rect x="187" y="98" width="62" height="36" rx="5" class="idle"/><text x="218.0" y="121.0" class="label" text-anchor="middle">2</text>
+    <rect x="266" y="51" width="62" height="30" rx="5" class="idle"/><text x="297.0" y="71.0" class="label" text-anchor="middle">2</text>
+    <rect x="266" y="98" width="62" height="36" rx="5" class="idle"/><text x="297.0" y="121.0" class="label" text-anchor="middle">8</text>
+    <rect x="345" y="51" width="62" height="30" rx="5" class="idle"/><text x="376.0" y="71.0" class="label" text-anchor="middle">3</text>
+    <rect x="345" y="98" width="62" height="36" rx="5" class="idle"/><text x="376.0" y="121.0" class="label" text-anchor="middle">12</text>
+    <text x="16" y="176" class="number" text-anchor="start">位置 15 ÷ 16 → 块 0，余 15</text>
+    <text x="16" y="215" class="label" text-anchor="start">物理槽位 = 5 × 16 + 15 = 95</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>查位置 16</title>
+    <desc>每块 16 个槽，位置从 0 计数。查逻辑块 1 得物理块 2，带入偏移 0，得到槽位 32。</desc>
+    <rect x="108" y="51" width="62" height="30" rx="5" class="idle"/><text x="139.0" y="71.0" class="label" text-anchor="middle">0</text>
+    <rect x="108" y="98" width="62" height="36" rx="5" class="idle"/><text x="139.0" y="121.0" class="label" text-anchor="middle">5</text>
+    <rect x="187" y="51" width="62" height="30" rx="5" class="fresh"/><text x="218.0" y="71.0" class="label" text-anchor="middle">1</text>
+    <rect x="187" y="98" width="62" height="36" rx="5" class="stored"/><text x="218.0" y="121.0" class="label" text-anchor="middle">2</text>
+    <rect x="266" y="51" width="62" height="30" rx="5" class="idle"/><text x="297.0" y="71.0" class="label" text-anchor="middle">2</text>
+    <rect x="266" y="98" width="62" height="36" rx="5" class="idle"/><text x="297.0" y="121.0" class="label" text-anchor="middle">8</text>
+    <rect x="345" y="51" width="62" height="30" rx="5" class="idle"/><text x="376.0" y="71.0" class="label" text-anchor="middle">3</text>
+    <rect x="345" y="98" width="62" height="36" rx="5" class="idle"/><text x="376.0" y="121.0" class="label" text-anchor="middle">12</text>
+    <text x="16" y="176" class="number" text-anchor="start">位置 16 ÷ 16 → 块 1，余 0</text>
+    <text x="16" y="215" class="label" text-anchor="start">物理槽位 = 2 × 16 + 0 = 32</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>查位置 35</title>
+    <desc>每块 16 个槽，位置从 0 计数。查逻辑块 2 得物理块 8，带入偏移 3，得到槽位 131。</desc>
+    <rect x="108" y="51" width="62" height="30" rx="5" class="idle"/><text x="139.0" y="71.0" class="label" text-anchor="middle">0</text>
+    <rect x="108" y="98" width="62" height="36" rx="5" class="idle"/><text x="139.0" y="121.0" class="label" text-anchor="middle">5</text>
+    <rect x="187" y="51" width="62" height="30" rx="5" class="idle"/><text x="218.0" y="71.0" class="label" text-anchor="middle">1</text>
+    <rect x="187" y="98" width="62" height="36" rx="5" class="idle"/><text x="218.0" y="121.0" class="label" text-anchor="middle">2</text>
+    <rect x="266" y="51" width="62" height="30" rx="5" class="fresh"/><text x="297.0" y="71.0" class="label" text-anchor="middle">2</text>
+    <rect x="266" y="98" width="62" height="36" rx="5" class="stored"/><text x="297.0" y="121.0" class="label" text-anchor="middle">8</text>
+    <rect x="345" y="51" width="62" height="30" rx="5" class="idle"/><text x="376.0" y="71.0" class="label" text-anchor="middle">3</text>
+    <rect x="345" y="98" width="62" height="36" rx="5" class="idle"/><text x="376.0" y="121.0" class="label" text-anchor="middle">12</text>
+    <text x="16" y="176" class="number" text-anchor="start">位置 35 ÷ 16 → 块 2，余 3</text>
+    <text x="16" y="215" class="label" text-anchor="start">物理槽位 = 8 × 16 + 3 = 131</text>
+  </g>
+  <g data-frame="3" display="none">
+    <title>查位置 48</title>
+    <desc>每块 16 个槽，位置从 0 计数。查逻辑块 3 得物理块 12，带入偏移 0，得到槽位 192。</desc>
+    <rect x="108" y="51" width="62" height="30" rx="5" class="idle"/><text x="139.0" y="71.0" class="label" text-anchor="middle">0</text>
+    <rect x="108" y="98" width="62" height="36" rx="5" class="idle"/><text x="139.0" y="121.0" class="label" text-anchor="middle">5</text>
+    <rect x="187" y="51" width="62" height="30" rx="5" class="idle"/><text x="218.0" y="71.0" class="label" text-anchor="middle">1</text>
+    <rect x="187" y="98" width="62" height="36" rx="5" class="idle"/><text x="218.0" y="121.0" class="label" text-anchor="middle">2</text>
+    <rect x="266" y="51" width="62" height="30" rx="5" class="idle"/><text x="297.0" y="71.0" class="label" text-anchor="middle">2</text>
+    <rect x="266" y="98" width="62" height="36" rx="5" class="idle"/><text x="297.0" y="121.0" class="label" text-anchor="middle">8</text>
+    <rect x="345" y="51" width="62" height="30" rx="5" class="fresh"/><text x="376.0" y="71.0" class="label" text-anchor="middle">3</text>
+    <rect x="345" y="98" width="62" height="36" rx="5" class="stored"/><text x="376.0" y="121.0" class="label" text-anchor="middle">12</text>
+    <text x="16" y="176" class="number" text-anchor="start">位置 48 ÷ 16 → 块 3，余 0</text>
+    <text x="16" y="215" class="label" text-anchor="start">物理槽位 = 12 × 16 + 0 = 192</text>
+  </g>
+</svg>

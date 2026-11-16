@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 472 242" role="img" aria-labelledby="sglang-prefill-turns-title">
+  <title id="sglang-prefill-turns-title">160 个提示位置怎样拆成三块</title>
+  <desc>假设分块上限 64、无前缀命中。上方是提示长度，下方记录另一个请求获得的解码轮次。</desc>
+  <text x="16" y="29" class="diagram-title" text-anchor="start">160 个提示位置怎样拆成三块</text>
+  <text x="20" y="87" class="label" text-anchor="start">提示 P</text>
+  <text x="20" y="165" class="label" text-anchor="start">解码 D</text>
+  <text x="104" y="56" class="note" text-anchor="middle">0</text>
+  <text x="232" y="56" class="note" text-anchor="middle">64</text>
+  <text x="360" y="56" class="note" text-anchor="middle">128</text>
+  <text x="424" y="56" class="note" text-anchor="middle">160</text>
+  <g data-frame="0">
+    <title>P 算第一个 64</title>
+    <desc>首个分块 prefill 占 64 个输入位置，P 还有 96 个待算。</desc>
+    <rect x="104" y="66" width="126" height="36" rx="5" class="fresh"/><text x="167.0" y="89.0" class="label" text-anchor="middle">64</text>
+    <rect x="232" y="66" width="126" height="36" rx="5" class="idle"/><text x="295.0" y="89.0" class="label" text-anchor="middle">64</text>
+    <rect x="360" y="66" width="62" height="36" rx="5" class="idle"/><text x="391.0" y="89.0" class="label" text-anchor="middle">32</text>
+    <rect x="105" y="143" width="99" height="35" rx="5" class="idle"/><text x="154.5" y="165.5" class="label" text-anchor="middle">·</text>
+    <rect x="216" y="143" width="99" height="35" rx="5" class="idle"/><text x="265.5" y="165.5" class="label" text-anchor="middle">·</text>
+    <text x="20" y="218" class="note" text-anchor="start">P 已计算 64 / 160 个位置；D 已推进 0 轮。</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>D 获得一轮</title>
+    <desc>示例调度在两个分块之间给 D 一轮，D 生成下一个 token。</desc>
+    <rect x="104" y="66" width="126" height="36" rx="5" class="stored"/><text x="167.0" y="89.0" class="label" text-anchor="middle">64</text>
+    <rect x="232" y="66" width="126" height="36" rx="5" class="idle"/><text x="295.0" y="89.0" class="label" text-anchor="middle">64</text>
+    <rect x="360" y="66" width="62" height="36" rx="5" class="idle"/><text x="391.0" y="89.0" class="label" text-anchor="middle">32</text>
+    <rect x="105" y="143" width="99" height="35" rx="5" class="fresh"/><text x="154.5" y="165.5" class="label" text-anchor="middle">token 1</text>
+    <rect x="216" y="143" width="99" height="35" rx="5" class="idle"/><text x="265.5" y="165.5" class="label" text-anchor="middle">·</text>
+    <text x="20" y="218" class="note" text-anchor="start">P 已计算 64 / 160 个位置；D 已推进 1 轮。</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>P 算第二个 64</title>
+    <desc>第二块完成后，P 的连续已算长度从 64 增到 128。</desc>
+    <rect x="104" y="66" width="126" height="36" rx="5" class="stored"/><text x="167.0" y="89.0" class="label" text-anchor="middle">64</text>
+    <rect x="232" y="66" width="126" height="36" rx="5" class="fresh"/><text x="295.0" y="89.0" class="label" text-anchor="middle">64</text>
+    <rect x="360" y="66" width="62" height="36" rx="5" class="idle"/><text x="391.0" y="89.0" class="label" text-anchor="middle">32</text>
+    <rect x="105" y="143" width="99" height="35" rx="5" class="stored"/><text x="154.5" y="165.5" class="label" text-anchor="middle">token 1</text>
+    <rect x="216" y="143" width="99" height="35" rx="5" class="idle"/><text x="265.5" y="165.5" class="label" text-anchor="middle">·</text>
+    <text x="20" y="218" class="note" text-anchor="start">P 已计算 128 / 160 个位置；D 已推进 1 轮。</text>
+  </g>
+  <g data-frame="3" display="none">
+    <title>D 再走一轮</title>
+    <desc>D 又获得一次执行机会；P 的最后 32 个输入位置继续排队。</desc>
+    <rect x="104" y="66" width="126" height="36" rx="5" class="stored"/><text x="167.0" y="89.0" class="label" text-anchor="middle">64</text>
+    <rect x="232" y="66" width="126" height="36" rx="5" class="stored"/><text x="295.0" y="89.0" class="label" text-anchor="middle">64</text>
+    <rect x="360" y="66" width="62" height="36" rx="5" class="idle"/><text x="391.0" y="89.0" class="label" text-anchor="middle">32</text>
+    <rect x="105" y="143" width="99" height="35" rx="5" class="stored"/><text x="154.5" y="165.5" class="label" text-anchor="middle">token 1</text>
+    <rect x="216" y="143" width="99" height="35" rx="5" class="fresh"/><text x="265.5" y="165.5" class="label" text-anchor="middle">token 2</text>
+    <text x="20" y="218" class="note" text-anchor="start">P 已计算 128 / 160 个位置；D 已推进 2 轮。</text>
+  </g>
+  <g data-frame="4" display="none">
+    <title>P 算最后 32</title>
+    <desc>最后一块只有 32 个位置，P 的提示处理完毕。条长表示 token 数，与执行耗时无关。</desc>
+    <rect x="104" y="66" width="126" height="36" rx="5" class="stored"/><text x="167.0" y="89.0" class="label" text-anchor="middle">64</text>
+    <rect x="232" y="66" width="126" height="36" rx="5" class="stored"/><text x="295.0" y="89.0" class="label" text-anchor="middle">64</text>
+    <rect x="360" y="66" width="62" height="36" rx="5" class="fresh"/><text x="391.0" y="89.0" class="label" text-anchor="middle">32</text>
+    <rect x="105" y="143" width="99" height="35" rx="5" class="stored"/><text x="154.5" y="165.5" class="label" text-anchor="middle">token 1</text>
+    <rect x="216" y="143" width="99" height="35" rx="5" class="stored"/><text x="265.5" y="165.5" class="label" text-anchor="middle">token 2</text>
+    <text x="20" y="218" class="note" text-anchor="start">P 已计算 160 / 160 个位置；D 已推进 2 轮。</text>
+  </g>
+</svg>

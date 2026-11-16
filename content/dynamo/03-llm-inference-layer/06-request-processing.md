@@ -3,9 +3,9 @@ title: "请求处理流程"
 weight: 6
 ---
 
-> 本文介绍 Dynamo 的完整请求处理流程，从 HTTP 请求到流式响应。
+## 追踪 HTTP 请求而非固定进程数
 
----
+从一次短请求开始，关联前端模板与分词、选择 worker、后端执行、输出解码和客户端接收的时间。不同后端与输入形式下预处理所在位置可能变化，客户端的请求标识和返回格式仍是观察入口。 [请求处理架构](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/docs/fern/pages/developer-guide/knowledge-base/concepts/system-architecture/architecture.md)
 
 ## 1. 处理流程概览
 
@@ -68,24 +68,27 @@ impl DecodeStream {
 
 ### 2.3 增量解码流程
 
-```mermaid
-sequenceDiagram
-    participant Engine
-    participant DecodeStream
-    participant Client
-
-    Engine->>DecodeStream: [token_1]
-    DecodeStream->>DecodeStream: 解码 "Hello"
-    DecodeStream-->>Client: "Hello"
-
-    Engine->>DecodeStream: [token_2]
-    DecodeStream->>DecodeStream: 解码 "Hello world" - "Hello"
-    DecodeStream-->>Client: " world"
-
-    Engine->>DecodeStream: [token_3]
-    DecodeStream->>DecodeStream: 解码 "Hello world!" - "Hello world"
-    DecodeStream-->>Client: "!"
-```
+{{< trace >}}
+title: 增量解码只发新增文字
+actors: ["引擎", "解码状态", "客户端"]
+steps:
+  - from: 0
+    to: 1
+    label: "第一个片段"
+    detail: "收到第一个输出 ID，对应可显示的 Hello。"
+  - from: 1
+    to: 2
+    label: "发送 Hello"
+    detail: "记录已经送出的文本边界。"
+  - from: 0
+    to: 1
+    label: "第二个片段"
+    detail: "新 ID 解码后，完整可见文本变为 Hello world。"
+  - from: 1
+    to: 2
+    label: "发送空格与 world"
+    detail: "这次只发上次边界之后的部分，客户端拼接得到 Hello world。"
+{{< /trace >}}
 
 ---
 
@@ -320,18 +323,6 @@ data: [DONE]
   }
 }
 ```
-
----
-
-## 小结
-
-本文介绍了 Dynamo 的完整请求处理流程：
-
-1. **Tokenization**：文本编码和增量解码
-2. **Preprocessor**：Chat Template 渲染
-3. **采样参数**：Temperature、Top-P、Top-K
-4. **停止条件**：EOS、Stop Sequences
-5. **响应格式**：SSE 流式和非流式
 
 ---
 

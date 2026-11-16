@@ -1,15 +1,9 @@
 ---
-title: "附录"
+title: "术语索引"
 linkTitle: "附录"
 weight: 13
 description: >
   术语表、参考资料与扩展阅读
 ---
 
-本附录提供 Mooncake 文档中使用的术语解释、技术缩略词对照以及扩展阅读资源。
-
-## 内容导航
-
-- [术语表与缩略词](01-glossary.md) - 核心术语中英对照与技术缩略词解释
-- 参考文献 - Mooncake 相关论文与技术资料 (待补充)
-- 扩展阅读 - 深入学习相关技术的推荐资源 (待补充)
+[术语表](./01-glossary.md)解释请求调度、前缀索引、存储和传输的角色。查 API 或启动参数时，请使用对应子项目的[固定版本接口文档](https://github.com/kvcache-ai/Mooncake/tree/v0.3.14/docs/source/api-reference)。

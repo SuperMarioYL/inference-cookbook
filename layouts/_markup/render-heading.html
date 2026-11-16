@@ -1,0 +1,8 @@
+<h{{ .Level }} id="{{ .Anchor }}"{{ range $key, $value := .Attributes }}{{ if ne $key "id" }} {{ $key }}="{{ $value }}"{{ end }}{{ end }}>
+  {{- if findRE "^[-]?[0-9]" .Anchor -}}
+    {{/* Bootstrap ScrollSpy resolves TOC fragments as CSS selectors. Keep the original deep link on the heading. */}}
+    <span id="toc-h-{{ .Anchor }}">{{ .Text }}</span>
+  {{- else -}}
+    {{ .Text }}
+  {{- end -}}
+</h{{ .Level }}>

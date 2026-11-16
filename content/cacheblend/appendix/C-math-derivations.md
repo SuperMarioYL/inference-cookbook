@@ -3,13 +3,13 @@ title: "数学推导"
 weight: 3
 ---
 
-本文档提供 CacheBlend 核心算法的详细数学推导，包括 RoPE 位置编码的相对位置不变性证明、HKVD 选择的理论基础以及注意力稀疏性的量化分析。
+文档移位同时改变了位置编码和可见的上文。先固定 Q、K 推导位置差，再考察隐藏状态变化怎样进入 K、V 偏差。
 
 ---
 
 ## RoPE 位置编码的相对位置不变性证明
 
-**定理**: RoPE（Rotary Position Embedding，旋转位置编码）保持相对位置不变性，即两个 token 之间的注意力分数只依赖于它们的相对位置差，而不是绝对位置。
+**定理**: RoPE（Rotary Position Embedding，旋转位置编码）保持相对位置不变性，即两个 token 之间的注意力分数中的位置因子只取决于相对位置差。
 
 **证明**:
 
@@ -43,11 +43,11 @@ $$
 
 最后一步利用了旋转矩阵的性质 $R_m^T R_n = R_{n-m}$。
 
-这证明了注意力分数只依赖于相对位置 $(n-m)$，而不是绝对位置 $m$ 或 $n$。
+这证明了注意力分数中的旋转因子只依赖两者的相对位置 $(n-m)$。
 
 ### CacheBlend 中的应用
 
-对于预先计算的 KV Cache，其 Key 向量是在原始位置 $p_{old}$ 编码的：
+若当前引擎保存的是已加入 RoPE 的 Key，它位于原始位置 $p_{old}$：
 
 $$
 k_{old} = R_{p_{old}} \cdot k_{base}
@@ -63,17 +63,7 @@ k_{new} &= R_{p_{new}} \cdot k_{base} \\
 \end{aligned}
 $$
 
-在代码中实现为：
-
-```python
-# 设置正确的位置差
-cache_fuse_metadata['org_pos'] = positions  # 新位置
-
-# 使用 rotary_emb 应用位置差
-_, old_kv[0] = self.rotary_emb(cache_fuse_metadata['org_pos'],
-                                cache_fuse_metadata['fake_q'],
-                                old_kv[0])
-```
+作者原型在应用 RoPE 之前收集 `hack_kv`，因此复用时对这份原始 K 用组合后的位置直接旋转。若输入已经带旧旋转，才使用上面的差分关系。跟踪某个具体实现应从保存 K 的位置开始。[原型源码](https://github.com/YaoJiayi/CacheBlend/blob/55ad02675939f783a38d579393527d218a7fd581/vllm_blend/vllm/model_executor/models/llama.py)
 
 ---
 

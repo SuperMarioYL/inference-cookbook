@@ -3,9 +3,9 @@ title: "Runtime 双层设计"
 weight: 3
 ---
 
-> 本文介绍 Dynamo 的 Runtime 双层设计，包括 Local Runtime、Distributed Runtime 以及生命周期管理。
+## 本地执行器与分布式成员怎样配合
 
----
+每个进程独立创建 runtime，以相同 namespace 和发现后端联通。Dynamo 1.6.2 的开发例子可使用文件发现，默认请求传输与事件传输分别是 TCP、ZMQ。以下 etcd/NATS 的配置对应明确选用这些后端的情况。 [DistributedRuntime 源码](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/runtime/src/distributed.rs)
 
 ## 1. 设计理念
 
@@ -219,29 +219,27 @@ classDiagram
 
 ### 3.3 初始化流程
 
-```mermaid
-sequenceDiagram
-    participant App as 应用
-    participant DRT as DistributedRuntime
-    participant Secondary as Secondary Runtime
-    participant etcd as etcd
-    participant NATS as NATS
-
-    App->>DRT: new(runtime, config)
-
-    DRT->>Secondary: spawn(etcd 连接)
-    Secondary->>etcd: 建立连接
-    etcd-->>Secondary: 连接成功
-    Secondary-->>DRT: etcd_client
-
-    DRT->>Secondary: spawn(NATS 连接)
-    Secondary->>NATS: 建立连接
-    NATS-->>Secondary: 连接成功
-    Secondary-->>DRT: nats_client
-
-    DRT->>DRT: 创建 component_registry
-    DRT-->>App: DistributedRuntime
-```
+{{< trace >}}
+title: 启动时如何接好运行时组件
+actors: ["应用进程", "运行时", "发现后端", "目标实例"]
+steps:
+  - from: 0
+    to: 1
+    label: "读取配置"
+    detail: "应用指定 namespace、发现方式以及请求和事件的传输选择。"
+  - from: 1
+    to: 2
+    label: "接入发现服务"
+    detail: "运行时初始化相应后端。例如单机可选文件，裸机亦可使用 etcd。"
+  - from: 2
+    to: 1
+    label: "提供成员集合"
+    detail: "已有实例和后续成员变化成为客户端选择目标的输入。"
+  - from: 1
+    to: 3
+    label: "发起首次调用"
+    detail: "一个已发现的目标被选中，运行时向其请求端点发送消息。"
+{{< /trace >}}
 
 ### 3.4 组件注册表 (Registry)
 
@@ -333,35 +331,31 @@ sequenceDiagram
 
 ### 4.3 Graceful Shutdown 流程
 
-```mermaid
-sequenceDiagram
-    participant OS as 操作系统
-    participant Worker as Worker
-    participant App as 应用逻辑
-    participant RT as Runtime
-    participant etcd as etcd
-
-    Note over OS: 收到 SIGTERM/SIGINT
-
-    OS->>RT: 信号处理器触发
-    RT->>RT: cancellation_token.cancel()
-
-    par 并行执行
-        RT->>App: 通知应用取消
-        App->>App: 完成当前请求
-        App->>App: 清理资源
-    and
-        RT->>etcd: Revoke Lease
-        Note over etcd: 服务自动下线
-    end
-
-    alt 在超时内完成
-        App-->>Worker: 正常退出
-        Worker-->>OS: exit(0)
-    else 超时
-        Worker-->>OS: exit(911)
-    end
-```
+{{< trace >}}
+title: 关闭信号如何走到进程退出
+actors: ["系统", "服务进程", "运行时", "客户端"]
+steps:
+  - from: 0
+    to: 1
+    label: "送出终止信号"
+    detail: "进程进入关闭流程。"
+  - from: 1
+    to: 2
+    label: "启动清理"
+    detail: "服务停止接收新工作，运行时通知相关任务关闭。"
+  - from: 1
+    to: 3
+    label: "排空已接请求"
+    detail: "已经进入处理的请求有机会结束，直到完成或达到配置的关闭期限。"
+  - from: 2
+    to: 2
+    label: "清理成员记录"
+    detail: "相应的发现后端处理注销；在 etcd 模式也需处理租约。"
+  - from: 1
+    to: 0
+    label: "退出进程"
+    detail: "服务和后台任务收尾后结束进程。"
+{{< /trace >}}
 
 ---
 
@@ -401,17 +395,6 @@ graph LR
 
     Default --> Defaults --> Etc --> Env --> Final["最终配置"]
 ```
-
----
-
-## 小结
-
-本文介绍了 Dynamo 的 Runtime 双层设计：
-
-1. **Local Runtime**：管理 Tokio 线程池，隔离业务和后台任务
-2. **Distributed Runtime**：扩展分布式能力，管理 etcd/NATS 连接
-3. **生命周期管理**：CancellationToken 层级结构，与 etcd Lease 绑定
-4. **Worker 框架**：统一的应用入口点，支持优雅关闭
 
 ---
 

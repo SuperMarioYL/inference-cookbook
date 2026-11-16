@@ -7,14 +7,14 @@ weight: 4
 
 PyTorch 提供了两套互补的 API 来构建神经网络：
 
-- **`torch.nn.Module`**（简称 `nn.*`）：有状态的面向对象 API，内部维护可学习参数
-- **`torch.nn.functional`**（简称 `F.*`）：无状态的函数式 API，纯函数，不持有任何参数
+- **`torch.nn.Module`**（简称 `nn.*`）：有状态的面向对象 API，可以注册参数、buffer 和子模块
+- **`torch.nn.functional`**（简称 `F.*`）：函数式入口，调用者传入权重、运行统计量及训练标记
 
 这两套 API 并非竞争关系，而是协作关系。大多数 `nn.Module` 子类的 `forward()` 方法都会委托给对应的 `F.*` 函数完成实际计算。理解两者的关系和适用场景，是编写简洁 PyTorch 代码的关键。
 
-## 2. functional 提供无状态纯函数
+## 2. functional 的参数与副作用
 
-`torch.nn.functional` 模块（文件：`torch/nn/functional.py`）提供一系列无状态的神经网络操作函数。"无状态"意味着这些函数不维护任何内部状态，每次调用的结果完全由输入参数决定。
+`torch.nn.functional` 模块（文件：`torch/nn/functional.py`）提供按次调用的操作，不替调用者登记参数。`F.dropout(..., training=True)` 会采样随机 mask，`F.batch_norm(..., training=True)` 可以更新传入的运行统计量；这些操作并非数学意义上的纯函数。
 
 ### 2.1 常见的 functional 函数
 
@@ -107,44 +107,27 @@ class _BatchNorm(_NormBase):
 
 ## 4. 调用链分析
 
-```mermaid
-flowchart LR
-    subgraph user["用户代码层"]
-        Call["model(input)"]
-    end
-
-    subgraph module_layer["nn.Module 层"]
-        direction TB
-        CallImpl["__call__ / _call_impl"]
-        Hooks["Hook 执行"]
-        Forward["forward()"]
-        CallImpl --> Hooks
-        Hooks --> Forward
-    end
-
-    subgraph functional_layer["nn.functional 层"]
-        direction TB
-        FFunc["F.linear / F.conv2d / ..."]
-        Dispatch["Python 参数处理与分发"]
-        FFunc --> Dispatch
-    end
-
-    subgraph aten_layer["ATen / C++ 层"]
-        direction TB
-        ATenOp["at::linear / at::conv2d / ..."]
-        Backend["后端实现<br/>(CPU / CUDA / MPS / ...)"]
-        ATenOp --> Backend
-    end
-
-    Call --> CallImpl
-    Forward --> FFunc
-    Dispatch --> ATenOp
-
-    style user fill:#4A90D9,color:#fff
-    style module_layer fill:#50B5A9,color:#fff
-    style functional_layer fill:#F5A623,color:#fff
-    style aten_layer fill:#9B59B6,color:#fff
-```
+{{< trace >}}
+title: "Linear 的权重如何进入计算"
+actors: ["调用方", "nn.Linear", "F.linear", "输出"]
+steps:
+  - from: 0
+    to: 1
+    label: "传入 x"
+    detail: "本例一行输入 x=[1,2]，模块中保存一行 weight=[3,4] 与 bias=[1]。"
+  - from: 1
+    to: 2
+    label: "取出参数"
+    detail: "Linear.forward 把 x、self.weight、self.bias 作为参数交给 F.linear。"
+  - from: 2
+    to: 3
+    label: "计算线性层"
+    detail: "x@weight.T+bias=1×3+2×4+1=12。"
+  - from: 3
+    to: 0
+    label: "返回一个通道"
+    detail: "输出张量与输入共享 batch 维；权重仍由 nn.Linear 持有。"
+{{< /trace >}}
 
 完整调用链：
 1. **用户调用 `model(x)`** -> 触发 `Module.__call__`

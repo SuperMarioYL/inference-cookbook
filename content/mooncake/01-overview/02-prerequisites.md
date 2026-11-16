@@ -3,13 +3,7 @@ title: "技术预备知识"
 weight: 2
 ---
 
-[上一篇: 引言与项目背景](./01-introduction.md) | [下一篇: 整体架构设计](../02-architecture/01-system-architecture.md)
-
----
-
-# 技术预备知识
-
-在深入 Mooncake 的设计细节之前，本章将介绍必要的技术背景知识，包括 Transformer 架构、KVCache 原理、LLM 推理的两阶段特性，以及 RDMA 网络基础。
+Mooncake 搬运的 KV 由预填充端生成，解码端读取。算出这些块的大小，就能估算链路至少要搬多少字节。
 
 ### 2.1 Transformer 架构与 KVCache 原理
 
@@ -130,27 +124,32 @@ $$= 80 \times 2 \times \frac{8192}{64/8} \times 2 = 80 \times 2 \times 1024 \tim
 
 **Prefix Caching 的工作流程**：
 
-```mermaid
-sequenceDiagram
-    participant R1 as 请求 A
-    participant Cache as KVCache 缓存
-    participant GPU as GPU
-    participant R2 as 请求 B
-
-    R1->>GPU: 发送完整 prompt
-    GPU->>GPU: Prefill 计算
-    GPU->>Cache: 存储 KVCache (hash: prefix_A)
-    GPU-->>R1: 返回输出
-
-    Note over R2,Cache: 请求 B 到达，前缀与 A 相同
-
-    R2->>Cache: 查询 prefix hash
-    Cache-->>R2: 命中！返回 KVCache 位置
-    R2->>GPU: 只发送不同的后缀
-    Cache->>GPU: 加载缓存的 KVCache
-    GPU->>GPU: 只计算后缀部分
-    GPU-->>R2: 返回输出
-```
+{{< stateboard >}}
+title: "两条请求的最长共同前缀"
+rows: ["请求 P", "请求 Q", "已匹配"]
+steps:
+  - title: "比较起点"
+    detail: "假设每格是一块。P 与 Q 首先遇到相同的系统提示。"
+    cells:
+      - ["系统", "M1", "M2", "甲问"]
+      - ["系统", "M1", "R", "乙问"]
+      - ["命中", "·", "·", "·"]
+    focus: [[2, 0]]
+  - title: "多命中一块"
+    detail: "相同的 M1 紧随系统提示，第二块也可复用。"
+    cells:
+      - ["系统", "M1", "M2", "甲问"]
+      - ["系统", "M1", "R", "乙问"]
+      - ["命中", "命中", "·", "·"]
+    focus: [[2, 1]]
+  - title: "遇到不同内容"
+    detail: "第三块分别是 M2 和 R，Q 的连续命中长度停在两块。"
+    cells:
+      - ["系统", "M1", "M2", "甲问"]
+      - ["系统", "M1", "R", "乙问"]
+      - ["命中", "命中", "失配", "·"]
+    focus: [[0, 2], [1, 2], [2, 2]]
+{{< /stateboard >}}
 
 ### 2.2 LLM 推理的两阶段特性
 
@@ -365,18 +364,27 @@ Mooncake 主要使用 **RDMA Write** 和 **RDMA Read** 进行 KVCache 传输，�
 
 **GPU Direct RDMA (GDR)** 允许网卡直接访问 GPU 显存，无需经过 CPU 内存中转：
 
-```mermaid
-graph LR
-    subgraph no_gdr["无 GDR"]
-        G1["GPU A"] -->|"PCIe"| C1["CPU 内存"]
-        C1 -->|"RDMA"| C2["CPU 内存"]
-        C2 -->|"PCIe"| G2["GPU B"]
-    end
-
-    subgraph with_gdr["有 GDR"]
-        G3["GPU A"] -->|"直接 RDMA"| G4["GPU B"]
-    end
-```
+{{< trace >}}
+title: "一块 GPU 内存跨节点传输"
+actors: ["源 GPU", "源 RNIC", "目标 RNIC", "目标 GPU"]
+steps:
+  - from: 0
+    to: 1
+    label: "访问源地址"
+    detail: "在支持 GPU Direct RDMA 并完成内存注册的环境中，RNIC 可访问源 GPU 缓冲。"
+  - from: 1
+    to: 2
+    label: "传输字节"
+    detail: "两侧网卡沿已建立的 RDMA 通道传输指定范围。"
+  - from: 2
+    to: 3
+    label: "写目标块"
+    detail: "目标 GPU 中注册的地址范围收到数据。"
+  - from: 3
+    to: 3
+    label: "等待可用"
+    detail: "应用按所用接口等待完成并同步设备，再让消费该块的计算执行。"
+{{< /trace >}}
 
 **GDR 的优势**：
 - 减少数据拷贝
@@ -420,23 +428,32 @@ Continuous Batching（持续批处理）是 Decode 阶段的关键优化：
 - 每个 iteration 动态添加新请求、移除已完成请求
 - 显著提高 GPU 利用率
 
-```mermaid
-graph TB
-    subgraph static_batch["静态 Batching"]
-        S1["Batch 1 - A, B, C"] --> S2["等待全部完成"]
-        S2 --> S3["Batch 2 - D, E, F"]
-    end
-
-    subgraph cont_batch["Continuous Batching"]
-        C1["Iter 1 - A, B, C"]
-        C2["Iter 2 - A, B, D"]
-        C3["Iter 3 - A, D, E"]
-        C4["Iter 4 - D, E, F"]
-        C1 --> C2
-        C2 --> C3
-        C3 --> C4
-    end
-```
+{{< stateboard >}}
+title: "每次迭代重新安排两个槽"
+rows: ["时刻", "槽 0", "槽 1"]
+steps:
+  - title: "最初的批次"
+    detail: "A 和 B 一起运行，C 已经到达并排队。"
+    cells:
+      - ["步0", "步1", "步2"]
+      - ["A", "·", "·"]
+      - ["B", "·", "·"]
+    focus: [[1, 0], [2, 0]]
+  - title: "短请求结束"
+    detail: "B 在第一步结束。下一步 C 用上它释放的槽，A 继续。"
+    cells:
+      - ["步0", "步1", "步2"]
+      - ["A", "A", "·"]
+      - ["B", "C", "·"]
+    focus: [[1, 1], [2, 1]]
+  - title: "继续生成"
+    detail: "A、C 是否结束各由自己的生成状态决定。"
+    cells:
+      - ["步0", "步1", "步2"]
+      - ["A", "A", "A"]
+      - ["B", "C", "C"]
+    focus: [[1, 2], [2, 2]]
+{{< /stateboard >}}
 
 #### 2.4.3 Chunked Prefill
 
@@ -456,16 +473,8 @@ Mooncake 提出的 Chunked Pipeline Parallelism (CPP) 通过流水线方式减�
 
 ### 2.5 本章小结
 
-本章介绍了理解 Mooncake 所需的技术背景：
-
 1. **KVCache** 是 LLM 推理的核心数据结构，大小与上下文长度成正比
 2. **Prefix Caching** 可以显著减少重复计算，但需要大容量全局缓存
 3. **Prefill/Decode 分离** 可以消除两阶段的相互干扰
 4. **RDMA** 提供了高带宽、低延迟的跨节点数据传输能力
 5. **GPU Direct RDMA** 进一步减少了数据拷贝开销
-
-有了这些背景知识，我们将在下一章深入 Mooncake 的系统架构设计。
-
----
-
-[上一篇: 引言与项目背景](./01-introduction.md) | [下一篇: 整体架构设计](../02-architecture/01-system-architecture.md)

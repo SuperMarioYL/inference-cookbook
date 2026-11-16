@@ -3,13 +3,7 @@ title: "核心概念详解"
 weight: 2
 ---
 
-# 核心概念详解
-
-[上一篇: 什么是 Mooncake](01-what-is-mooncake.md) | [目录](../README.md) | [下一篇: 快速上手教程](03-quick-start-tutorial.md)
-
----
-
-> 本篇将深入讲解 Mooncake 涉及的核心概念，帮助读者建立对系统各组件的直觉理解。
+一块 KV 在设备上算出来，可以直接交给解码端，也可以写进 Store 等下一次读取。两条路径分别涉及传输引擎、存储节点和元数据。
 
 ---
 
@@ -21,20 +15,32 @@ weight: 2
 
 **KVCache 的作用**就是将已经计算过的 Key 和 Value 向量缓存下来，后续生成新 Token 时直接复用，避免重复计算。
 
-```mermaid
-graph LR
-    subgraph nocache["无 KVCache"]
-        A1["Token 1"] --> C1["计算 K1, V1"]
-        A2["Token 2"] --> C2["重新计算 K1, V1, K2, V2"]
-        A3["Token 3"] --> C3["重新计算 K1, V1, K2, V2, K3, V3"]
-    end
-
-    subgraph withcache["有 KVCache"]
-        B1["Token 1"] --> D1["计算 K1, V1 并缓存"]
-        B2["Token 2"] --> D2["复用 K1, V1 + 计算 K2, V2"]
-        B3["Token 3"] --> D3["复用 K1..K2, V1..V2 + 计算 K3, V3"]
-    end
-```
+{{< stateboard >}}
+title: "生成下一词时，旧 KV 留在什么位置"
+rows: ["历史位置", "本步新词", "读写"]
+steps:
+  - title: "读入提示"
+    detail: "P0 与 P1 形成提示，prefill 为它们留下 KV。"
+    cells:
+      - ["P0", "P1", "·"]
+      - ["·", "·", "·"]
+      - ["写", "写", "·"]
+    focus: [[2, 0], [2, 1]]
+  - title: "输入新 token"
+    detail: "生成 T 后，下一步用 T 当作输入，读取已有的 P0、P1。"
+    cells:
+      - ["P0", "P1", "·"]
+      - ["·", "·", "T"]
+      - ["读", "读", "·"]
+    focus: [[2, 0], [2, 1]]
+  - title: "追加本步 KV"
+    detail: "本次前向为 T 产生新 K/V，追加到缓存供后续步骤使用。"
+    cells:
+      - ["P0", "P1", "T"]
+      - ["·", "·", "T"]
+      - ["读", "读", "写"]
+    focus: [[2, 2]]
+{{< /stateboard >}}
 
 ### 1.2 KVCache 有多大
 
@@ -64,7 +70,7 @@ graph LR
 | 128K tokens | 40 GB | 一块 A100 (40GB) 的全部显存 |
 | 1M tokens | 320 GB | 需要 4 块 A100 (80GB) |
 
-可以看到，随着上下文窗口的增长，KVCache 的显存占用迅速膨胀，成为 LLM 推理的核心瓶颈之一。这正是 Mooncake 要解决的问题 -- 将 KVCache 从有限的 GPU 显存"溢出"到集群中更充裕的 DRAM 和 SSD 中。
+上下文越长，各层要保留的 K、V 越多。Mooncake 可以把仍有复用机会的数据放到集群 DRAM 或 SSD，设备空间留给当前执行的请求。
 
 ---
 
@@ -274,29 +280,22 @@ Mooncake Store 提供简洁的 Key-Value 接口：
 就像 CDN 让全球用户都能快速获取静态资源一样，Mooncake Store 让集群中的任何 Decode 节点都能快速获取所需的 KVCache：
 
 1. **首次计算**: 用户发送一个新的 Prompt，Prefill 节点计算 KVCache 并存入 Mooncake Store
-2. **缓存命中**: 后续相同或相似前缀的请求，直接从 Mooncake Store 获取已有的 KVCache，跳过重复计算
+2. **缓存命中**: 后续分词后相同的连续前缀的请求，直接从 Mooncake Store 获取已有的 KVCache，跳过重复计算
 3. **就近获取**: KVCache 可以缓存在距离 Decode 节点最近的内存中，最小化传输延迟
-4. **自动淘汰**: 当存储空间不足时，自动清理最久未使用的 KVCache
+4. **自动淘汰**: 存储压力升高时，按实际配置和租约状态选择可驱逐副本
 
 ### 6.3 Conductor 的角色
 
-Conductor 是 Mooncake 的全局调度器，类似 CDN 中的智能 DNS 解析器：
-
-- **请求路由**: 根据 KVCache 命中情况，将请求分配到最优节点
-- **负载均衡**: 监控各节点资源使用情况，避免热点
-- **缓存管理**: 决定 KVCache 的存储位置和淘汰策略
-- **SLO 保障**: 在满足延迟约束的前提下，最大化系统吞吐量
-
----
+v0.3.14 的 Conductor 从推理引擎和 Store 订阅事件，告诉路由器哪台实例的哪一层缓存覆盖了多长的前缀。路由器可以再结合队列选择实例。对象何时驱逐由存储或引擎处理，随后发布事件反映到索引。[Conductor 的组件和查询](../02-architecture/03-conductor-scheduler.md)
 
 ## 概念关系总结
 
-下面的图展示了本篇介绍的所有核心概念之间的关系：
+在使用共享池的路径中，路由器选择 P/D 实例，Store 保存可复用数据，Transfer Engine 搬运字节。
 
 ```mermaid
 graph LR
     subgraph request["用户请求处理流程"]
-        REQ["用户请求"] --> COND["Conductor 调度"]
+        REQ["用户请求"] --> COND["路由器查询 Conductor"]
         COND -->|"Cache Miss"| PF["Prefill 节点"]
         COND -->|"Cache Hit"| DC["Decode 节点"]
         PF -->|"生成 KVCache"| TE1["Transfer Engine"]
@@ -317,6 +316,5 @@ graph LR
 
 ## 下一步
 
-掌握了核心概念后，让我们动手实践：
 
-> [下一篇: 快速上手教程](03-quick-start-tutorial.md) -- 安装 Mooncake 并运行第一个 Transfer Engine 和 Mooncake Store 示例。
+> [下一篇: 快速上手教程](03-quick-start-tutorial.md) -- 安装 Mooncake，在本机通过 TCP 建立 Store 连接并验证读回。

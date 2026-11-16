@@ -3,20 +3,9 @@ title: "内存池管理"
 weight: 3
 ---
 
-## 概述
+## 请求行、token 槽与模型 KV 池
 
-### 本章学习目标
-- 理解 SGLang 内存池的整体架构
-- 掌握 Token Pool 和 KV Pool 的设计
-- 了解 Paged Attention 的实现原理
-- 学习内存分配和回收机制
-
-### 前置知识要求
-- 了解 KV Cache 基础
-- 熟悉内存管理概念
-- 理解池化技术
-
----
+一次分配同时涉及请求状态能否进入池、每个逻辑位置对应哪个 KV 槽、模型的实际 K/V 张量放在哪里。先从一个请求行跟到两个 token 位置，释放其中一个请求时再看哪些槽还被树或其他请求引用。 [0.5.23 池类型与接口](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/mem_cache/memory_pool.py)
 
 ## 内存池架构
 
@@ -511,35 +500,27 @@ def check_memory_pressure(self) -> str:
 
 ### 完整分配流程
 
-```mermaid
-sequenceDiagram
-    participant SCHED as Scheduler
-    participant R2T as ReqToTokenPool
-    participant T2KV as TokenToKVPool
-    participant KV as KVCache
-    participant CACHE as RadixCache
-
-    SCHED->>CACHE: match_prefix(tokens)
-    CACHE-->>SCHED: (node, prefix_len)
-
-    SCHED->>R2T: alloc()
-    R2T-->>SCHED: req_idx
-
-    SCHED->>T2KV: alloc(num_new_tokens)
-    T2KV-->>SCHED: kv_indices
-
-    SCHED->>R2T: set_token_loc(req_idx, prefix_len, kv_indices)
-
-    Note over SCHED: 前向计算
-    SCHED->>KV: store_kv(layer, indices, k, v)
-
-    SCHED->>CACHE: cache_req(tokens, all_indices)
-
-    Note over SCHED: 请求完成
-    SCHED->>CACHE: dec_ref(node)
-    SCHED->>T2KV: free(new_indices)
-    SCHED->>R2T: free(req_idx)
-```
+{{< trace >}}
+title: 请求行怎样连到分散的 KV 槽
+actors: ["调度器", "前缀树", "请求池", "KV 池"]
+steps:
+  - from: 0
+    to: 1
+    label: "查已算前缀"
+    detail: "B 有四个输入位置，前两个与 A 的缓存相同。"
+  - from: 1
+    to: 0
+    label: "取得前缀映射"
+    detail: "这两个位置指向已有 KV，其余两个位置还需要空间。"
+  - from: 0
+    to: 2
+    label: "借一行"
+    detail: "请求池为 B 保留一行逻辑位置映射。"
+  - from: 0
+    to: 3
+    label: "分配后缀"
+    detail: "KV 池提供新的两个物理位置，调度器把完整映射与这一行关联。"
+{{< /trace >}}
 
 ### 代码示例
 
@@ -572,26 +553,10 @@ req_to_token_pool.free(req_idx)
 
 ---
 
-## 小结
-
-### 要点回顾
-
-1. **两级池**：ReqToTokenPool + TokenToKVPool
-2. **分页存储**：固定大小页，高内存利用率
-3. **预分配**：避免运行时分配开销
-4. **与 RadixCache 集成**：支持前缀复用
-
-### 关键数据结构
+## 内存池对象速查
 
 | 结构 | 作用 |
 |------|------|
 | `ReqToTokenPool` | 请求到 Token 的映射 |
 | `TokenToKVPoolAllocator` | Token 空间分配 |
 | `KVCache` | 实际 KV 存储 |
-
-### 下一章预告
-
-在下一章《缓存淘汰策略》中，我们将：
-- 了解 LRU/LFU 淘汰策略
-- 学习优先级淘汰机制
-- 掌握内存回收流程

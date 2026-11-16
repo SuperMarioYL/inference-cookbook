@@ -3,18 +3,7 @@ title: "Transformer 架构详解"
 weight: 2
 ---
 
-
-> 本章将详细介绍 Transformer 架构，这是现代大语言模型的基础。
-
----
-
-## 引言
-
-2017 年，Google 发表了划时代的论文《Attention Is All You Need》，提出了 Transformer 架构。这个架构彻底改变了自然语言处理领域，成为了 GPT、BERT、LLaMA 等现代 LLM 的基础。
-
-理解 Transformer 架构是理解 vLLM 优化原理的关键。
-
----
+给模型输入“北京的冬天”，每个位置先从词表取得向量，再经过一层层注意力和前馈网络。最后一个位置的输出用来预测下一个 token。这里从张量形状入手，把这一次前向拆开看。
 
 ## 1. Transformer 的诞生背景
 
@@ -355,13 +344,27 @@ Q, K, V 投影: 3 × hidden_dim × hidden_dim
 
 FFN 是一个简单的两层全连接网络：
 
-```mermaid
-graph LR
-    I["输入<br/>hidden_dim"] --> L1["Linear 1<br/>hidden → intermediate"]
-    L1 --> ACT["激活函数<br/>GELU/SiLU"]
-    ACT --> L2["Linear 2<br/>intermediate → hidden"]
-    L2 --> O["输出<br/>hidden_dim"]
-```
+{{< trace >}}
+title: 一个位置通过两层前馈网络
+actors: ["输入", "第一层", "激活函数", "第二层"]
+steps:
+  - from: 0
+    to: 1
+    label: "进入 FFN"
+    detail: "例中隐藏维度为 2，位置 x 有两个分量。"
+  - from: 1
+    to: 2
+    label: "升维到 4"
+    detail: "第一层线性投影产生四个中间特征。"
+  - from: 2
+    to: 3
+    label: "逐元素变换"
+    detail: "激活函数依次作用于这四个分量，为两次线性映射之间引入非线性。"
+  - from: 3
+    to: 3
+    label: "降回 2 维"
+    detail: "第二层把四个分量映回隐藏维度，便于后续与残差相加。"
+{{< /trace >}}
 
 ```python
 class FeedForward(nn.Module):
@@ -605,29 +608,21 @@ class TransformerBlock(nn.Module):
 ```mermaid
 pie title LLaMA-7B 参数分布
     "Attention (Q/K/V/O)" : 32
-    "FFN" : 65
-    "Embedding + LM Head" : 2
-    "Norm" : 1
+    "FFN" : 64.1
+    "Embedding + LM Head" : 3.9
+    "Norm" : 0.004
 ```
 
 **关键观察**：
-- **FFN 占比最大**（约 65%）
+- **FFN 占比最大**（约 64%）
 - **Attention 其次**（约 32%）
-- **Embedding 占比很小**（约 2%）
+- **Embedding 占比很小**（约 4%）
 
-这解释了为什么 vLLM 主要优化 Attention 和内存管理，而不是 FFN。
+权重字节数说明载入模型要多少空间。推理时还要为各条请求的 KV 留空间，这一项随序列长度变化。
 
 ---
 
-## 11. 本章小结
-
-### 架构要点
-
-1. **Decoder-Only 架构**：现代 LLM 的主流选择
-2. **Transformer Block**：Attention + FFN + Norm + 残差
-3. **位置编码**：RoPE 是现代标准
-
-### 关键组件
+## 一个 Decoder block 里有哪些算子
 
 | 组件 | 作用 | 现代实现 |
 |------|------|---------|
@@ -638,20 +633,6 @@ pie title LLaMA-7B 参数分布
 | Layer Norm | 稳定训练 | RMSNorm |
 | 残差连接 | 信息直传 | Pre-Norm |
 
-### 参数分布
-
-- FFN 占主导（约 65%）
-- Attention 约 32%
-- Embedding 约 2%
-
-### 与 vLLM 的关联
-
-- Attention 计算是 KV Cache 优化的核心
-- 参数分布影响显存使用和优化策略
-- 位置编码影响序列长度支持
-
----
-
 ## 思考题
 
 1. 为什么 Decoder-Only 架构在 LLM 中比 Encoder-Decoder 更流行？
@@ -660,8 +641,4 @@ pie title LLaMA-7B 参数分布
 
 ---
 
-## 下一步
-
-Transformer 架构介绍完毕，接下来我们将深入学习其核心——注意力机制：
-
-👉 [下一章：注意力机制原理](03-attention-mechanism.md)
+[跟踪一个查询向量如何读取 K 和 V](03-attention-mechanism.md)

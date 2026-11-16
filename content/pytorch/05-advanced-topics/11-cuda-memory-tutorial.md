@@ -9,7 +9,7 @@ weight: 11
 
 在深度学习训练中，GPU 内存（显存）是最宝贵的资源之一。与 CPU 内存不同，GPU 显存容量有限（通常 8GB-80GB），且分配/释放操作开销较大。PyTorch 的 CUDA 内存管理系统通过**缓存分配器**（CachingAllocator）和**流同步机制**，在性能和内存利用率之间取得平衡。
 
-本文将从用户视角介绍 CUDA 内存的基本概念和常见操作，为后续深入源码解析打下基础。
+观察显存时，把张量占用的字节与分配器保留的字节分开记录。删除张量后，这两个数可能有不同变化。
 
 ## 2. 核心概念
 
@@ -116,34 +116,27 @@ print(f"已缓存：{torch.cuda.memory_reserved() / 1e6:.2f} MB")
 
 为避免频繁调用耗时的 `cudaMalloc`/`cudaFree`，PyTorch 使用 **CachingAllocator** 维护显存池：
 
-```mermaid
-flowchart LR
-    subgraph user["用户请求"]
-        A["x = torch.randn(1000, 1000, device='cuda')"]
-    end
-
-    subgraph allocator["CachingAllocator"]
-        B{"缓存池中有空闲 Block？"}
-        C["复用已有 Block"]
-        D["调用 cudaMalloc 申请新内存"]
-    end
-
-    subgraph result["结果"]
-        E["返回 DataPtr 给 Tensor"]
-    end
-
-    A --> B
-    B -->|"有"| C
-    B -->|"无"| D
-    C --> E
-    D --> E
-
-    style allocator fill:#fff3e0,stroke:#FF9800
-```
+{{< stateboard >}}
+title: "同一设备块怎样被下一次分配复用"
+rows: ["张量 x", "缓存块甲", "张量 y"]
+steps:
+  - title: "分配给 x"
+    detail: "取固定设备、相同 stream 的简化例子。x 获得一个满足请求大小的缓存块。"
+    cells: [["引用甲"], ["在用"], ["·"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "释放张量引用"
+    detail: "最后一个引用释放、且之前使用该块的 CUDA 工作已满足复用条件后，块回到可复用池。"
+    cells: [["·"], ["空闲"], ["·"]]
+    focus: [[1, 0]]
+  - title: "y 请求同样大小"
+    detail: "分配器若选中这个空闲块，y 可以得到同一段地址，省去一次新的底层分配。"
+    cells: [["·"], ["在用"], ["引用甲"]]
+    focus: [[1, 0], [2, 0]]
+{{< /stateboard >}}
 
 **关键特性**：
 - **内存池复用**：删除 Tensor 后，显存不立即归还系统，而是放入缓存池供后续分配复用
-- **减少系统调用**：避免频繁的 `cudaMalloc`（耗时约 1ms）
+- **减少系统调用**：已释放且满足复用条件的缓存块可以用于同类请求，减少 `cudaMalloc` 调用
 - **碎片化管理**：自动分割和合并内存块
 
 ### 3.3 手动释放显存
@@ -379,7 +372,7 @@ class PrefetchLoader:
 
 ## 9. 延伸阅读
 
-- [Module 1 - Tensor/Storage](../module-01-tensor-storage/) - 理解 TensorImpl 和内存分配基础
-- [下一篇 - 缓存分配器深入解析](01-caching-allocator.md) - CachingAllocator 源码剖析
-- [CUDA Stream 与 Event](02-cuda-stream-event.md) - 异步执行与同步机制
+- [Module 1 - Tensor/Storage](/pytorch/01-introduction/01-tensor-basics-tutorial/) - 理解 TensorImpl 和内存分配基础
+- [下一篇 - 缓存分配器深入解析](https://docs.pytorch.org/docs/2.15/notes/cuda.html#memory-management) - CachingAllocator 源码剖析
+- [CUDA Stream 与 Event](https://docs.pytorch.org/docs/2.15/notes/cuda.html#cuda-streams) - 异步执行与同步机制
 - [PyTorch CUDA 官方文档](https://pytorch.org/docs/stable/notes/cuda.html)

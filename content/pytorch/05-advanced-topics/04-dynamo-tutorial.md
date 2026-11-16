@@ -92,33 +92,17 @@ flowchart TD
 
 ### 4.1 公共 API 入口
 
-`torch.compile()` 定义在 `torch/__init__.py`（第 2572 行），其函数签名如下：
+PyTorch 2.15 的公开接口接受 `fullgraph`、`dynamic`、`backend`、`mode` 等参数。默认路径选择 Inductor。`recompile_limit` 可给本次包装设置专门化上限；需要让包装后的函数独立计数时可设置 `isolate_recompiles=True`。签名与该版本的源码可在解释器中核对。
 
 ```python
-def compile(
-    model: Callable | None = None,
-    *,
-    fullgraph: bool = False,
-    dynamic: bool | None = None,
-    backend: str | Callable = "inductor",
-    mode: str | None = None,
-    options: dict | None = None,
-    disable: bool = False,
-) -> Callable:
+import inspect
+import torch
+
+print(inspect.signature(torch.compile))
+print(torch.compiler.list_backends())
 ```
 
-在内部，`torch.compile()` 最终调用 `torch._dynamo.optimize()`（`torch/_dynamo/eval_frame.py` 第 1463 行），后者是 TorchDynamo 的真正入口：
-
-```python
-# torch/__init__.py 第 2758 行
-return torch._dynamo.optimize(
-    backend=backend,
-    nopython=fullgraph,
-    dynamic=dynamic,
-    disable=disable,
-    guard_filter_fn=guard_filter_fn,
-)(model)
-```
+普通 eager 环境下，入口准备 backend，然后将 `fullgraph` 对应的整图要求和动态形状、重编译配置交给 `torch._dynamo.optimize`。私有模块名用于阅读实现；应用侧从 `torch.compile` 调用。[2.15 接口](https://docs.pytorch.org/docs/2.15/generated/torch.compile.html) · [实现](https://github.com/pytorch/pytorch/blob/v2.15.0/torch/__init__.py)
 
 ### 4.2 调用链全景
 
@@ -225,12 +209,12 @@ flowchart TD
 
 ```python
 # 查看稳定后端
-torch._dynamo.list_backends()
+torch.compiler.list_backends()
 # 查看所有后端（含实验性后端）
-torch._dynamo.list_backends(None)
+torch.compiler.list_backends(exclude_tags=())
 ```
 
-后端注册机制在 `torch/_dynamo/backends/registry.py`（第 138 行）中实现，支持通过 Python entry_points 注册第三方后端。
+后端注册机制在 `torch/_dynamo/backends/registry.py`中实现，支持通过 Python entry_points 注册第三方后端。
 
 ---
 
@@ -240,31 +224,27 @@ torch._dynamo.list_backends(None)
 
 TorchDynamo 尝试将用户函数中的 PyTorch 操作捕获为一张完整的 FX Graph。当遇到无法被追踪的 Python 语句时，Dynamo 被迫中断当前图，产生 **Graph Break**。图中断会将一个函数拆分为多个子图：
 
-```mermaid
-flowchart TD
-    subgraph original["原始函数"]
-        A["op1: torch.add"] --> B["op2: torch.mul"]
-        B --> C["print(x)  -- 无法追踪"]
-        C --> D["op3: torch.relu"]
-        D --> E["op4: torch.sigmoid"]
-    end
-
-    subgraph split["Dynamo 拆分后"]
-        direction TB
-        subgraph g1["Graph 1"]
-            F["op1: torch.add"] --> G["op2: torch.mul"]
-        end
-        H["Graph Break\nprint(x) 在 Eager 模式执行"]
-        subgraph g2["Graph 2"]
-            I["op3: torch.relu"] --> J["op4: torch.sigmoid"]
-        end
-        g1 --> H --> g2
-    end
-
-    style H fill:#ffebee,stroke:#f44336,stroke-width:2px
-    style g1 fill:#e8f5e9,stroke:#4caf50
-    style g2 fill:#e8f5e9,stroke:#4caf50
-```
+{{< trace >}}
+title: "一次 graph break 分割张量计算"
+actors: ["Python", "Dynamo", "第一张图", "第二张图"]
+steps:
+  - from: 0
+    to: 1
+    label: "遇到张量操作"
+    detail: "开始计算 a=x.sin()，Dynamo 记录可捕获的前缀。"
+  - from: 1
+    to: 2
+    label: "结束第一个片段"
+    detail: "在 torch._dynamo.graph_break() 处结束当前捕获，片段包含 sin。"
+  - from: 2
+    to: 0
+    label: "回到 Python 边界"
+    detail: "默认 fullgraph=False 时，运行时可以越过这处显式中断。"
+  - from: 0
+    to: 3
+    label: "继续捕获"
+    detail: "中断后执行 b=a.cos()，后续计算可进入另一个 FX 图。"
+{{< /trace >}}
 
 ### 6.2 常见 Graph Break 原因
 
@@ -277,7 +257,7 @@ flowchart TD
 | **动态 Python 特性** | `setattr(module, name, val)` 等动态操作 | 使用静态属性 |
 | **不兼容的第三方库** | 调用未被 Dynamo 追踪的外部库 | 使用 `torch._dynamo.allow_in_graph` |
 
-Graph Break 相关的异常处理定义在 `torch/_dynamo/exc.py`（第 472 行），允许回退到 eager 执行的异常包括 `DataDependentOutputException`、`DynamicOutputShapeException` 等。
+Graph Break 相关的异常处理定义在 `torch/_dynamo/exc.py`，允许回退到 eager 执行的异常包括 `DataDependentOutputException`、`DynamicOutputShapeException` 等。
 
 ### 6.3 手动插入 Graph Break
 
@@ -299,7 +279,7 @@ def my_function(x):
 
 当设置 `fullgraph=True` 时，Dynamo 要求整个函数必须被完整捕获为单张图，任何 Graph Break 都会抛出异常。这对应 `torch._dynamo.optimize()` 中的 `nopython=True` 参数。
 
-在 `torch/_dynamo/eval_frame.py`（第 1542 行），当 `nopython=True` 时会调用 `optimize_assert`：
+在 `torch/_dynamo/eval_frame.py`，当 `nopython=True` 时会调用 `optimize_assert`：
 
 ```python
 if nopython and not config.debug_force_graph_break_on_leaf_return:
@@ -355,7 +335,7 @@ flowchart LR
 
 ### 8.1 工作原理
 
-`torch._dynamo.explain()` 定义在 `torch/_dynamo/eval_frame.py`（第 1592 行），它对函数进行一次试编译，收集所有子图和 Graph Break 信息，返回一个 `ExplainOutput` 对象。
+`torch._dynamo.explain()` 定义在 `torch/_dynamo/eval_frame.py`，它对函数进行一次试编译，收集所有子图和 Graph Break 信息，返回一个 `ExplainOutput` 对象。
 
 内部实现使用一个累积式编译器 `dynamo_graph_accumulating_compiler`，每次产生新的子图时都记录下来：
 
@@ -389,7 +369,7 @@ def explain(f, *extra_args, **extra_kwargs):
 
 ### 8.2 ExplainOutput 结构
 
-`ExplainOutput` 类定义在 `torch/_dynamo/backends/debugging.py`（第 537 行），包含以下字段：
+`ExplainOutput` 类定义在 `torch/_dynamo/backends/debugging.py`，包含以下字段：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -563,13 +543,13 @@ default_time = benchmark(compiled_default, x)
 print(f"Compiled (default): {default_time:.3f} ms")
 
 # torch.compile reduce-overhead 模式
-torch._dynamo.reset()
+torch.compiler.reset()
 compiled_ro = torch.compile(model, mode="reduce-overhead")
 ro_time = benchmark(compiled_ro, x)
 print(f"Compiled (reduce):  {ro_time:.3f} ms")
 
 # torch.compile max-autotune 模式
-torch._dynamo.reset()
+torch.compiler.reset()
 compiled_ma = torch.compile(model, mode="max-autotune")
 ma_time = benchmark(compiled_ma, x)
 print(f"Compiled (max-at):  {ma_time:.3f} ms")

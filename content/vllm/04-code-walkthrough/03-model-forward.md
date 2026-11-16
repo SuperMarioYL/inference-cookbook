@@ -3,8 +3,11 @@ title: "模型前向传播"
 weight: 3
 ---
 
+## 先区分两套 GPU model runner
 
-在前面的章节中，我们了解了 vLLM 的架构和调度机制。本章将深入模型的前向传播过程，以 Llama 模型为例，详细分析从输入到输出的完整计算流程。
+0.33.0 的 worker 在 _make_model_runner 中选择传统 GPUModelRunner 或 V2。V2 把持久状态与本次执行的输入分开维护；本章的张量示例讲相同计算依赖，实际输入布局和采样路径要按选中的 runner 阅读。 [Model Runner V2 设计](https://github.com/vllm-project/vllm/blob/v0.33.0/docs/design/model_runner_v2.md)
+
+以 Llama 为例，输入 token 先映射为向量，依次通过注意力和前馈层。最后的位置表示经输出层映射为词表上的 logits。
 
 ---
 
@@ -514,7 +517,7 @@ flowchart LR
 ### 6.1 Attention 层的 KV Cache 使用
 
 ```python
-# vllm/attention/layer.py
+# vllm/model_executor/layers/attention/attention.py
 
 class Attention(nn.Module):
     """vLLM 的注意力层，集成 KV Cache"""
@@ -547,33 +550,31 @@ class Attention(nn.Module):
 
 ### 6.2 PagedAttention 后端
 
-```mermaid
-sequenceDiagram
-    participant Attn as Attention Layer
-    participant PA as PagedAttention
-    participant KVC as KV Cache
-
-    Attn->>PA: forward(Q, K, V)
-
-    rect rgb(230, 245, 230)
-        Note over PA,KVC: 写入新的 K、V
-        PA->>KVC: 根据 slot_mapping 写入
-        Note over KVC: K、V 存储到对应的 block
-    end
-
-    rect rgb(245, 230, 230)
-        Note over PA,KVC: 读取完整的 K、V
-        PA->>KVC: 根据 block_table 读取
-        Note over KVC: 返回所有历史 K、V
-    end
-
-    rect rgb(230, 230, 245)
-        Note over PA: 计算注意力
-        PA->>PA: attention = softmax(Q @ K^T / sqrt(d)) @ V
-    end
-
-    PA-->>Attn: attention output
-```
+{{< trace >}}
+title: 块表如何参与一次注意力前向
+actors: ["注意力层", "后端", "KV 缓存"]
+steps:
+  - from: 0
+    to: 1
+    label: "提交 Q、K、V"
+    detail: "当前 token 的投影与批次的注意力元数据一起传给后端。"
+  - from: 1
+    to: 2
+    label: "定位写入槽"
+    detail: "slot mapping 把新 K/V 放到当前请求的物理位置。"
+  - from: 2
+    to: 1
+    label: "按块表读取"
+    detail: "读取逻辑历史所对应的物理块，块号可以不连续。"
+  - from: 1
+    to: 1
+    label: "汇总注意力"
+    detail: "后端在模型允许的上下文中求权重并汇总值向量。"
+  - from: 1
+    to: 0
+    label: "送回输出"
+    detail: "本层输出回到模型后续计算。"
+{{< /trace >}}
 
 ---
 
@@ -703,40 +704,10 @@ flowchart TD
 | Transformer 层 | `vllm/model_executor/models/llama.py` | `LlamaDecoderLayer` |
 | Self-Attention | `vllm/model_executor/models/llama.py` | `LlamaAttention` |
 | MLP | `vllm/model_executor/models/llama.py` | `LlamaMLP` |
-| Attention 后端 | `vllm/attention/layer.py` | `Attention` |
-| 旋转位置编码 | `vllm/model_executor/layers/rotary_embedding.py` | `get_rope()` |
+| Attention 后端 | `vllm/model_executor/layers/attention/attention.py` | `Attention` |
+| 旋转位置编码 | `vllm/model_executor/layers/rotary_embedding/__init__.py` | `get_rope()` |
 | 并行线性层 | `vllm/model_executor/layers/linear.py` | `*ParallelLinear` |
 | RMSNorm | `vllm/model_executor/layers/layernorm.py` | `RMSNorm` |
-
----
-
-## 10. 小结
-
-本章我们深入了解了 vLLM 中模型前向传播的实现：
-
-1. **模型结构**：
-   - `LlamaForCausalLM` → `LlamaModel` → `LlamaDecoderLayer`
-   - Pre-LN 结构，每层包含 Attention 和 MLP
-
-2. **Self-Attention**：
-   - QKV 合并投影
-   - RoPE 旋转位置编码
-   - GQA 减少 KV Cache 内存
-   - PagedAttention 集成
-
-3. **MLP**：
-   - SwiGLU 激活函数
-   - gate_up 合并投影
-
-4. **张量并行**：
-   - ColumnParallelLinear：输出切分
-   - RowParallelLinear：输入切分 + AllReduce
-
-5. **KV Cache 集成**：
-   - 自动写入和读取
-   - 通过 attn_metadata 控制
-
-在下一章中，我们将深入分析采样过程，了解如何从 logits 生成下一个 token。
 
 ---
 
@@ -744,4 +715,4 @@ flowchart TD
 
 - 上一篇：[Executor 与 Worker](02-executor-worker.md)
 - 下一篇：[采样过程分析](04-sampling.md)
-- [返回目录](../README.md)
+- [返回目录](/vllm/00-overview/overview/)

@@ -5,7 +5,7 @@ weight: 3
 
 > 难度：入门 | 前置知识：基本的 PyTorch 使用经验
 
-本文是 PyTorch 源码分析的"概念速查手册"。每个概念给出一句话定义、所属源码位置、核心作用以及与其他概念的关联。阅读完本文后，你将建立起对 PyTorch 内部术语的统一认知框架，为后续模块的深入分析做好准备。
+沿着一次张量运算会遇到三个不同的问题：谁描述形状和 stride，谁持有数据，谁决定执行哪个算子。遇到陌生的 C++ 类型时，可以按这三条线查找。
 
 ---
 
@@ -36,7 +36,7 @@ PyTorch 的内部概念可以按职责划分为三层：
 
 Python 中 `torch.Tensor` 是一个轻量包装，真正的实现在 C++ 侧的 `TensorImpl`。多个 Tensor 可以共享同一份 Storage（如 `view` 操作），这是理解 PyTorch 内存模型的关键。
 
-> 详见 [Module 1 - Tensor 与 Storage 系统](../module-01-tensor-storage/)
+> 详见 [Module 1 - Tensor 与 Storage 系统](/pytorch/01-introduction/01-tensor-basics-tutorial/)
 
 ### 2. Storage - 原始数据缓冲区
 
@@ -49,7 +49,7 @@ Python 中 `torch.Tensor` 是一个轻量包装，真正的实现在 C++ 侧的 
 
 Storage 与 Tensor 的分离设计使得 `view`、`reshape`、`slice` 等操作无需拷贝数据 -- 它们只是创建了一个指向同一 Storage 的新 TensorImpl，但拥有不同的 offset、size 和 stride。
 
-> 详见 [Module 1 - Tensor 与 Storage 系统](../module-01-tensor-storage/)
+> 详见 [Module 1 - Tensor 与 Storage 系统](/pytorch/01-introduction/01-tensor-basics-tutorial/)
 
 ### 3. TensorImpl - Tensor 的 C++ 实现
 
@@ -62,7 +62,7 @@ Storage 与 Tensor 的分离设计使得 `view`、`reshape`、`slice` 等操作�
 
 TensorImpl 是一个可继承的类，`OpaqueTensorImpl`、`SparseTensorImpl` 等子类分别处理不同的 Tensor 表示。
 
-> 详见 [Module 1 - Tensor 与 Storage 系统](../module-01-tensor-storage/)
+> 详见 [Module 1 - Tensor 与 Storage 系统](/pytorch/01-introduction/01-tensor-basics-tutorial/)
 
 ---
 
@@ -79,7 +79,7 @@ TensorImpl 是一个可继承的类，`OpaqueTensorImpl`、`SparseTensorImpl` �
 
 DispatchKey 的设计使得 PyTorch 可以通过"洋葱层"模式在同一个算子上叠加多种功能：最外层是 Autograd，中间可能经过 Functionalization，最内层才是真正的 CPU/CUDA kernel。
 
-> 详见 [Module 5 - 算子分发系统](../module-05-dispatch/)
+> 详见 [Module 5 - 算子分发系统](/pytorch/03-core-modules/07-dispatcher-core/)
 
 ### 5. DispatchKeySet - 调度键集合
 
@@ -92,7 +92,7 @@ DispatchKey 的设计使得 PyTorch 可以通过"洋葱层"模式在同一个算
 
 当一层 dispatch 处理完毕后，会将自己的 key 从集合中排除，再调用 `redispatch` 进入下一层。这个递归下降过程就是所谓的"dispatch 洋葱模型"。
 
-> 详见 [Module 5 - 算子分发系统](../module-05-dispatch/)
+> 详见 [Module 5 - 算子分发系统](/pytorch/03-core-modules/07-dispatcher-core/)
 
 ### 6. Dispatcher - 中央调度器
 
@@ -105,7 +105,7 @@ DispatchKey 的设计使得 PyTorch 可以通过"洋葱层"模式在同一个算
 
 Dispatcher 是 PyTorch 可扩展性的核心 -- 无论是后端扩展（XLA、MPS）、功能扩展（Autograd、Functionalization）还是编译器集成（Dynamo、FX Tracing），都通过向 Dispatcher 注册 kernel 来实现。
 
-> 详见 [Module 5 - 算子分发系统](../module-05-dispatch/)
+> 详见 [Module 5 - 算子分发系统](/pytorch/03-core-modules/07-dispatcher-core/)
 
 ### 7. Autograd Graph - 自动微分计算图
 
@@ -118,7 +118,7 @@ Dispatcher 是 PyTorch 可扩展性的核心 -- 无论是后端扩展（XLA、MP
 
 Autograd Graph 在 eager 模式下是动态构建的（define-by-run），每次前向计算都会生成新图。这也是 PyTorch 区别于静态图框架的核心特征。
 
-> 详见 [Module 2 - Autograd 系统](../module-02-autograd/)
+> 详见 [Module 2 - Autograd 系统](/pytorch/02-fundamentals/05-computational-graph/)
 
 ### 8. grad_fn - 梯度函数节点
 
@@ -131,7 +131,7 @@ Autograd Graph 在 eager 模式下是动态构建的（define-by-run），每次
 
 用户通过 `tensor.grad_fn` 即可访问该节点。`grad_fn` 为 `None` 表示该 Tensor 是叶节点（如模型参数），其梯度将累积到 `.grad` 属性中。
 
-> 详见 [Module 2 - Autograd 系统](../module-02-autograd/)
+> 详见 [Module 2 - Autograd 系统](/pytorch/02-fundamentals/05-computational-graph/)
 
 ---
 
@@ -148,7 +148,7 @@ Autograd Graph 在 eager 模式下是动态构建的（define-by-run），每次
 
 FX Graph 的节点（`torch.fx.Node`）记录了操作类型、目标函数和参数。它本质上是一个 SSA 形式的计算图，非常适合做编译优化。
 
-> 详见 [Module 7 - FX 图系统](../module-07-fx/)
+> 详见 [Module 7 - FX 图系统](/pytorch/05-advanced-topics/02-fx-tutorial/)
 
 ### 10. Guard - 运行时守卫
 
@@ -161,7 +161,7 @@ FX Graph 的节点（`torch.fx.Node`）记录了操作类型、目标函数和�
 
 Guard 是 `torch.compile` 性能的关键 -- Guard 过宽会导致错误结果，过窄会导致频繁重编译。Dynamo 会为 shape、dtype、stride、Python 全局变量等生成不同类型的 Guard。
 
-> 详见 [Module 6 - TorchDynamo](../module-06-dynamo/)
+> 详见 [Module 6 - TorchDynamo](/pytorch/05-advanced-topics/04-dynamo-tutorial/)
 
 ### 11. Decomposition - 算子分解
 
@@ -174,7 +174,7 @@ Guard 是 `torch.compile` 性能的关键 -- Guard 过宽会导致错误结果�
 
 例如，`torch.addmm` 可以分解为 `torch.mm` + `torch.add`。分解表（decomposition table）是可注册的，不同后端可以选择性地覆盖。
 
-> 详见 [Module 8 - TorchInductor](../module-08-inductor/)
+> 详见 [Module 8 - TorchInductor](/pytorch/05-advanced-topics/07-inductor-overview/)
 
 ### 12. Lowering - 图下降
 
@@ -187,7 +187,7 @@ Guard 是 `torch.compile` 性能的关键 -- Guard 过宽会导致错误结果�
 
 Lowering 是编译管线中承上启下的环节：上游是平台无关的 FX 图变换，下游是特定后端的代码生成（Triton / C++）。
 
-> 详见 [Module 8 - TorchInductor](../module-08-inductor/)
+> 详见 [Module 8 - TorchInductor](/pytorch/05-advanced-topics/07-inductor-overview/)
 
 ### 13. Functionalization - 函数化
 
@@ -200,7 +200,7 @@ Lowering 是编译管线中承上启下的环节：上游是平台无关的 FX �
 
 例如 `x.add_(1)` 会被转换为 `x = x.add(1)`，同时更新所有引用到 `x` 的别名视图。
 
-> 详见 [Module 8 - TorchInductor](../module-08-inductor/)
+> 详见 [Module 8 - TorchInductor](/pytorch/05-advanced-topics/07-inductor-overview/)
 
 ### 14. AOT Autograd - 提前自动微分
 
@@ -213,7 +213,7 @@ Lowering 是编译管线中承上启下的环节：上游是平台无关的 FX �
 
 在 eager 模式下，反向图是运行时按需构建的，无法提前优化。AOT Autograd 解决了这个问题 -- 它利用 `make_fx` 追踪前向计算，同时记录反向图，最终产出两张可独立优化的 FX Graph。
 
-> 详见 [Module 8 - TorchInductor](../module-08-inductor/)
+> 详见 [Module 8 - TorchInductor](/pytorch/05-advanced-topics/07-inductor-overview/)
 
 ### 15. Proxy - 符号追踪代理
 
@@ -226,7 +226,7 @@ Lowering 是编译管线中承上启下的环节：上游是平台无关的 FX �
 
 当你调用 `torch.fx.symbolic_trace(model)` 时，模型的输入会被替换为 Proxy 对象。后续所有运算都在 Proxy 上进行，不会触发真实计算，但会在 FX Graph 中记录完整的操作序列。
 
-> 详见 [Module 7 - FX 图系统](../module-07-fx/)
+> 详见 [Module 7 - FX 图系统](/pytorch/05-advanced-topics/02-fx-tutorial/)
 
 ---
 
@@ -319,11 +319,11 @@ flowchart TD
 
 | 概念 | 深入模块 | 建议阅读顺序 |
 |------|----------|--------------|
-| Tensor / Storage / TensorImpl | [Module 1 - Tensor 与 Storage 系统](../module-01-tensor-storage/) | 初学者路线第 5 步 |
-| DispatchKey / Dispatcher | [Module 5 - 算子分发系统](../module-05-dispatch/) | 初学者路线第 6 步 |
-| Autograd Graph / grad_fn | [Module 2 - Autograd 系统](../module-02-autograd/) | 初学者路线第 4 步 |
-| FX Graph / Proxy | [Module 7 - FX 图系统](../module-07-fx/) | 编译器路线第 1 步 |
-| Guard | [Module 6 - TorchDynamo](../module-06-dynamo/) | 编译器路线第 2 步 |
-| Decomposition / Lowering / AOT Autograd / Functionalization | [Module 8 - TorchInductor](../module-08-inductor/) | 编译器路线第 3 步 |
+| Tensor / Storage / TensorImpl | [Module 1 - Tensor 与 Storage 系统](/pytorch/01-introduction/01-tensor-basics-tutorial/) | 初学者路线第 5 步 |
+| DispatchKey / Dispatcher | [Module 5 - 算子分发系统](/pytorch/03-core-modules/07-dispatcher-core/) | 初学者路线第 6 步 |
+| Autograd Graph / grad_fn | [Module 2 - Autograd 系统](/pytorch/02-fundamentals/05-computational-graph/) | 初学者路线第 4 步 |
+| FX Graph / Proxy | [Module 7 - FX 图系统](/pytorch/05-advanced-topics/02-fx-tutorial/) | 编译器路线第 1 步 |
+| Guard | [Module 6 - TorchDynamo](/pytorch/05-advanced-topics/04-dynamo-tutorial/) | 编译器路线第 2 步 |
+| Decomposition / Lowering / AOT Autograd / Functionalization | [Module 8 - TorchInductor](/pytorch/05-advanced-topics/07-inductor-overview/) | 编译器路线第 3 步 |
 
-> **下一篇**：[03-architecture-overview.md](./03-architecture-overview.md) - PyTorch 三层架构全景图
+> **下一篇**：[03-architecture-overview.md](/pytorch/00-overview/01-architecture-overview/) - PyTorch 三层架构全景图

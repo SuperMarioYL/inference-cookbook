@@ -17,7 +17,7 @@ weight: 3
 
 ## 1. 概述
 
-Flash Attention 的调试涉及 Python、C++ 和 CUDA 三个层次。由于其高性能实现大量使用了 TMA、GMMA 等硬件特性，传统的 `print` 调试难以直接应用。本文介绍系统化的调试方法和常见问题的排查流程。
+Flash Attention 的调试涉及 Python、C++ 和 CUDA 三个层次。由于其高性能实现大量使用了 TMA、GMMA 等硬件特性，传统的 `print` 调试难以直接应用。先用同一组小张量复现输出，再沿 Python 接口和扩展入口缩小出错范围。
 
 ```mermaid
 graph TD
@@ -561,21 +561,20 @@ q = torch.randn(total, 32, 128, device="cuda", dtype=torch.float16)
 
 ### Q6: 如何检查安装了哪个版本？
 
+先在运行模型的同一解释器查包版本，再检查模型代码实际导入的命名空间。FA4 的预览版号与 FA2 独立递增，`flash_attn.__version__` 不能回答三个实现的版本问题。
+
 ```python
-import flash_attn
-print(f"Flash Attention version: {flash_attn.__version__}")
+from importlib.metadata import PackageNotFoundError, version
 
-# 检查支持的 GPU 架构
-import torch
-major, minor = torch.cuda.get_device_capability()
-print(f"GPU compute capability: sm{major}{minor}")
-print(f"GPU name: {torch.cuda.get_device_name()}")
+for name in ("flash-attn", "flash-attn-3", "flash-attn-4"):
+    try:
+        print(name, version(name))
+    except PackageNotFoundError:
+        print(name, "未安装")
 ```
-
----
 
 ## 导航
 
-- 上一篇：[反向调用链追踪](02-backward-call-trace.md)
-- 下一篇：[因果遮蔽与 Masking](../06-advanced-features/01-causal-and-masking.md)
-- [返回目录](../README.md)
+- 上一篇：[反向调用链追踪](/flashattention/05-code-walkthrough/02-backward-call-trace/)
+- 下一篇：[因果遮蔽与 Masking](/flashattention/06-advanced-features/01-causal-and-masking/)
+- [返回目录](/flashattention/00-overview/overview/)

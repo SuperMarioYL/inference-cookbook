@@ -6,4 +6,4 @@ description: >
   Mooncake 项目背景、核心理念与技术预备知识
 ---
 
-本部分介绍 Mooncake 的诞生背景、设计动机以及理解后续章节所需的技术预备知识。
+把 FAST ’25 的 Kimi 系统与目前可以安装的开源组件放在一起读。论文用真实请求 trace 和生产集群回答容量问题，`v0.3.14` 的 Store、Transfer Engine 和 Conductor 分别提供存储、传输和前缀位置查询。[论文](https://www.usenix.org/conference/fast25/presentation/qin) · [开源版本](https://github.com/kvcache-ai/Mooncake/releases/tag/v0.3.14)

@@ -339,31 +339,33 @@ TiledCopy:
 
 ## 5. Hopper 架构新特性
 
-Hopper（SM90, H100）引入了四项对 Flash Attention 至关重要的新特性。
+在 Hopper（SM90，如 H100）上，下面四项机制分别影响数据搬运、矩阵乘或线程块之间的协作。
 
 ### 5.1 TMA — Tensor Memory Accelerator
 
-TMA 是一个 **硬件级的内存拷贝引擎**，可以在不占用任何 CUDA Core 或 Warp 的情况下完成数据传输：
+TMA 由指定线程发起。搬运引擎按描述符传输 tile，其他可独立的线程工作可以同时推进。
 
-```mermaid
-sequenceDiagram
-    participant Thread as CUDA Thread
-    participant TMA as TMA Engine
-    participant SMEM as Shared Memory
-    participant HBM as HBM
-
-    Note over Thread,HBM: 传统 cp.async
-    Thread->>HBM: 发起 cp.async 指令
-    HBM-->>SMEM: 数据传输（占用 Warp）
-    Thread->>Thread: 继续执行（Warp 被占用）
-
-    Note over Thread,HBM: Hopper TMA
-    Thread->>TMA: 配置 TMA 描述符（仅 1 个线程）
-    TMA->>HBM: 自动发起传输
-    HBM-->>SMEM: 数据传输（TMA 引擎执行）
-    Thread->>Thread: 所有线程自由计算
-    TMA-->>Thread: Barrier 通知完成
-```
+{{< trace >}}
+title: "TMA 拷贝与消费者何时碰到同一块"
+actors: ["发起线程", "TMA", "共享内存", "消费者"]
+steps:
+  - from: 0
+    to: 1
+    label: "提供描述符"
+    detail: "选定的发起线程为目标区域提交 TMA 异步拷贝。"
+  - from: 1
+    to: 2
+    label: "搬运 tile"
+    detail: "TMA 按指定布局把数据从全局内存搬入共享内存。"
+  - from: 2
+    to: 3
+    label: "满足完成条件"
+    detail: "消费者在相应 barrier 上等待，直到该 stage 的数据可读。"
+  - from: 3
+    to: 3
+    label: "消费 tile"
+    detail: "消费者可以启动依赖这块输入的矩阵乘；其他可重叠工作取决于管线调度。"
+{{< /trace >}}
 
 **TMA 的关键优势**：
 
@@ -557,7 +559,7 @@ graph TB
 
 ### 6.4 与 SM80 (Ampere) 的对比
 
-Flash Attention 同时支持 SM80 和 SM90 两种架构，实现方式差异显著：
+对照 SM80 与 SM90 的取数、矩阵乘和同步方式：
 
 | 维度 | SM80 (Ampere) | SM90 (Hopper) |
 |------|--------------|---------------|
@@ -607,6 +609,6 @@ Flash Attention 目前主要使用 `ClusterShape = (1, 1, 1)`（单 SM），但�
 
 ## 导航
 
-- 上一篇：[反向传播算法详解](../02-core-algorithm/04-backward-pass.md)
-- 下一篇：[SM90 内核架构解析](02-kernel-architecture-sm90.md)
-- [返回目录](../README.md)
+- 上一篇：[反向传播算法详解](/flashattention/02-core-algorithm/04-backward-pass/)
+- 下一篇：[SM90 内核架构解析](/flashattention/03-cuda-kernel/02-kernel-architecture-sm90/)
+- [返回目录](/flashattention/00-overview/overview/)

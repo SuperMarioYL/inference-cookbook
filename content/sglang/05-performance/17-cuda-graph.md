@@ -3,20 +3,9 @@ title: "CUDA Graph"
 weight: 1
 ---
 
-## 概述
+## 0.5.23 如何区分捕获和重放
 
-### 本章学习目标
-- 理解 CUDA Graph 的原理和优势
-- 掌握 SGLang 中的 CUDA Graph 实现
-- 了解图捕获和重放机制
-- 学习性能优化技巧
-
-### 前置知识要求
-- 了解 CUDA 编程基础
-- 熟悉 PyTorch 模型执行
-- 理解 GPU 内核调度
-
----
+解码图由 DecodeCudaGraphRunner 组织，通用捕获逻辑在 BaseCudaGraphRunner，prefill 有独立 runner。记录实际命中的 batch size、是否需要 padding 和可复用的缓冲区；有捕获日志仍需看到目标批次进入 replay 才能说明该轮使用了图。 [解码图实现](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py)
 
 ## 为什么需要 CUDA Graph
 
@@ -49,19 +38,27 @@ sequenceDiagram
 
 预先录制操作图，一次提交：
 
-```mermaid
-sequenceDiagram
-    participant CPU
-    participant GPU
-
-    Note over CPU,GPU: CUDA Graph
-    CPU->>GPU: 提交整个 Graph
-    GPU->>GPU: Execute Kernel 1
-    GPU->>GPU: Execute Kernel 2
-    GPU->>GPU: Execute Kernel 3
-
-    Note over CPU: CPU 开销大幅减少
-```
+{{< trace >}}
+title: 一次图重放提交三个操作
+actors: ["CPU", "CUDA 图", "GPU"]
+steps:
+  - from: 0
+    to: 1
+    label: "写入本批输入"
+    detail: "图捕获时建立的缓冲地址仍有效，这一批改写其中的值。"
+  - from: 0
+    to: 1
+    label: "提交一次 replay"
+    detail: "CPU 对已捕获的图发起一次重放。"
+  - from: 1
+    to: 2
+    label: "执行操作 1、2"
+    detail: "GPU 按图中的依赖执行前两个操作。"
+  - from: 2
+    to: 2
+    label: "完成操作 3"
+    detail: "第三个操作消费先前的结果，runner 读取本批输出。"
+{{< /trace >}}
 
 ---
 
@@ -105,12 +102,13 @@ g.replay()
 
 ## SGLang 实现
 
-### CudaGraphRunner 类
+### 解码图的捕获与重放
 
-**关键文件**：`python/sglang/srt/model_executor/cuda_graph_runner.py`
+**关键文件**：`python/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py`
 
 ```python
-class CudaGraphRunner:
+# 教学示意，实际解码图由 DecodeCudaGraphRunner 组织。
+class GraphReplayExample:
     def __init__(self, model_runner: ModelRunner):
         # 要捕获的批次大小
         self.capture_bs: List[int]
@@ -398,7 +396,7 @@ class PiecewiseCudaGraphRunner:
 ### 延迟对比
 
 ```
-场景: Decode 阶段，批次大小 32
+假设一个含 32 条解码请求的批次需要 50 次串行提交，每次开销 10 微秒。
 
 无 CUDA Graph:
 - 内核启动: ~50 次 × 10μs = 500μs
@@ -413,16 +411,9 @@ class PiecewiseCudaGraphRunner:
 延迟降低: ~20%
 ```
 
-### 吞吐量提升
+### 观察端到端吞吐量
 
-| 批次大小 | 无 Graph | 有 Graph | 提升 |
-|---------|----------|----------|------|
-| 1 | 100 tok/s | 150 tok/s | 50% |
-| 8 | 500 tok/s | 650 tok/s | 30% |
-| 32 | 1500 tok/s | 1800 tok/s | 20% |
-| 128 | 4000 tok/s | 4400 tok/s | 10% |
-
----
+记录模型、GPU、驱动、批大小、输入输出长度及 warm-up 次数，使用同一条请求轨迹分别允许与关闭图重放。比较每步设备时间、CPU 提交空隙、输出 token/s、首 token 延迟和图池显存。若某些形状无法重放，先统计实际进入 Graph 的批次比例。
 
 ## 配置参数
 
@@ -446,17 +437,17 @@ class ServerArgs:
 ```bash
 # 默认启用 CUDA Graph
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct
+    --model-path meta-llama/Llama-3.1-8B-Instruct
 
 # 禁用 CUDA Graph
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --disable-cuda-graph
 
 # 调整最大批次大小
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
-    --cuda-graph-max-bs 256
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
+    --cuda-graph-max-bs-decode 256
 ```
 
 ---
@@ -465,10 +456,10 @@ python -m sglang.launch_server \
 
 ### 限制
 
-1. **动态形状**：不支持动态形状输入
-2. **控制流**：不支持数据依赖的控制流
-3. **同步操作**：捕获期间不能有 CPU-GPU 同步
-4. **内存分配**：捕获期间不能有动态内存分配
+1. **输入形状**：重放使用已捕获的形状。runner 可把较小批次 pad 到合适的规格。
+2. **执行路径**：选择与当前前向模式相符的图；依赖 GPU 结果的 Python 分支需在捕获区域外处理。
+3. **主机同步**：把读取 GPU 结果并阻塞 CPU 的操作移出捕获区域。
+4. **内存地址**：重放要能再次访问捕获时的地址。图专用内存池和可复用输入缓冲帮助保持地址稳定。
 
 ### 解决方案
 
@@ -518,27 +509,3 @@ print(prof.key_averages().table())
 ```
 
 ---
-
-## 小结
-
-### 要点回顾
-
-1. **原理**：预录制操作图，消除内核启动开销
-2. **捕获**：预热 → 录制 → 存储
-3. **重放**：填充缓冲区 → 重放图 → 提取输出
-4. **优化**：批次大小选择、内存复用
-
-### 性能收益
-
-| 场景 | 收益 |
-|------|------|
-| 小批次 | 30-50% |
-| 中批次 | 15-30% |
-| 大批次 | 10-15% |
-
-### 下一章预告
-
-在下一章《torch.compile 优化》中，我们将：
-- 了解 torch.compile 原理
-- 学习内核融合优化
-- 掌握编译配置

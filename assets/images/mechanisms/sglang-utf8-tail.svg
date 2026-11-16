@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 472 235" role="img" aria-labelledby="sglang-utf8-tail-title">
+  <title id="sglang-utf8-tail-title">三个字节什么时候能显示为「猫」</title>
+  <desc>十六进制字节依次到达，上一轮未完成的尾部会参与下一轮解码。</desc>
+  <text x="16" y="29" class="diagram-title" text-anchor="start">三个字节什么时候能显示为「猫」</text>
+  <text x="20" y="90" class="label" text-anchor="start">累计字节</text>
+  <text x="20" y="162" class="label" text-anchor="start">可发送文本</text>
+  <path d="M135 106 L405 106" class="edge"/>
+  <g data-frame="0">
+    <title>首字节到达</title>
+    <desc>以按字节分片的 tokenizer 为例，E7 标识一个三字节 UTF-8 字符的起点。</desc>
+    <rect x="130" y="67" width="77" height="37" rx="5" class="fresh"/><text x="168.5" y="90.5" class="label" text-anchor="middle">E7</text>
+    <rect x="224" y="67" width="77" height="37" rx="5" class="idle"/><text x="262.5" y="90.5" class="label" text-anchor="middle">·</text>
+    <rect x="318" y="67" width="77" height="37" rx="5" class="idle"/><text x="356.5" y="90.5" class="label" text-anchor="middle">·</text>
+    <rect x="129" y="133" width="266" height="42" rx="5" class="idle"/><text x="262.0" y="159.0" class="label" text-anchor="middle">等待完整字符</text>
+    <text x="130" y="212" class="note" text-anchor="start">已到 1 字节，共需 3 个</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>续字节仍不足</title>
+    <desc>读到 8C，仍需最后一个续字节，客户端暂时没有新增文字。</desc>
+    <rect x="130" y="67" width="77" height="37" rx="5" class="stored"/><text x="168.5" y="90.5" class="label" text-anchor="middle">E7</text>
+    <rect x="224" y="67" width="77" height="37" rx="5" class="fresh"/><text x="262.5" y="90.5" class="label" text-anchor="middle">8C</text>
+    <rect x="318" y="67" width="77" height="37" rx="5" class="idle"/><text x="356.5" y="90.5" class="label" text-anchor="middle">·</text>
+    <rect x="129" y="133" width="266" height="42" rx="5" class="idle"/><text x="262.0" y="159.0" class="label" text-anchor="middle">等待完整字符</text>
+    <text x="130" y="212" class="note" text-anchor="start">已到 2 字节，共需 3 个</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>字符完整</title>
+    <desc>AB 到达，三个字节解码为“猫”。现在可以发送这一个完整字符。</desc>
+    <rect x="130" y="67" width="77" height="37" rx="5" class="stored"/><text x="168.5" y="90.5" class="label" text-anchor="middle">E7</text>
+    <rect x="224" y="67" width="77" height="37" rx="5" class="stored"/><text x="262.5" y="90.5" class="label" text-anchor="middle">8C</text>
+    <rect x="318" y="67" width="77" height="37" rx="5" class="fresh"/><text x="356.5" y="90.5" class="label" text-anchor="middle">AB</text>
+    <rect x="129" y="133" width="266" height="42" rx="5" class="stored"/><text x="262.0" y="159.0" class="label" text-anchor="middle">猫</text>
+    <text x="130" y="212" class="note" text-anchor="start">UTF-8：E7 8C AB → 猫</text>
+  </g>
+</svg>

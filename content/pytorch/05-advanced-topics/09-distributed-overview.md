@@ -127,54 +127,17 @@ flowchart TD
 
 ### 核心目录
 
-```
-torch/distributed/
-├── __init__.py                 # 核心 API 入口
-├── distributed_c10d.py         # C10D 实现 (6288 行核心)
-├── device_mesh.py              # 设备网格拓扑
-├── rendezvous.py               # 分布式初始化协调
-│
-├── algorithms/                 # 分布式算法
-│   ├── ddp_comm_hooks/         # DDP 通信钩子
-│   └── join.py                 # Uneven inputs 处理
-│
-├── fsdp/                       # Fully Sharded Data Parallel
-│   ├── fully_sharded_data_parallel.py  # FSDP 主类
-│   ├── _flat_param.py          # Flat Parameter 管理 (2837 行)
-│   ├── _runtime_utils.py       # Forward/Backward Hook
-│   ├── _optim_utils.py         # 优化器状态分片 (2113 行)
-│   └── api.py                  # FSDP API
-│
-├── tensor/                     # DTensor (分布式张量)
-│   ├── _api.py                 # DTensor API
-│   ├── placement_types.py      # Placement 类型
-│   ├── _redistribute.py        # 重分布机制
-│   ├── _sharding_prop.py       # 分片传播
-│   └── parallel/               # 张量并行
-│       ├── style.py            # ColwiseParallel / RowwiseParallel
-│       └── api.py              # parallelize_module()
-│
-├── rpc/                        # Remote Procedure Call
-│   ├── api.py                  # RPC API (37037 行核心)
-│   ├── backend_registry.py     # 后端注册
-│   └── options.py              # RPC 配置
-│
-├── optim/                      # 分布式优化器
-│   ├── zero_redundancy_optimizer.py  # ZeRO Optimizer
-│   └── optimizer.py            # DistributedOptimizer
-│
-├── nn/                         # 分布式神经网络模块
-│   ├── parallel/               # 并行封装
-│   │   ├── distributed.py      # DistributedDataParallel (DDP)
-│   │   └── replicate.py        # DataParallel (已弃用)
-│   └── functional.py           # 分布式 functional ops
-│
-├── elastic/                    # Elastic Training
-│   ├── multiprocessing/        # 多进程管理
-│   ├── rendezvous/             # Elastic rendezvous
-│   └── metrics/                # 指标收集
-│
-└── c10d_logger.py              # 日志工具
+```text
+torch/distributed/distributed_c10d.py            进程组、后端注册与集合通信 API
+torch/csrc/distributed/c10d/nccl2/              2.15 默认 NCCL C++ 后端
+torch/nn/parallel/distributed.py               DDP Python 模块
+torch/csrc/distributed/c10d/reducer.cpp        DDP 梯度 bucket
+torch/distributed/fsdp/                        FSDP1 与 FSDP2 的公开入口
+torch/distributed/fsdp/_fully_shard/           FSDP2 参数组、hook 和通信实现
+torch/distributed/device_mesh.py               DeviceMesh 入口
+torch/distributed/tensor/                      DTensor 与重分布
+torch/distributed/tensor/parallel/             张量并行策略
+torch/distributed/rpc/                         RPC 接口
 ```
 
 ---
@@ -216,60 +179,38 @@ class Backend:
     UCC = "ucc"        # Unified Collective Communication
 ```
 
-**后端选择指南**:
+2.15 中，`init_process_group("nccl")` 默认进入重写的 NCCL 后端。追踪默认实现应从 `torch/csrc/distributed/c10d/nccl2/` 开始；显式 `nccl-legacy` 或将 `TORCH_DIST_USE_NCCL2` 设为 `0` 对应旧路径。Gloo 等其他后端单独选择。[2.15 发布说明](https://pytorch.org/blog/pytorch-2-15-release-blog/) · [后端注册](https://github.com/pytorch/pytorch/blob/v2.15.0/torch/distributed/distributed_c10d.py)
 
-| Backend | 设备 | 性能 | 适用场景 |
-|---------|------|------|----------|
-| **NCCL** | GPU | ⭐⭐⭐⭐⭐ | GPU 训练(首选) |
-| **Gloo** | CPU/GPU | ⭐⭐⭐ | CPU 训练、调试 |
-| **MPI** | CPU/GPU | ⭐⭐⭐⭐ | HPC 环境 |
-| **UCC** | GPU | ⭐⭐⭐⭐ | 多厂商 GPU |
+### 按设备选择通信后端
 
----
+CPU 进程可以用 Gloo，NVIDIA GPU 上训练通常用 NCCL。MPI 需要构建时启用，其他后端是否可用取决于安装包与设备。分别用 `dist.is_gloo_available()`、`dist.is_nccl_available()`、`dist.is_mpi_available()` 查看本机能力。[2.15 后端说明](https://docs.pytorch.org/docs/2.15/distributed.html#backends)
 
 ## 5. 启动方式
 
-### 5.1 torchrun (推荐)
+### 5.1 torchrun
+
+下面是两台四卡主机使用固定 rendezvous 的写法。两台节点分别设置 `NODE_RANK=0` 和 `NODE_RANK=1`，`MASTER_ADDR` 设置为双方可达的第一台主机地址；执行相同的命令。
 
 ```bash
-# torchrun 是官方推荐的启动方式
-torchrun \
-    --nproc_per_node=4 \      # 每个节点 4 个进程
-    --nnodes=2 \               # 2 个节点
-    --node_rank=0 \            # 当前节点 rank
-    --master_addr="10.0.0.1" \ # master 地址
-    --master_port=29500 \      # master 端口
-    train.py
+torchrun --nnodes=2 --nproc-per-node=4 --node-rank="$NODE_RANK" --master-addr="$MASTER_ADDR" --master-port=29500 train.py
 ```
 
-**对应的 Python 代码**:
+`train.py` 内用本机设备号选卡、用全局 rank 确定数据分片。例如：
+
 ```python
-# train.py
+import os
 import torch
 import torch.distributed as dist
 
-def main():
-    # 1. 初始化进程组
-    dist.init_process_group(backend="nccl")
-
-    # 2. 获取 rank 和 world_size
-    rank = dist.get_rank()
-    world_size = dist.get_world_size()
-
-    print(f"Rank {rank}/{world_size}")
-
-    # 3. 训练逻辑
-    model = MyModel().cuda(rank)
-    ddp_model = torch.nn.parallel.DistributedDataParallel(
-        model,
-        device_ids=[rank],
-    )
-
-    # 4. 清理
+local_rank = int(os.environ["LOCAL_RANK"])
+torch.cuda.set_device(local_rank)
+dist.init_process_group("nccl")
+try:
+    model = torch.nn.Linear(8, 4).to(torch.device("cuda", local_rank))
+    wrapped = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
+    print(dist.get_rank(), dist.get_world_size(), local_rank)
+finally:
     dist.destroy_process_group()
-
-if __name__ == "__main__":
-    main()
 ```
 
 ### 5.2 torch.distributed.launch (已弃用)
@@ -336,48 +277,23 @@ sequenceDiagram
 
 ### 六种基本操作
 
-```mermaid
-flowchart LR
-    subgraph allreduce["all_reduce"]
-        AR1["[1,2]"] -.sum.-> AR2["[6,8]"]
-        AR3["[3,4]"] -.sum.-> AR4["[6,8]"]
-        AR5["[2,2]"] -.sum.-> AR6["[6,8]"]
-    end
-
-    subgraph broadcast["broadcast"]
-        BR1["[1,2]"] -->|"src=0"| BR2["[1,2]"]
-        BR3["[?,?]"] -->|"src=0"| BR4["[1,2]"]
-        BR5["[?,?]"] -->|"src=0"| BR6["[1,2]"]
-    end
-
-    subgraph allgather["all_gather"]
-        AG1["[1]"] --> AG2["[1,2,3]"]
-        AG3["[2]"] --> AG4["[1,2,3]"]
-        AG5["[3]"] --> AG6["[1,2,3]"]
-    end
-
-    subgraph reduce["reduce"]
-        R1["[1,2]"] -.sum.-> R2["[6,8]"]
-        R3["[3,4]"] -.sum.-> R4[""]
-        R5["[2,2]"] -.sum.-> R6[""]
-    end
-
-    subgraph scatter["scatter"]
-        S1["[1,2,3]"] -->|"src=0"| S2["[1]"]
-        S3[""] -->|"src=0"| S4["[2]"]
-        S5[""] -->|"src=0"| S6["[3]"]
-    end
-
-    subgraph gather["gather"]
-        G1["[1]"] -->|"dst=0"| G2["[1,2,3]"]
-        G3["[2]"] -->|"dst=0"| G4[""]
-        G5["[3]"] -->|"dst=0"| G6[""]
-    end
-
-    style allreduce fill:#e8f5e9,stroke:#4caf50
-    style broadcast fill:#e3f2fd,stroke:#2196f3
-    style allgather fill:#fff3e0,stroke:#ff9800
-```
+{{< stateboard >}}
+title: "DDP 把本地梯度规约为平均值"
+rows: ["rank 0", "rank 1", "共同权重"]
+steps:
+  - title: "两份模型同一起点"
+    detail: "考虑一个无 bias 的标量线性层，两边权重都为 1，局部损失取各自的输出。"
+    cells: [["输入 1", "·"], ["输入 2", "·"], ["1", "1"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "本地反向"
+    detail: "rank 0 的局部梯度为 1，rank 1 为 2；默认 DDP 跨两个 rank 规约。"
+    cells: [["梯度", "1"], ["梯度", "2"], ["1", "1"]]
+    focus: [[0, 1], [1, 1]]
+  - title: "两边获得平均梯度"
+    detail: "每个 rank 都收到 1.5。用学习率 0.1 的普通 SGD 更新，两份权重都变为 0.85。"
+    cells: [["梯度", "1.5"], ["梯度", "1.5"], ["0.85", "0.85"]]
+    focus: [[2, 0], [2, 1]]
+{{< /stateboard >}}
 
 **使用示例**:
 ```python
@@ -389,13 +305,13 @@ dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
 # 结果: tensor = [1+2+3+4] = [10] (所有进程)
 
 # 2. broadcast - 广播
-tensor = torch.tensor([rank]) if rank == 0 else torch.zeros(1)
+tensor = torch.tensor([rank], dtype=torch.int64)
 dist.broadcast(tensor, src=0)
 # 结果: tensor = [0] (所有进程)
 
 # 3. all_gather - 收集到所有进程
 tensor = torch.tensor([rank])
-tensor_list = [torch.zeros(1) for _ in range(world_size)]
+tensor_list = [torch.empty_like(tensor) for _ in range(world_size)]
 dist.all_gather(tensor_list, tensor)
 # 结果: tensor_list = [[0], [1], [2], [3]] (所有进程)
 
@@ -563,71 +479,38 @@ dtensor_replicated = dtensor.redistribute(
 
 ---
 
-## 10. 完整示例
+## 10. 两个 CPU 进程观察梯度规约
 
-### 数据并行训练
+将下面的代码保存为 `ddp_cpu.py`，在支持 Gloo 的 PyTorch 环境运行 `torchrun --master-addr=127.0.0.1 --master-port=29500 --nproc-per-node=2 ddp_cpu.py`。两个 rank 各有一个权重相同、无 bias 的线性层；本地输入分别为 1 和 2。输出对权重的局部梯度刚好等于输入，因此两边第一次反向后应都看到 1.5。
 
 ```python
 import torch
 import torch.distributed as dist
-import torch.nn as nn
-from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.nn.parallel import DistributedDataParallel
 
-def setup(rank, world_size):
-    """初始化进程组"""
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
-
-def cleanup():
-    """清理进程组"""
+dist.init_process_group("gloo")
+try:
+    assert dist.get_world_size() == 2
+    layer = torch.nn.Linear(1, 1, bias=False)
+    model = DistributedDataParallel(layer)
+    x = torch.tensor([[float(dist.get_rank() + 1)]])
+    model(x).sum().backward()
+    torch.testing.assert_close(layer.weight.grad, torch.tensor([[1.5]]))
+    print(dist.get_rank(), layer.weight.grad.item())
+finally:
     dist.destroy_process_group()
-
-def train(rank, world_size):
-    setup(rank, world_size)
-
-    # 1. 创建模型
-    model = nn.Linear(10, 5).cuda(rank)
-    ddp_model = DDP(model, device_ids=[rank])
-
-    # 2. 创建优化器
-    optimizer = torch.optim.SGD(ddp_model.parameters(), lr=0.01)
-
-    # 3. 训练循环
-    for epoch in range(10):
-        # 前向
-        inputs = torch.randn(20, 10).cuda(rank)
-        outputs = ddp_model(inputs)
-        loss = outputs.sum()
-
-        # 反向
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        if rank == 0:
-            print(f"Epoch {epoch}, Loss: {loss.item()}")
-
-    cleanup()
-
-if __name__ == "__main__":
-    world_size = 4
-    torch.multiprocessing.spawn(
-        train,
-        args=(world_size,),
-        nprocs=world_size,
-        join=True,
-    )
 ```
 
----
+多机多 GPU 训练使用启动器提供的 `LOCAL_RANK` 绑定进程设备；全局 `RANK` 用于标识进程和协调通信，不能直接当作每台主机内的 GPU 编号。[两卡 FSDP 示例](/pytorch/05-advanced-topics/10-ddp-fsdp/)
 
 ## 11. 下一步
 
-- **[C10D 后端](./01-c10d-backend.md)**: ProcessGroup 与后端实现
-- **[集合通信](./02-collective-ops.md)**: 通信操作详解
-- **[DDP 与 FSDP](./03-ddp-fsdp.md)**: 数据并行详解
-- **[DTensor](./04-dtensor.md)**: 分布式张量抽象
-- **[RPC 框架](./05-rpc-framework.md)**: 远程过程调用
-- **[分布式调试](./06-distributed-debug.md)**: 调试技巧
+- **[C10D 后端](https://docs.pytorch.org/docs/2.15/distributed.html#backends)**: ProcessGroup 与后端实现
+- **[集合通信](https://docs.pytorch.org/docs/2.15/distributed.html#collective-functions)**: 通信操作详解
+- **[DDP 与 FSDP](/pytorch/05-advanced-topics/10-ddp-fsdp/)**: 数据并行详解
+- **[DTensor](https://docs.pytorch.org/docs/2.15/distributed.tensor.html)**: 分布式张量抽象
+- **[RPC 框架](https://docs.pytorch.org/docs/2.15/rpc.html)**: 远程过程调用
+- **[分布式调试](https://docs.pytorch.org/docs/2.15/distributed.html#debugging-torch-distributed-applications)**: 调试技巧
 
 ---
 
@@ -638,7 +521,7 @@ if __name__ == "__main__":
 | **C10D** | 核心通信层 | `distributed_c10d.py` |
 | **ProcessGroup** | 进程组抽象 | `ProcessGroup` 类 |
 | **Backend** | 通信后端 | NCCL/Gloo/MPI |
-| **DDP** | 数据并行 | `nn/parallel/distributed.py` |
+| **DDP** | 数据并行 | `torch/nn/parallel/distributed.py` |
 | **FSDP** | 全分片数据并行 | `fsdp/` |
 | **DTensor** | 分布式张量 | `tensor/` |
 | **RPC** | 远程调用 | `rpc/` |

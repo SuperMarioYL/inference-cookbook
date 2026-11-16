@@ -3,16 +3,7 @@ title: "LLM 生成过程"
 weight: 5
 ---
 
-
-> 本章将详细介绍 LLM 文本生成的完整流程，包括 Prefill、Decode 两个阶段以及各种采样策略。
-
----
-
-## 引言
-
-LLM 生成文本是一个复杂的过程，涉及 tokenization、模型前向传播、采样等多个环节。理解这个过程对于理解 vLLM 的优化策略至关重要。
-
----
+客户端发来一段文字，推理引擎先把它切成 token。第一次前向处理提示词，最后一个位置的 logits 用于采样首个输出；下一次前向才把这个刚采样出的 token 送进模型。
 
 ## 1. 生成流程概览
 
@@ -476,24 +467,28 @@ graph LR
 | 计算量 | O(N²d) | O(Nd) |
 | 内存读取 | 模型权重 | 模型权重 + KV Cache |
 | 计算/访存比 | 高 | 低 |
-| GPU 利用率 | 50-80% | 10-30% |
+| 可并行的位置 | 本轮选入的提示词位置 | 普通自回归每条请求一个，可合批 |
 | 瓶颈 | 计算 | 内存带宽 |
 
-### 6.2 GPU 利用率可视化
+### 6.2 一个输出 token 什么时候进入缓存
 
-```mermaid
-gantt
-    title GPU 利用率时间线
-    dateFormat X
-    axisFormat %s
-
-    section GPU 计算
-    Prefill (高利用率) :done, p, 0, 20
-    Decode Step 1 (低利用率) :crit, d1, 20, 25
-    Decode Step 2 (低利用率) :crit, d2, 25, 30
-    Decode Step 3 (低利用率) :crit, d3, 30, 35
-    ...更多 decode steps :crit, dn, 35, 80
-```
+{{< stateboard >}}
+title: 哪一轮计算了刚采样出的 token
+rows: ["前向输入", "KV 长度", "本轮采样"]
+steps:
+  - title: 提示词进入模型
+    detail: 设提示词长 4，prefill 用最后一个位置的 logits 采样 A。
+    cells: [["4 个位置"], ["4"], ["A"]]
+    focus: [[0, 0], [1, 0]]
+  - title: 输入 A
+    detail: 下一轮才为 A 写 K 和 V，然后从新的 logits 采样 B。
+    cells: [["A"], ["5"], ["B"]]
+    focus: [[0, 0], [1, 0]]
+  - title: 输入 B
+    detail: 缓存扩到 6 个位置，本轮的输出 C 可以先返回给用户。
+    cells: [["B"], ["6"], ["C"]]
+    focus: [[0, 0], [2, 0]]
+{{< /stateboard >}}
 
 ### 6.3 批处理的重要性
 
@@ -509,19 +504,22 @@ def decode_single(request):
 def decode_batch(requests, batch_size=32):
     read_weights()      # 14GB（只读一次）
     process_32_tokens() # 32 倍的计算量
-    # GPU 利用率提高 32 倍
+    # 批中的 32 个位置可共用同一组权重
 ```
 
 ---
 
 ## 7. 完整生成示例
 
-### 7.1 代码示例
+### 7.1 普通自回归生成的伪代码
 
 ```python
 def generate(model, tokenizer, prompt, max_tokens=100, temperature=0.8, top_p=0.9):
     # 1. Tokenization
     input_ids = tokenizer.encode(prompt, return_tensors='pt').cuda()
+
+    if max_tokens <= 0:
+        return ""
 
     # 2. 初始化 KV Cache
     kv_cache = KVCache(model.config)
@@ -533,6 +531,8 @@ def generate(model, tokenizer, prompt, max_tokens=100, temperature=0.8, top_p=0.
     # 4. 采样第一个 token
     sampling_params = SamplingParams(temperature=temperature, top_p=top_p)
     first_token = sample(logits, sampling_params)
+    if first_token.item() == tokenizer.eos_token_id:
+        return ""
     generated_tokens = [first_token.item()]
 
     # 5. Decode 循环
@@ -561,45 +561,39 @@ print(output)
 
 ### 7.2 时序图
 
-```mermaid
-sequenceDiagram
-    participant T as Tokenizer
-    participant P as Prefill
-    participant D as Decode
-    participant S as Sampler
-    participant C as KV Cache
-
-    Note over T,C: 输入: "Hello"
-
-    T->>P: token_ids = [1, 15043]
-    P->>C: 初始化缓存
-    P->>C: 存储 K[0:2], V[0:2]
-    P->>S: logits
-    S->>D: token_id = 318 ("I")
-
-    loop Decode 循环
-        D->>C: 读取 K[0:n], V[0:n]
-        D->>C: 写入 K[n], V[n]
-        D->>S: logits
-        S->>D: next_token
-    end
-
-    Note over T,C: 输出: "I am fine"
-```
+{{< trace >}}
+title: 一次前向怎样接到下一次
+actors: ["分词器", "模型", "KV 缓存", "采样器"]
+steps:
+  - from: 0
+    to: 1
+    label: "输入两个 ID"
+    detail: "分词器交给模型两个提示 token。"
+  - from: 1
+    to: 2
+    label: "写入两个位置"
+    detail: "这一轮预填充计算两组 K/V，模型在最后一个输入位置得到 logits。"
+  - from: 1
+    to: 3
+    label: "选择 x"
+    detail: "采样器根据 logits 选出第一个输出 ID。"
+  - from: 3
+    to: 1
+    label: "送回 x"
+    detail: "x 成为下一轮的输入，逻辑位置从 0、1 接到 2。"
+  - from: 2
+    to: 1
+    label: "读取历史"
+    detail: "模型用先前的 KV 和当前位置的投影计算，并为位置 2 写入 KV。"
+  - from: 1
+    to: 3
+    label: "选择 y"
+    detail: "采样器得到第二个输出；遇到停止条件时结束循环。"
+{{< /trace >}}
 
 ---
 
-## 8. 本章小结
-
-### 生成流程
-
-1. **Tokenization**：文本 → Token IDs
-2. **Prefill**：并行处理输入，初始化 KV Cache
-3. **Decode**：逐个生成 token，增量更新 KV Cache
-4. **Sampling**：从 logits 采样 token
-5. **Detokenization**：Token IDs → 文本
-
-### 两阶段特性
+## 预填充与逐步解码
 
 | 阶段 | Prefill | Decode |
 |------|---------|--------|
@@ -607,21 +601,6 @@ sequenceDiagram
 | 计算密度 | 高 | 低 |
 | 瓶颈 | 计算 | 内存带宽 |
 | 优化重点 | 并行计算 | 批处理 |
-
-### 采样策略
-
-- **Greedy**：确定性，取最大概率
-- **Temperature**：控制随机程度
-- **Top-k**：限制候选数量
-- **Top-p**：动态限制累积概率
-
-### 与 vLLM 的关联
-
-- **Continuous Batching**：动态组合 Prefill 和 Decode
-- **Chunked Prefill**：分块处理长输入
-- **采样优化**：批量采样提高效率
-
----
 
 ## 思考题
 
@@ -631,8 +610,4 @@ sequenceDiagram
 
 ---
 
-## 下一步
-
-深度学习基础部分已经完成！接下来我们将进入核心模块详解，首先介绍 vLLM 的核心创新——PagedAttention：
-
-👉 [下一章：PagedAttention 分页注意力](../03-core-modules/01-paged-attention.md)
+[查看 vLLM 如何按块管理这段历史](../03-core-modules/01-paged-attention.md)

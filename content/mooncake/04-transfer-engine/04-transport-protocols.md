@@ -3,12 +3,6 @@ title: "传输协议全面对比与深度解析"
 weight: 4
 ---
 
-# 传输协议全面对比与深度解析
-
-[上一篇](03-data-transfer-impl.md) | [目录](../README.md) | [下一篇](05-code-debug-traces.md)
-
----
-
 ## 1. 概述
 
 Mooncake Transfer Engine 是一个高度可扩展的数据传输框架，其核心设计理念之一是**传输协议的可插拔性**。系统通过统一的 `Transport` 基类接口，将具体的硬件传输细节抽象化，使得上层应用可以透明地使用不同的物理传输通道。
@@ -65,8 +59,8 @@ graph LR
 
 | 文件路径 | 说明 |
 |---------|------|
-| `include/transport/tcp_transport/tcp_transport.h` | 头文件定义 |
-| `src/transport/tcp_transport/tcp_transport.cpp` | 实现逻辑 |
+| `mooncake-transfer-engine/include/transport/tcp_transport/tcp_transport.h` | 头文件定义 |
+| `mooncake-transfer-engine/src/transport/tcp_transport/tcp_transport.cpp` | 实现逻辑 |
 
 **工作原理**：
 
@@ -99,12 +93,12 @@ TCP Transport 采用 ASIO 异步 I/O 框架实现数据传输。每次传输建�
 
 | 文件路径 | 说明 |
 |---------|------|
-| `include/transport/rdma_transport/rdma_transport.h` | 主传输类 |
-| `include/transport/rdma_transport/rdma_context.h` | RDMA 设备上下文 |
-| `include/transport/rdma_transport/rdma_endpoint.h` | QP 连接端点 |
-| `include/transport/rdma_transport/endpoint_store.h` | 端点连接池 |
-| `include/transport/rdma_transport/worker_pool.h` | CQ 轮询工作线程池 |
-| `src/transport/rdma_transport/rdma_transport.cpp` | 核心实现 |
+| `mooncake-transfer-engine/include/transport/rdma_transport/rdma_transport.h` | 主传输类 |
+| `mooncake-transfer-engine/include/transport/rdma_transport/rdma_context.h` | RDMA 设备上下文 |
+| `mooncake-transfer-engine/include/transport/rdma_transport/rdma_endpoint.h` | QP 连接端点 |
+| `mooncake-transfer-engine/include/transport/rdma_transport/endpoint_store.h` | 端点连接池 |
+| `mooncake-transfer-engine/include/transport/rdma_transport/worker_pool.h` | CQ 轮询工作线程池 |
+| `mooncake-transfer-engine/src/transport/rdma_transport/rdma_transport.cpp` | 核心实现 |
 
 **工作原理**：
 
@@ -145,10 +139,10 @@ RDMA Transport 是 Mooncake 最核心的高性能传输协议。其架构包含�
 
 | 文件路径 | 说明 |
 |---------|------|
-| `include/transport/nvmeof_transport/nvmeof_transport.h` | 主传输类 |
-| `include/transport/nvmeof_transport/cufile_context.h` | cuFile 文件句柄管理 |
-| `include/transport/nvmeof_transport/cufile_desc_pool.h` | cuFile 批量描述符池 |
-| `src/transport/nvmeof_transport/nvmeof_transport.cpp` | 核心实现 |
+| `mooncake-transfer-engine/include/transport/nvmeof_transport/nvmeof_transport.h` | 主传输类 |
+| `mooncake-transfer-engine/include/transport/nvmeof_transport/cufile_context.h` | cuFile 文件句柄管理 |
+| `mooncake-transfer-engine/include/transport/nvmeof_transport/cufile_desc_pool.h` | cuFile 批量描述符池 |
+| `mooncake-transfer-engine/src/transport/nvmeof_transport/nvmeof_transport.cpp` | 核心实现 |
 
 **工作原理**：
 
@@ -181,8 +175,8 @@ NVMe-oF Transport 利用 NVIDIA GPUDirect Storage (GDS) 技术，通过 cuFile A
 
 | 文件路径 | 说明 |
 |---------|------|
-| `include/transport/cxl_transport/cxl_transport.h` | 头文件定义 |
-| `src/transport/cxl_transport/cxl_transport.cpp` | 核心实现 |
+| `mooncake-transfer-engine/include/transport/cxl_transport/cxl_transport.h` | 头文件定义 |
+| `mooncake-transfer-engine/src/transport/cxl_transport/cxl_transport.cpp` | 核心实现 |
 
 **工作原理**：
 
@@ -223,8 +217,8 @@ CXL Transport 通过 Linux DAX（Direct Access）设备接口访问 CXL 扩展�
 
 | 文件路径 | 说明 |
 |---------|------|
-| `include/transport/nvlink_transport/nvlink_transport.h` | 头文件定义 |
-| `src/transport/nvlink_transport/nvlink_transport.cpp` | 核心实现 |
+| `mooncake-transfer-engine/include/transport/nvlink_transport/nvlink_transport.h` | 头文件定义 |
+| `mooncake-transfer-engine/src/transport/nvlink_transport/nvlink_transport.cpp` | 核心实现 |
 
 **工作原理**：
 
@@ -264,8 +258,8 @@ NVLink Transport 支持两种内存共享模式，在初始化时自动检测并
 
 | 文件路径 | 说明 |
 |---------|------|
-| `include/transport/hip_transport/hip_transport.h` | 头文件定义 |
-| `src/transport/hip_transport/hip_transport.cpp` | 核心实现 |
+| `mooncake-transfer-engine/include/transport/hip_transport/hip_transport.h` | 头文件定义 |
+| `mooncake-transfer-engine/src/transport/hip_transport/hip_transport.cpp` | 核心实现 |
 
 **工作原理**：
 
@@ -302,8 +296,8 @@ Ascend Transport 包含三个子类型，针对华为 Ascend NPU 的不同传输
 | **传输方式** | 基于 HCCL P2P 通信接口 |
 
 **核心文件**：
-- `include/transport/ascend_transport/hccl_transport/hccl_transport.h`
-- `src/transport/ascend_transport/hccl_transport/hccl_transport.cpp`
+- `mooncake-transfer-engine/include/transport/ascend_transport/hccl_transport/hccl_transport.h`
+- `mooncake-transfer-engine/src/transport/ascend_transport/hccl_transport/hccl_transport.cpp`
 
 #### 2.7.2 Heterogeneous RDMA Transport
 
@@ -315,8 +309,8 @@ Ascend Transport 包含三个子类型，针对华为 Ascend NPU 的不同传输
 | **传输方式** | NPU->CPU->RDMA 中转传输，支持聚合/非聚合模式 |
 
 **核心文件**：
-- `include/transport/ascend_transport/heterogeneous_rdma_transport.h`
-- `src/transport/ascend_transport/heterogeneous_rdma_transport/heterogeneous_rdma_transport.cpp`
+- `mooncake-transfer-engine/include/transport/ascend_transport/heterogeneous_rdma_transport.h`
+- `mooncake-transfer-engine/src/transport/ascend_transport/heterogeneous_rdma_transport/heterogeneous_rdma_transport.cpp`
 
 **工作原理**：
 
@@ -336,8 +330,8 @@ Ascend Transport 包含三个子类型，针对华为 Ascend NPU 的不同传输
 | **传输方式** | 基于 ADXL (Ascend Direct eXchange Link) 引擎的直接通信 |
 
 **核心文件**：
-- `include/transport/ascend_transport/ascend_direct_transport/ascend_direct_transport.h`
-- `src/transport/ascend_transport/ascend_direct_transport/ascend_direct_transport.cpp`
+- `mooncake-transfer-engine/include/transport/ascend_transport/ascend_direct_transport/ascend_direct_transport.h`
+- `mooncake-transfer-engine/src/transport/ascend_transport/ascend_direct_transport/ascend_direct_transport.cpp`
 
 **关键特性**：
 
@@ -362,10 +356,10 @@ Ascend Transport 包含三个子类型，针对华为 Ascend NPU 的不同传输
 
 | 文件路径 | 说明 |
 |---------|------|
-| `include/transport/barex_transport/barex_transport.h` | 主传输类 |
-| `include/transport/barex_transport/barex_context.h` | BarEx 上下文与通道缓存 |
-| `src/transport/barex_transport/barex_transport.cpp` | 核心实现 |
-| `src/transport/barex_transport/barex_context.cpp` | 上下文实现 |
+| `mooncake-transfer-engine/include/transport/barex_transport/barex_transport.h` | 主传输类 |
+| `mooncake-transfer-engine/include/transport/barex_transport/barex_context.h` | BarEx 上下文与通道缓存 |
+| `mooncake-transfer-engine/src/transport/barex_transport/barex_transport.cpp` | 核心实现 |
+| `mooncake-transfer-engine/src/transport/barex_transport/barex_context.cpp` | 上下文实现 |
 
 **工作原理**：
 
@@ -397,10 +391,10 @@ BarEx Transport 基于 ACCL (Accelerated Communication Library) 的 BarEx 子系
 
 | 文件路径 | 说明 |
 |---------|------|
-| `include/transport/rpc_communicator/rpc_communicator.h` | RPC 通信器 |
-| `include/transport/rpc_communicator/rpc_interface.h` | Python 绑定接口 |
-| `src/transport/rpc_communicator/rpc_communicator.cpp` | 实现 |
-| `src/transport/rpc_communicator/rpc_interface.cpp` | 接口实现 |
+| `mooncake-transfer-engine/include/transport/rpc_communicator/rpc_communicator.h` | RPC 通信器 |
+| `mooncake-transfer-engine/include/transport/rpc_communicator/rpc_interface.h` | Python 绑定接口 |
+| `mooncake-transfer-engine/src/transport/rpc_communicator/rpc_communicator.cpp` | 实现 |
+| `mooncake-transfer-engine/src/transport/rpc_communicator/rpc_interface.cpp` | 接口实现 |
 
 **工作原理**：
 
@@ -438,15 +432,15 @@ TENT (Transfer ENgine Two) 是 Mooncake 的新一代传输引擎架构，采用�
 
 | 文件路径 | 说明 |
 |---------|------|
-| `tent/include/tent/transport/rdma/rdma_transport.h` | 主传输类 |
-| `tent/include/tent/transport/rdma/context.h` | RDMA 上下文 |
-| `tent/include/tent/transport/rdma/endpoint.h` | 端点管理 |
-| `tent/include/tent/transport/rdma/slice.h` | Slice 定义 |
-| `tent/include/tent/transport/rdma/quota.h` | QP 配额管理 |
-| `tent/include/tent/transport/rdma/workers.h` | CQ 轮询 Worker |
-| `tent/include/tent/transport/rdma/buffers.h` | 本地 Buffer 管理 |
-| `tent/include/tent/transport/rdma/params.h` | RDMA 参数配置 |
-| `tent/include/tent/transport/rdma/rail_monitor.h` | 多网卡监控 |
+| `mooncake-transfer-engine/tent/include/tent/transport/rdma/rdma_transport.h` | 主传输类 |
+| `mooncake-transfer-engine/tent/include/tent/transport/rdma/context.h` | RDMA 上下文 |
+| `mooncake-transfer-engine/tent/include/tent/transport/rdma/endpoint.h` | 端点管理 |
+| `mooncake-transfer-engine/tent/include/tent/transport/rdma/slice.h` | Slice 定义 |
+| `mooncake-transfer-engine/tent/include/tent/transport/rdma/quota.h` | QP 配额管理 |
+| `mooncake-transfer-engine/tent/include/tent/transport/rdma/workers.h` | CQ 轮询 Worker |
+| `mooncake-transfer-engine/tent/include/tent/transport/rdma/buffers.h` | 本地 Buffer 管理 |
+| `mooncake-transfer-engine/tent/include/tent/transport/rdma/params.h` | RDMA 参数配置 |
+| `mooncake-transfer-engine/tent/include/tent/transport/rdma/rail_monitor.h` | 多网卡监控 |
 
 **与经典版本的区别**：
 
@@ -464,7 +458,7 @@ TENT (Transfer ENgine Two) 是 Mooncake 的新一代传输引擎架构，采用�
 | **适用场景** | 同机进程间共享内存传输 |
 | **支持内存类型** | CPU DRAM（POSIX 共享内存 / CXL 挂载路径） |
 
-**核心文件**：`tent/include/tent/transport/shm/shm_transport.h`
+**核心文件**：`mooncake-transfer-engine/tent/include/tent/transport/shm/shm_transport.h`
 
 **关键特性**：
 
@@ -481,7 +475,7 @@ TENT (Transfer ENgine Two) 是 Mooncake 的新一代传输引擎架构，采用�
 | **命名空间** | `mooncake::tent` |
 | **适用场景** | 同机 GPU 间 P2P 传输（CUDA IPC） |
 
-**核心文件**：`tent/include/tent/transport/nvlink/nvlink_transport.h`
+**核心文件**：`mooncake-transfer-engine/tent/include/tent/transport/nvlink/nvlink_transport.h`
 
 **关键特性**：
 
@@ -498,7 +492,7 @@ TENT (Transfer ENgine Two) 是 Mooncake 的新一代传输引擎架构，采用�
 | **适用场景** | 跨节点 Multi-Node NVLink (MNNVL) GPU 直传 |
 | **硬件要求** | NVIDIA Grace Hopper / Blackwell + NVLink Switch + CUDA Fabric Memory |
 
-**核心文件**：`tent/include/tent/transport/mnnvl/mnnvl_transport.h`
+**核心文件**：`mooncake-transfer-engine/tent/include/tent/transport/mnnvl/mnnvl_transport.h`
 
 **关键特性**：
 
@@ -516,7 +510,7 @@ TENT (Transfer ENgine Two) 是 Mooncake 的新一代传输引擎架构，采用�
 | **适用场景** | GPU 与本地/远程存储间的高速 I/O |
 | **硬件要求** | NVIDIA GPU + cuFile/GDS 支持 |
 
-**核心文件**：`tent/include/tent/transport/gds/gds_transport.h`
+**核心文件**：`mooncake-transfer-engine/tent/include/tent/transport/gds/gds_transport.h`
 
 **关键特性**：
 
@@ -533,7 +527,7 @@ TENT (Transfer ENgine Two) 是 Mooncake 的新一代传输引擎架构，采用�
 | **适用场景** | Linux 原生异步文件 I/O，CPU 到本地文件系统的传输 |
 | **硬件要求** | Linux Kernel 5.1+（io_uring 支持） |
 
-**核心文件**：`tent/include/tent/transport/io_uring/io_uring_transport.h`
+**核心文件**：`mooncake-transfer-engine/tent/include/tent/transport/io_uring/io_uring_transport.h`
 
 **关键特性**：
 
@@ -550,7 +544,7 @@ TENT (Transfer ENgine Two) 是 Mooncake 的新一代传输引擎架构，采用�
 | **命名空间** | `mooncake::tent` |
 | **适用场景** | 无 RDMA 环境下的跨节点通信 + 通知消息 |
 
-**核心文件**：`tent/include/tent/transport/tcp/tcp_transport.h`
+**核心文件**：`mooncake-transfer-engine/tent/include/tent/transport/tcp/tcp_transport.h`
 
 **独特能力**：
 
@@ -567,7 +561,7 @@ TENT (Transfer ENgine Two) 是 Mooncake 的新一代传输引擎架构，采用�
 | **适用场景** | Ascend NPU 间基于 HIXL 的直接传输 |
 | **硬件要求** | 华为 Ascend NPU + HIXL 库 |
 
-**核心文件**：`tent/include/tent/transport/ascend/ascend_direct_transport.h`
+**核心文件**：`mooncake-transfer-engine/tent/include/tent/transport/ascend/ascend_direct_transport.h`
 
 **与经典版本的区别**：
 
@@ -584,7 +578,7 @@ TENT (Transfer ENgine Two) 是 Mooncake 的新一代传输引擎架构，采用�
 | **适用场景** | 基于标准缓冲 I/O 的文件传输，兼容性最佳 |
 | **硬件要求** | 无特殊要求 |
 
-**核心文件**：`tent/include/tent/transport/bufio/bufio_transport.h`
+**核心文件**：`mooncake-transfer-engine/tent/include/tent/transport/bufio/bufio_transport.h`
 
 **关键特性**：
 
@@ -846,7 +840,3 @@ mooncake-transfer-engine/tent/
       ascend/ascend_direct_transport.h       # Ascend NPU 直连
       bufio/bufio_transport.h               # 标准缓冲 I/O
 ```
-
----
-
-[上一篇](03-data-transfer-impl.md) | [目录](../README.md) | [下一篇](05-code-debug-traces.md)

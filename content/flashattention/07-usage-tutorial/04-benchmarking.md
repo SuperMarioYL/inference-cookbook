@@ -11,33 +11,36 @@ weight: 4
 - [4. 使用 benchmark_attn.py](#4-使用-benchmark_attnpy)
 - [5. 自定义 Benchmark](#5-自定义-benchmark)
 - [6. 性能分析工具](#6-性能分析工具)
-- [7. 性能参考数据](#7-性能参考数据)
+- [7. 如何记录和比较结果](#7-如何记录和比较结果)
 - [8. 性能调优指南](#8-性能调优指南)
 
 ---
 
 ## 1. 概述
 
-性能测试是验证 Flash Attention 集成效果的关键步骤。本章介绍如何正确测量 Flash Attention 的吞吐量、延迟，以及如何与其他实现进行对比。
+比较两个内核时，先固定 Q/K/V 的形状、dtype、mask 和前向或反向模式。预热后用设备事件给相同的一段计算计时。
 
-```mermaid
-graph LR
-    subgraph metrics["核心性能指标"]
-        M1["TFLOPS<br/>每秒万亿浮点运算"]
-        M2["延迟 (ms)<br/>单次前向/反向耗时"]
-        M3["吞吐量<br/>tokens/sec"]
-        M4["内存占用<br/>峰值显存 (GB)"]
-    end
-
-    subgraph tools["测试工具"]
-        T1["flash_attn.utils.benchmark"]
-        T2["triton.testing.do_bench"]
-        T3["torch.cuda.Event"]
-        T4["Nsight Systems/Compute"]
-    end
-
-    metrics --> tools
-```
+{{< stateboard >}}
+title: "分开记录首次编译和热态 GPU 时间"
+rows: ["阶段", "计时边界", "报告值"]
+steps:
+  - title: "首次调用"
+    detail: "固定 shape、dtype、mask。第一次运行可能包含初始化或即时编译，用主机时钟和设备同步测完整耗时。"
+    cells: [["首次调用"], ["主机同步"], ["冷耗时"]]
+    focus: [[2, 0]]
+  - title: "预热相同形状"
+    detail: "执行若干相同的调用，等待编译和分配完成后再开始热态测量。"
+    cells: [["预热"], ["同步"], ["·"]]
+    focus: [[0, 0]]
+  - title: "采样 GPU 时间"
+    detail: "用同一 stream 的 CUDA events 包住多次调用，等末尾事件完成后取每次耗时。"
+    cells: [["重复执行"], ["CUDA event"], ["热耗时"]]
+    focus: [[1, 0], [2, 0]]
+  - title: "报告比较条件"
+    detail: "保留输出误差、GPU 型号、输入规模及采样次数，再比较吞吐或延迟。"
+    cells: [["整理"], ["相同输入"], ["冷、热分列"]]
+    focus: [[2, 0]]
+{{< /stateboard >}}
 
 ---
 
@@ -225,7 +228,7 @@ python benchmark_attn.py
 | 实现 | 说明 |
 |------|------|
 | Flash2 | Flash Attention v2（通过 `flash_attn.flash_attn_interface`） |
-| Flash3 | Flash Attention v3（通过 `flash_attn_interface`，Hopper 优化） |
+| Flash3 | Flash Attention v3（通过 Hopper 扩展，当前命名空间为 `flash_attn_3.flash_attn_interface`） |
 | cuDNN | NVIDIA cuDNN SDPA |
 | Triton | Triton Fused Attention |
 
@@ -436,44 +439,9 @@ print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
 
 ---
 
-## 7. 性能参考数据
+## 7. 如何记录和比较结果
 
-### 7.1 H100 SXM 参考吞吐量
-
-以下数据基于 H100 SXM 80GB，BF16，`headdim=128`：
-
-| 场景 | 配置 | 前向 TFLOPS | 前向+反向 TFLOPS |
-|------|------|------------|----------------|
-| 训练 | B=8, S=2048, H=32, causal | ~800-900 | ~600-700 |
-| 训练 | B=4, S=4096, H=32, causal | ~850-950 | ~650-750 |
-| 训练 | B=2, S=8192, H=32, causal | ~900-1000 | ~700-800 |
-| 训练 | B=8, S=2048, H=32, non-causal | ~900-1000 | ~700-800 |
-
-> **注意**：实际性能取决于具体硬件配置、CUDA 版本、driver 版本和散热条件。以上为近似参考值。
-
-### 7.2 Flash Attention v2 vs v3
-
-Flash Attention v3 针对 Hopper 架构优化，相比 v2 通常有 20-50% 的性能提升：
-
-```mermaid
-graph LR
-    subgraph comparison["性能对比（H100, causal, headdim=128）"]
-        V2["Flash Attention v2<br/>~600-800 TFLOPS"]
-        V3["Flash Attention v3<br/>~800-1100 TFLOPS"]
-        V2 -->|"20-50% 提升"| V3
-    end
-```
-
-### 7.3 与标准注意力对比
-
-| 序列长度 | 标准注意力 | Flash Attention | 加速比 |
-|---------|-----------|----------------|--------|
-| 512 | ~2 ms | ~0.3 ms | ~6.7× |
-| 2048 | ~30 ms | ~0.8 ms | ~37.5× |
-| 8192 | ~500 ms | ~5 ms | ~100× |
-| 32768 | OOM | ~60 ms | - |
-
----
+同一张表只放相同 GPU、shape、dtype、mask 和计时范围的数据。分别记录包及 tag、PyTorch/CUDA 版本、热身次数与测量次数。FA4 的首次 JIT 编译单列；FA2/FA3 记录是否已完成扩展编译。prefill 与单 token decode 使用各自的序列长度和 batch，直接比较每步耗时或 tokens/s。将本机的吞吐和形状一同记录，再对照论文的实验设置。[FA4 实验设置](https://arxiv.org/abs/2603.05451)
 
 ## 8. 性能调优指南
 
@@ -538,6 +506,6 @@ out = flash_attn_with_kvcache(
 
 ## 导航
 
-- 上一篇：[推理优化](03-inference-optimization.md)
-- 下一篇：[术语表](../08-appendix/01-glossary.md)
-- [返回目录](../README.md)
+- 上一篇：[推理优化](/flashattention/07-usage-tutorial/03-inference-optimization/)
+- 下一篇：[术语表](/flashattention/08-appendix/01-glossary/)
+- [返回目录](/flashattention/00-overview/overview/)

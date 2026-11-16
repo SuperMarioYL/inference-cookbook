@@ -3,7 +3,7 @@ title: "代码导航技巧"
 weight: 5
 ---
 
-> 本文提供 PyTorch 源码阅读中最实用的导航技巧，包括如何追踪一个算子的完整实现路径、理解代码生成系统、掌握调试工具，以及识别代码库中的常见设计模式。
+跟踪一个算子时，从算子名开始搜索。以 `aten::mm` 为例，schema 给出参数约定，分发表给出后端注册位置，再往下才能找到矩阵乘的实现。
 
 ---
 
@@ -56,7 +56,7 @@ def add(input: Tensor, other: Tensor, *, alpha: Number = 1, out: Optional[Tensor
 torchgen 会根据 `native_functions.yaml` 自动生成以下代码：
 
 - `build/aten/src/ATen/Operators_*.cpp`：Dispatcher 注册代码。
-- `build/aten/src/ATen/RegisterCPU.cpp` / `RegisterCUDA.cpp`：按设备的 kernel 注册。
+- `build/aten/src/ATen/RegisterCPU_0.cpp` / `RegisterCUDA_*.cpp`：按设备的 kernel 注册。
 - `torch/csrc/autograd/generated/VariableType_*.cpp`：Autograd 包装层（记录反向图）。
 - `torch/csrc/autograd/generated/python_torch_functions_*.cpp`：Python 绑定。
 
@@ -392,7 +392,7 @@ PyTorch 近年来在逐步添加类型标注。`.pyi` 存根文件（如 `torch/
 
 ## 6. 总结
 
-PyTorch 源码阅读的核心挑战在于跨语言（Python/C++）、跨层次（API/Dispatch/Kernel）的复杂调用链。本文提供的导航路径可以概括为：
+同一个算子可以从这几处进入源码。
 
 1. **从 `native_functions.yaml` 出发**找到算子声明。
 2. **通过 dispatch 字段**定位具体设备的 kernel 实现。

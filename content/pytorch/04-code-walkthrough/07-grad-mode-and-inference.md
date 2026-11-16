@@ -5,7 +5,7 @@ weight: 7
 
 ## 概述
 
-PyTorch 的 autograd 系统提供了多种模式控制机制，用于在不同场景下精确控制梯度计算行为。本文深入分析三种核心模式的源码实现：**GradMode**（梯度模式）、**InferenceMode**（推理模式）和 **Forward-mode AD**（前向模式自动微分），帮助读者理解它们的内部机制及适用场景。
+在同一个输入上分别执行 `torch.no_grad()` 和 `torch.inference_mode()`。前者关闭反向图记录，后者还会改变新张量的视图追踪和版本计数行为。
 
 ---
 
@@ -174,27 +174,23 @@ with torch.inference_mode():
 
 PyTorch 默认使用**反向模式 AD**（reverse-mode AD），通过 VJP（vector-Jacobian product）计算梯度。而前向模式 AD 使用 JVP（Jacobian-vector product），在某些场景下更高效。
 
-```mermaid
-flowchart LR
-    subgraph vjp["反向模式 AD - VJP"]
-        direction LR
-        A1["输入 x"] --> B1["f(x)"]
-        B1 --> C1["标量损失 L"]
-        C1 --> D1["dL/dx = J^T * v"]
-        D1 --> E1["适合 - 多输入少输出"]
-    end
-
-    subgraph jvp["前向模式 AD - JVP"]
-        direction LR
-        A2["输入 x + tangent v"] --> B2["f(x)"]
-        B2 --> C2["输出 y + J*v"]
-        C2 --> D2["dy = J * v"]
-        D2 --> E2["适合 - 少输入多输出"]
-    end
-
-    style vjp fill:#e8f4f8,stroke:#2196F3
-    style jvp fill:#fce4ec,stroke:#e91e63
-```
+{{< stateboard >}}
+title: "同一个函数，正向传播切向量或反向传播梯度"
+rows: ["模式", "起点", "结果"]
+steps:
+  - title: "选函数与输入"
+    detail: "令 f(x)=x²，x=3，此处导数为 6。"
+    cells: [["比较"], ["x=3"], ["f=9"]]
+    focus: [[1, 0], [2, 0]]
+  - title: "JVP 从输入出发"
+    detail: "给输入方向 v=2，输出切向量为 Jv=6×2=12。"
+    cells: [["正向"], ["v=2"], ["Jv=12"]]
+    focus: [[0, 0], [2, 0]]
+  - title: "VJP 从输出出发"
+    detail: "给输出的 cotangent 为 4，向输入回传得到 4×6=24。"
+    cells: [["反向"], ["v=4"], ["vJ=24"]]
+    focus: [[0, 0], [2, 0]]
+{{< /stateboard >}}
 
 **核心区别**：
 

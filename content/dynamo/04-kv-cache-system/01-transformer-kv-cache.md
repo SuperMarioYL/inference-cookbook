@@ -3,9 +3,9 @@ title: "KV Cache 原理"
 weight: 1
 ---
 
-> 理解 KV Cache 是掌握 LLM 推理优化的基础。本文档从 Self-Attention 机制出发，深入解析 KV Cache 的工作原理和内存特性。
+## 每个 worker 持有哪些 KV
 
----
+计算单个请求的理论 KV 大小时，明确是每层还是所有层、全模型还是每 rank。Dynamo 路由器关心可复用前缀在哪个实例，而每个实例内的注意力 KV 布局仍由具体引擎和模型决定。 [KV 路由设计](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/docs/fern/pages/developer-guide/knowledge-base/concepts/system-architecture/kv-aware-routing.md)
 
 ## 1. Self-Attention 机制回顾
 
@@ -301,20 +301,7 @@ graph TB
 
 ---
 
-## 总结
-
-KV Cache 是 LLM 推理优化的核心技术：
-
-1. **原理**：缓存历史 Token 的 K、V 矩阵，避免重复计算
-2. **收益**：将生成复杂度从 $O(m \cdot n^2)$ 降低到 $O(m \cdot n)$
-3. **代价**：显著的内存占用，随序列长度线性增长
-4. **挑战**：内存碎片、分布式共享、前缀复用
-
-理解这些基础知识，是深入学习 Dynamo KV Cache 系统的前提。
-
----
-
 ## 参考资料
 
 - [Attention Is All You Need](https://arxiv.org/abs/1706.03762) - Transformer 原论文
-- [vLLM: Easy, Fast, and Cheap LLM Serving](https://arxiv.org/abs/2309.06180) - PagedAttention
+- [Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180) - PagedAttention

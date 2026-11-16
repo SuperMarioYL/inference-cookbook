@@ -3,51 +3,37 @@ title: "RDMA 数据传输详细流程"
 weight: 4
 ---
 
-本文深入分析 Mooncake Transfer Engine 中 RDMA 数据传输的完整实现细节,从 QP 建立到数据传输的每一步。
+一笔 RDMA 读依次经过内存注册、QP 建连、提交和 CQ 完成。两端的地址、长度和访问键可以把同一条请求在各阶段连起来。
 
 ---
 
 ## 1. RDMA 传输流程概览
 
-```mermaid
-sequenceDiagram
-    participant Sender as Sender Worker
-    participant SenderTE as Sender TE
-    participant RDMANIC as RDMA NIC
-    participant ReceiverNIC as Receiver NIC
-    participant ReceiverTE as Receiver TE
-    participant Receiver as Receiver Worker
-
-    Note over Sender,Receiver: 初始化阶段 - 只执行一次
-    Sender->>SenderTE: 注册内存区域
-    SenderTE->>RDMANIC: ibv_reg_mr()
-    ReceiverTE->>ReceiverNIC: ibv_reg_mr()
-    SenderTE->>ReceiverTE: 交换 QP 信息
-    Note over SenderTE,ReceiverTE: 建立 QP 连接
-
-    Note over Sender,Receiver: 传输阶段 - 每次请求执行
-    Sender->>SenderTE: 请求传输 KVCache
-    SenderTE->>SenderTE: 准备 WR (Work Request)
-
-    alt 使用 RDMA Read
-        ReceiverTE->>RDMANIC: post_recv() - 准备接收
-        SenderTE->>RDMANIC: ibv_post_send(RDMA_READ)
-        RDMANIC->>ReceiverNIC: 读取远端内存
-        ReceiverNIC-->>RDMANIC: 返回数据
-        RDMANIC->>SenderTE: 触发 CQ 完成事件
-        SenderTE->>Sender: 传输完成
-    else 使用 RDMA Write
-        SenderTE->>RDMANIC: ibv_post_send(RDMA_WRITE)
-        RDMANIC->>ReceiverNIC: 写入远端内存
-        ReceiverNIC->>ReceiverTE: 触发 CQ 完成事件
-        ReceiverTE->>Receiver: 传输完成
-    end
-
-    Note over Sender,Receiver: GPU Direct RDMA (可选)
-    SenderTE->>RDMANIC: 直接从 GPU 显存读取
-    RDMANIC->>ReceiverNIC: 零拷贝传输
-    ReceiverNIC->>ReceiverTE: 直接写入 GPU 显存
-```
+{{< trace >}}
+title: "一次 RDMA Read 分成准备与读回两段"
+actors: ["读方进程", "本地 RNIC", "远端 RNIC", "远端缓冲"]
+steps:
+  - from: 0
+    to: 3
+    label: "取得远端描述"
+    detail: "通过控制通道协商远端地址、长度与访问键。两端先建立适用的队列对和内存注册。"
+  - from: 0
+    to: 1
+    label: "提交读取"
+    detail: "读方提交包含本地目的地和远端源范围的工作请求。"
+  - from: 1
+    to: 2
+    label: "网络读请求"
+    detail: "本地 RNIC 与远端 RNIC 交换所需数据。"
+  - from: 2
+    to: 3
+    label: "读取源范围"
+    detail: "远端 RNIC 在已授权的范围内访问注册缓冲。"
+  - from: 1
+    to: 0
+    label: "消费完成事件"
+    detail: "读方根据 CQ 完成结果确认本地目标数据就绪。"
+{{< /trace >}}
 
 ---
 
@@ -55,10 +41,10 @@ sequenceDiagram
 
 ### 2.1 内存注册 (Memory Registration)
 
-**核心函数**: `src/transfer/rdma/memory_pool.cpp::register_memory()`
+注册内存看 RdmaTransport::registerLocalMemory 和 RdmaContext::registerMemoryRegion。[v0.3.14 实现](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/transport/rdma_transport/rdma_context.cpp)
 
 ```cpp
-// 文件: mooncake-transfer-engine/src/transfer_engine.cpp
+// 下例用 verbs 说明操作顺序，是教学伪代码。
 struct RegisteredMemory {
     void* addr;           // 内存地址
     size_t length;        // 内存长度
@@ -145,10 +131,10 @@ RegisteredMemory* register_gpu_memory(void* gpu_ptr, size_t length) {
 
 ### 2.2 QP 创建与连接
 
-**核心函数**: `src/transfer/rdma/qp_manager.cpp::create_qp_pair()`
+主动与被动握手看 RdmaEndPoint::setupConnectionsByActive / setupConnectionsByPassive。[v0.3.14 实现](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/transport/rdma_transport/rdma_endpoint.cpp)
 
 ```cpp
-// 文件: mooncake-transfer-engine/src/transport/rdma_transport.cpp (推测)
+// 下例用 verbs 说明操作顺序，是教学伪代码。
 struct QPPair {
     ibv_qp* qp;              // Queue Pair 句柄
     ibv_cq* send_cq;         // Send Completion Queue
@@ -265,10 +251,10 @@ void modify_qp_to_rtr(ibv_qp* qp, const QPInfo& remote_info) {
 
 ### 2.3 RDMA Read 操作
 
-**核心函数**: `src/transfer/rdma/rdma_client.cpp::rdma_read()`
+slice 提交看 RdmaTransport::submitTransfer 和 RdmaEndPoint::submitPostSend。[v0.3.14 实现](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/transport/rdma_transport/rdma_transport.cpp)
 
 ```cpp
-// 文件: mooncake-transfer-engine/src/transport/rdma_transport.cpp
+// 下例用 verbs 说明操作顺序，是教学伪代码。
 int rdma_read(
     QPPair* qp,
     void* local_addr,        // 本地缓冲区
@@ -379,10 +365,10 @@ int rdma_read_batch(
 
 ### 2.4 完成队列轮询 (CQ Polling)
 
-**核心函数**: `src/transfer/rdma/completion_poller.cpp::poll_completions()`
+数据完成路径看 worker pool 处理 CQ 的代码。[v0.3.14 实现](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/transport/rdma_transport/worker_pool.cpp)
 
 ```cpp
-// 文件: mooncake-transfer-engine/src/transport/rdma_transport.cpp
+// 下例用 verbs 说明操作顺序，是教学伪代码。
 struct CompletionEvent {
     uint64_t wr_id;          // Work Request ID
     ibv_wc_status status;    // 完成状态
@@ -467,7 +453,7 @@ void wait_for_completion(ibv_cq* cq) {
 ### 3.1 TransferBatch 执行流程
 
 ```cpp
-// 文件: mooncake-transfer-engine/src/transfer_engine.cpp
+// 下例用 verbs 说明操作顺序，是教学伪代码。
 class TransferBatch {
 public:
     void add_task(const std::string& segment_name,
@@ -542,24 +528,9 @@ private:
 
 ## 4. 性能数据与调优
 
-### 4.1 RDMA 性能基准
+### 4.1 怎样测量这一层
 
-基于论文与实测数据 (100Gbps InfiniBand):
-
-| 操作 | 延迟 | 带宽 | CPU 占用 |
-|------|------|------|---------|
-| RDMA Read (1KB) | 1.2μs | - | ~0% (对端) |
-| RDMA Read (1MB) | 85μs | 94 Gbps | ~0% (对端) |
-| RDMA Write (1MB) | 80μs | 98 Gbps | ~0% (对端) |
-| GPU Direct (1MB) | 90μs | 88 Gbps | ~0% (CPU) |
-| TCP (1MB) | 250μs | 70 Gbps | ~20% (CPU) |
-
-**优势**:
-- **低延迟**: 微秒级延迟,适合实时推理
-- **高带宽**: 接近网卡理论带宽
-- **零 CPU 开销**: 对端 CPU 无需参与
-
----
+固定网卡型号、链路、NUMA、消息大小、并发和方向。用小消息看延迟，用足够多的在途字节观察能否填满链路，分别记录提交时刻和 CQ 完成时刻。把网络线速换成应用可见的字节速率还要考虑协议开销；两者也都不能直接换算为模型的首 token 延迟。[本版 TE benchmark 与测试参数](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/docs/source/performance/mooncake/tebench.md)
 
 ### 4.2 调优技巧
 
@@ -717,19 +688,19 @@ LOG_DEBUG("RDMA Read params: remote_addr=0x%lx, rkey=0x%x",
 
 ```bash
 # 检查网络丢包
-ethtool -S mlx5_0 | grep drop
+ethtool -S "$NETDEV" | grep drop
 
 # 检查远端节点连通性
-rping -s -a <remote_ip> -v -C 10
+rping -c -a "$REMOTE_IP" -v -C 10
 ```
 
 ---
 
 ## 7. 相关阅读
 
-- [04-transfer-engine/02-rdma-transport.md](../../04-transfer-engine/02-rdma-transport.md) - RDMA 传输实现
-- [04-transfer-engine/03-batch-transfer.md](../../04-transfer-engine/03-batch-transfer.md) - 批量传输优化
-- [09-performance/02-optimization-techniques.md](../../09-performance/02-optimization-techniques.md) - 性能优化技术
+- [04-transfer-engine/02-rdma-transport.md](../04-transfer-engine/02-rdma-transport.md) - RDMA 传输实现
+- [批量传输实现](../04-transfer-engine/03-data-transfer-impl.md) - 批量传输优化
+- [性能调优](../09-performance/03-tuning-guide.md) - 性能优化技术
 
 ---
 

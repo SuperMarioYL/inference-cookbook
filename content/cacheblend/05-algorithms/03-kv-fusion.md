@@ -3,7 +3,7 @@ title: "KV 融合算法"
 weight: 3
 ---
 
-本文档详细介绍 CacheBlend 中 KV Cache 融合算法和层间传播算法的原理与实现。这两个算法协同工作，确保选择性重计算的结果正确传播到后续层。
+假设只重算了位置 1 和 3。它们产生的新 K、V 要写回原来的两处；后续层收到的隐藏状态和残差也要按 1、3 这一相同顺序排列。
 
 ---
 
@@ -35,15 +35,32 @@ if status in [2]:
 
 ### 5.3.3 融合过程图示
 
-```mermaid
-graph LR
-    subgraph fusion["KV 融合过程"]
-        OldKV["旧 KV Cache<br>[全部 token]"] --> Update["部分更新"]
-        NewKV["新 KV<br>[仅 HKVD]"] --> Update
-        Idx["imp_indices"] --> Update
-        Update --> FusedKV["融合 KV Cache<br>[更新后的全部 token]"]
-    end
-```
+{{< stateboard >}}
+title: "位置 1 和 3 怎样写回旧缓存"
+rows: ["位置", "旧 KV", "融合结果"]
+steps:
+  - title: "读取旧数据"
+    detail: "整行旧 KV 保持原序列的四个位置。"
+    cells:
+      - ["0", "1", "2", "3"]
+      - ["K0", "K1", "K2", "K3"]
+      - ["·", "·", "·", "·"]
+    focus: [[1, 0], [1, 1], [1, 2], [1, 3]]
+  - title: "写回位置 1"
+    detail: "检查层选中了 1 和 3。先看位置 1，它接收本步重算出的新 KV。"
+    cells:
+      - ["0", "1", "2", "3"]
+      - ["K0", "K1", "K2", "K3"]
+      - ["K0", "新1", "K2", "K3"]
+    focus: [[2, 1]]
+  - title: "写回位置 3"
+    detail: "位置 3 同样更新，位置 0、2 仍保留原值。"
+    cells:
+      - ["0", "1", "2", "3"]
+      - ["K0", "K1", "K2", "K3"]
+      - ["K0", "新1", "K2", "新3"]
+    focus: [[2, 1], [2, 3]]
+{{< /stateboard >}}
 
 ### 5.3.4 内存效率分析
 
@@ -84,65 +101,36 @@ if temp_status == 1:
 
 ### 5.4.3 层间数据一致性
 
-```mermaid
-graph TB
-    subgraph propagation["层间数据传播"]
-        L1["Layer 1 (Check)"]
-        L2["Layer 2+"]
-
-        subgraph output["Check 层输出"]
-            H1["hidden[imp_indices]"]
-            R1["residual[imp_indices]"]
-            P1["positions[imp_indices]"]
-        end
-
-        subgraph input["后续层输入"]
-            H2["hidden"]
-            R2["residual"]
-            P2["positions"]
-        end
-
-        L1 --> H1
-        L1 --> R1
-        L1 --> P1
-
-        H1 --> H2
-        R1 --> R2
-        P1 --> P2
-
-        H2 --> L2
-        R2 --> L2
-        P2 --> L2
-    end
-```
+{{< stateboard >}}
+title: "用同一索引压缩位置、残差和隐藏状态"
+rows: ["positions", "hidden", "residual"]
+steps:
+  - title: "筛选前"
+    detail: "三行均按原 token 顺序排列。"
+    cells:
+      - ["0", "1", "2", "3"]
+      - ["h0", "h1", "h2", "h3"]
+      - ["r0", "r1", "r2", "r3"]
+    focus: [[0, 0], [0, 1], [0, 2], [0, 3]]
+  - title: "取相同索引"
+    detail: "选中 1、3，三行要取相同的两个位置。"
+    cells:
+      - ["0", "1", "2", "3"]
+      - ["h0", "h1", "h2", "h3"]
+      - ["r0", "r1", "r2", "r3"]
+    focus: [[0, 1], [0, 3], [1, 1], [1, 3], [2, 1], [2, 3]]
+  - title: "形成紧凑张量"
+    detail: "后续层的第 0 行属于原 token 1，第 1 行属于原 token 3。"
+    cells:
+      - ["1", "3", "·", "·"]
+      - ["h1", "h3", "·", "·"]
+      - ["r1", "r3", "·", "·"]
+    focus: [[0, 0], [0, 1], [1, 0], [1, 1], [2, 0], [2, 1]]
+{{< /stateboard >}}
 
 ### 5.4.4 完整的层间传播流程
 
-```mermaid
-sequenceDiagram
-    participant L0 as Layer 0
-    participant L1 as Layer 1 (Check)
-    participant L2 as Layer 2
-    participant LN as Layer N
-
-    Note over L0,LN: 数据形状: [seq_len, hidden_size]
-
-    L0->>L0: 处理所有 token
-    L0->>L1: hidden[seq_len], residual[seq_len]
-
-    Note over L1: HKVD 选择: imp_indices
-    L1->>L1: 过滤 hidden, residual, positions
-    Note over L1: 数据形状: [len(imp_indices), hidden_size]
-
-    L1->>L2: hidden[HKVD], residual[HKVD]
-
-    Note over L2: 部分更新 old_kv
-    L2->>L2: old_kv[imp_indices] = new_kv
-    L2->>L2: 使用融合 KV 计算注意力
-
-    L2->>LN: hidden[HKVD], residual[HKVD]
-    Note over LN: 继续部分更新和计算
-```
+下一层用紧凑张量继续前向，注意力后端仍通过原序列位置访问整段 KV。位置向量、隐藏状态和残差同步选取，才会保持 token 对应关系。
 
 ---
 

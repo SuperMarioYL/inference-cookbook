@@ -5,7 +5,7 @@ weight: 8
 
 ## 概述
 
-在深度学习训练中，前向传播保存的中间激活值是反向传播计算梯度的必要输入，但它们也是 GPU 显存消耗的主要来源。PyTorch 提供了一套完整的机制来管理这些保存的张量：**SavedVariable** 负责底层的张量保存与恢复，**saved_tensors_hooks** 提供用户自定义的打包/解包钩子，**gradient checkpointing** 实现计算换内存的策略，而 **anomaly detection** 则用于调试梯度计算中的异常。本文深入分析这些机制的源码实现。
+有些反向公式需要读取前向计算时的输入。可以用 `saved_tensors_hooks` 观察保存了哪些张量、什么时候取回，或者用 checkpoint 在反向时重新计算一段前向。
 
 ---
 
@@ -148,30 +148,23 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
 }
 ```
 
-```mermaid
-stateDiagram-v2
-    [*] --> Created : SavedVariable(tensor, is_output)
-    Created --> Saved : 保存版本号和数据
-    Saved --> VersionCheck : unpack() 被调用
-    VersionCheck --> Restored : 版本匹配
-    VersionCheck --> Error : 版本不匹配\n(inplace 修改)
-    Restored --> Rebuilt : 重建 autograd 元数据
-    Rebuilt --> [*] : 返回恢复的 Variable
-
-    Saved --> Released : reset_data()\n(backward 完成后)
-    Released --> BackwardTwiceError : 再次 unpack()
-
-    Saved --> HooksPacked : register_hooks()\n调用 pack_hook
-    HooksPacked --> HooksUnpacked : unpack() 调用 unpack_hook
-    HooksUnpacked --> Rebuilt
-
-    note right of Error
-        错误信息示例 -
-        "one of the variables needed for
-        gradient computation has been
-        modified by an inplace operation"
-    end note
-```
+{{< stateboard >}}
+title: "保存的张量在解包前发生了什么"
+rows: ["保存时版本", "当前版本", "读取"]
+steps:
+  - title: "前向保存"
+    detail: "无 pack/unpack hooks 的普通模式下，SavedVariable 捕获张量及当时的版本号。"
+    cells: [["0"], ["0"], ["待反向"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "经过原地写"
+    detail: "示例假设同一存储的版本由一次合法的原地操作从 0 增到 1。"
+    cells: [["0"], ["1"], ["待反向"]]
+    focus: [[1, 0]]
+  - title: "反向解包"
+    detail: "算子的梯度公式需要原值，版本不一致触发错误，避免使用已改写的数据计算梯度。"
+    cells: [["0"], ["1"], ["版本错误"]]
+    focus: [[2, 0]]
+{{< /stateboard >}}
 
 ### 1.4 版本检查机制
 
@@ -290,37 +283,27 @@ void SavedVariable::set_hooks_and_pack_data(
 
 Gradient checkpointing（梯度检查点）是一种经典的内存优化策略：不保存前向传播的中间激活值，而是在反向传播需要时重新计算它们。这用额外的前向计算开销换取显存节省。
 
-```mermaid
-flowchart LR
-    subgraph standard["标准反向传播 - 保存所有激活值"]
-        direction TB
-        S_FW["前向传播"] --> S_A1["保存 act_1"]
-        S_FW --> S_A2["保存 act_2"]
-        S_FW --> S_A3["保存 act_3"]
-        S_FW --> S_A4["保存 act_4"]
-        S_A1 --> S_BW["反向传播\n直接使用保存值"]
-        S_A2 --> S_BW
-        S_A3 --> S_BW
-        S_A4 --> S_BW
-        S_MEM["GPU 内存 - O(N) 层"]
-    end
-
-    subgraph checkpoint["梯度检查点 - 仅保存输入"]
-        direction TB
-        C_FW["前向传播\n(no_grad 下执行)"] --> C_IN["仅保存输入"]
-        C_IN --> C_BW["反向传播时\n重新前向计算"]
-        C_BW --> C_A1["重算 act_1"]
-        C_BW --> C_A2["重算 act_2"]
-        C_BW --> C_A3["重算 act_3"]
-        C_BW --> C_A4["重算 act_4"]
-        C_MEM["GPU 内存 - O(1)"]
-    end
-
-    style S_MEM fill:#ffcdd2,stroke:#e53935
-    style C_MEM fill:#c8e6c9,stroke:#43a047
-    style standard fill:#fff3e0,stroke:#ff9800
-    style checkpoint fill:#e8f5e9,stroke:#4caf50
-```
+{{< trace >}}
+title: "检查点何时重新执行前向"
+actors: ["前向", "检查点", "反向", "重算"]
+steps:
+  - from: 0
+    to: 1
+    label: "运行区段"
+    detail: "以 checkpoint(f, x, use_reentrant=False) 为例，保留随后能够重建计算所需的输入。"
+  - from: 1
+    to: 2
+    label: "跨过区段"
+    detail: "正常前向继续执行；区段中一部分供反向使用的激活无需一直驻留。"
+  - from: 2
+    to: 3
+    label: "请求中间值"
+    detail: "反向计算需要缺失的中间结果时，从保存的输入重新执行相应操作。"
+  - from: 3
+    to: 2
+    label: "交付激活"
+    detail: "非重入实现可以在所需中间量已经重建时停止重算，反向继续计算输入梯度。"
+{{< /trace >}}
 
 **内存复杂度对比**：
 
@@ -451,7 +434,7 @@ class CheckpointPolicy(enum.Enum):
 
 ### 4.1 功能概述
 
-异常检测模式（`torch.autograd.detect_anomaly`）是强大的调试工具，定义在 `torch/autograd/anomaly_mode.py`：
+反向传播报错时，`torch.autograd.detect_anomaly` 可以打印对应的前向调用栈。入口在 `torch/autograd/anomaly_mode.py`：
 
 ```python
 # torch/autograd/anomaly_mode.py
@@ -640,7 +623,7 @@ PyTorch 的张量保存与恢复机制形成了一个完整的层次体系：
 3. **Gradient Checkpointing**：高层策略，以重算代替存储
 4. **Anomaly Detection**：调试工具，追踪异常梯度的来源
 
-理解这些机制，对于训练大规模模型时的显存优化和调试异常梯度问题至关重要。
+
 
 **关键源码文件**：
 

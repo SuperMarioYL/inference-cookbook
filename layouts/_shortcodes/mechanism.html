@@ -1,0 +1,18 @@
+{{- $name := .Get 0 -}}
+{{- $id := printf "%s-%d" $name .Ordinal -}}
+{{- $src := printf "images/mechanisms/%s.svg" $name -}}
+{{- with resources.Get $src -}}
+  {{- $steps := findRESubmatch `(?s)<g data-frame="[0-9]+"[^>]*>\s*<title>([^<]+)</title>\s*<desc>([^<]+)</desc>` .Content -}}
+  {{- if not $steps }}{{ errorf "No described steps in %s" $src }}{{ end -}}
+  <figure id="fig-{{ $name }}" class="mechanism" data-mechanism>
+    {{ partial "inline-svg" (dict "src" $src "id" $id "class" "svg-inline-custom" "aria-labelledby" (printf "%s-title" $name)) }}
+    <figcaption>
+      {{- $captions := slice -}}
+      {{- range $steps }}{{ $captions = $captions | append (dict "title" (index . 1 | htmlUnescape) "detail" (index . 2 | htmlUnescape)) }}{{ end -}}
+      {{ partial "figures/controls.html" $captions }}
+    </figcaption>
+  </figure>
+  {{- $.Page.Store.Set "hasMechanism" true -}}
+{{- else -}}
+  {{- errorf "Missing mechanism %s in %s" $name $.Page.Path -}}
+{{- end -}}

@@ -3,11 +3,7 @@ title: "内存分配器实现解析"
 weight: 4
 ---
 
-[上一篇](03-eviction-and-ha.md) | [目录](../README.md) | [下一篇](05-segment-replica.md)
-
-# 内存分配器实现解析
-
-本章深入分析 Mooncake Store 的内存分配器实现，包括 CacheLib 和 Offset 两种分配策略。
+写入方申请一段连续空间时，Store 可以从不同 allocator 中选择。CacheLib 和 offset 分配器对大小分级、空闲片段及回收的处理各有侧重。
 
 ## 15.1 分配器架构设计
 
@@ -362,7 +358,3 @@ flowchart TD
     style CacheLib fill:#90EE90
     style Offset fill:#87CEEB
 ```
-
----
-
-[上一篇](03-eviction-and-ha.md) | [目录](../README.md) | [下一篇](05-segment-replica.md)

@@ -77,48 +77,11 @@ $$
 
 ### 2.4 分块计算示意图
 
-```mermaid
-graph TB
-    subgraph qmatrix["Q 矩阵 (N x d)"]
-        Q1["Q_1 (B_r x d)"]
-        Q2["Q_2 (B_r x d)"]
-        Q3["..."]
-        QTr["Q_Tr (B_r x d)"]
-    end
+观察 Q 的同一个行块：每读入一对 K/V 块，只更新这两行的统计量与输出累加器。
 
-    subgraph kvmatrix["K, V 矩阵 (N x d)"]
-        KV1["K_1, V_1 (B_c x d)"]
-        KV2["K_2, V_2 (B_c x d)"]
-        KV3["..."]
-        KVTc["K_Tc, V_Tc (B_c x d)"]
-    end
+{{< mechanism "fa-tile-scan" >}}
 
-    subgraph sram["SRAM - 片上计算"]
-        LOAD_Q["加载 Q_i 到 SRAM"]
-        LOAD_KV["依次加载 K_j, V_j"]
-        COMPUTE["计算 S_ij = Q_i * K_j^T"]
-        SOFTMAX["局部 Softmax + 在线更新"]
-        ACCUM["累加 O_i += P_ij * V_j"]
-    end
-
-    subgraph hbm["HBM - 高带宽显存"]
-        OUTPUT["写回 O_i 到 HBM"]
-    end
-
-    Q1 -->|"一次加载"| LOAD_Q
-    Q2 -->|"一次加载"| LOAD_Q
-    KV1 -->|"逐块流式加载"| LOAD_KV
-    KV2 -->|"逐块流式加载"| LOAD_KV
-    KVTc -->|"逐块流式加载"| LOAD_KV
-
-    LOAD_Q --> COMPUTE
-    LOAD_KV --> COMPUTE
-    COMPUTE --> SOFTMAX
-    SOFTMAX --> ACCUM
-    ACCUM -->|"所有 K,V 块遍历完"| OUTPUT
-```
-
-上图展示了分块计算的核心流程：Q 块加载一次后固定在 SRAM 中，然后逐块流式加载 K、V 块，在 SRAM 中完成局部注意力分数的计算和累加，最终只将结果 $O_i$ 写回 HBM。
+这个 Q-outer 示例中，每个 Q 行块只需为自己保存最大值、指数和和向量累加器。训练时还可写出 LSE 供反向重建概率。
 
 ---
 
@@ -327,7 +290,7 @@ graph LR
     CJ_5 -->|"所有块处理完毕"| F1
 ```
 
-上图展示了 Online Softmax 的核心流程：状态 $(m, l, O)$ 在处理每个 K/V 块时进行增量更新，每次更新都通过指数校正因子 $\exp(m_{\text{old}} - m_{\text{new}})$ 将历史累积量对齐到最新的最大值，最终一次性归一化得到精确结果。
+每加入一个 K/V 块，状态 $(m, l, O)$ 都要更新。指数校正因子 $\exp(m_{\text{old}} - m_{\text{new}})$ 把历史累积量换到新的最大值尺度，行末再归一化。
 
 ---
 
@@ -509,68 +472,17 @@ IO 复杂度是 Flash Attention 的理论核心之一。在 memory-bound 的运�
 
 当 $N \gg d$ 时（通常 $N = 1024 \sim 65536$，$d = 64 \sim 128$），主导项为 $\Theta(N^2)$。
 
-### 6.2 Flash Attention 的 IO 复杂度
+### 6.2 分块后仍有重复读取
 
-**定理**：设 SRAM 大小为 $M$，且 $M \geq 2d$ 和 $d \leq M$，则 Flash Attention 的 HBM 访问次数为：
+FA1 的定理 2 使用 $d \le M \le Nd$ 的两级存储模型，其中 $M$ 按标量个数计量。算法以 K/V 块为外层，列块宽度 $B_c=\Theta(M/d)$。K/V 总读取量为 $\Theta(Nd)$，每个列块还需要通读 Q 和当前行统计、部分输出；列块数约为 $N/B_c$。总计 $\Theta(Nd+Nd\lceil N/B_c\rceil)=\Theta(N^2d^2/M)$ 次 HBM 元素访问。[FA1 论文，定理 2](https://arxiv.org/abs/2205.14135)
 
-$$
-\Theta\left(\frac{N^2 d^2}{M}\right)
-$$
+### 6.3 额外存储与 IO 下界
 
-**证明**：
+当 $M=\Theta(Nd)$，片上容量与一整张序列乘头维矩阵同阶，上式才与仅读写输入、输出的 $\Theta(Nd)$ 同阶。现实中通常只能装下一个 tile：局部分数用完就可丢弃，仍需为其他 tile 再次搬运部分 Q/K/V。顺序不同的内核会重复读取不同的张量。
 
-外层循环遍历 $T_r = \lceil N / B_r \rceil$ 个 Q 块。对于每个 Q 块 $Q_i$：
+### 6.4 如何比较性能
 
-1. **读取 $Q_i$**：$B_r \cdot d$ 次 HBM 读取
-2. **内层循环**：遍历 $T_c = \lceil N / B_c \rceil$ 个 K/V 块
-   - 每次读取 $K_j$：$B_c \cdot d$ 次 HBM 读取
-   - 每次读取 $V_j$：$B_c \cdot d$ 次 HBM 读取
-   - 内层循环总读取：$T_c \cdot 2 B_c d = N / B_c \cdot 2 B_c d = 2Nd$
-3. **写回 $O_i$**：$B_r \cdot d$ 次 HBM 写入
-
-每个 Q 块的总 HBM 访问：$B_r d + 2Nd + B_r d = 2B_r d + 2Nd$
-
-所有 Q 块的总 HBM 访问：
-
-$$
-T_r \cdot (2B_r d + 2Nd) = \frac{N}{B_r} \cdot (2B_r d + 2Nd) = 2Nd + \frac{2N^2 d}{B_r}
-$$
-
-取 $B_r = \Theta(M / d)$（在满足 SRAM 约束的前提下），代入得：
-
-$$
-\text{HBM accesses} = 2Nd + \frac{2N^2 d}{M/d} = 2Nd + \frac{2N^2 d^2}{M} = \Theta\left(\frac{N^2 d^2}{M}\right)
-$$
-
-（当 $N^2 d^2 / M$ 主导 $Nd$ 项时，即 $Nd / M > 1$，通常成立。）
-
-### 6.3 最优性分析
-
-当 SRAM 大小 $M = \Theta(Nd)$ 时（即 SRAM 能容纳一整行的 Q 或 K/V）：
-
-$$
-\text{HBM accesses} = \Theta\left(\frac{N^2 d^2}{Nd}\right) = \Theta(Nd)
-$$
-
-这与仅读写输入输出矩阵 Q, K, V, O 所需的 $\Theta(Nd)$ 次访问相同，即 **达到了 IO 复杂度的下界**。
-
-### 6.4 加速比的直觉理解
-
-Flash Attention 相对标准 Attention 的 HBM 访问减少倍数为：
-
-$$
-\text{加速比} = \frac{\Theta(Nd + N^2)}{\Theta(N^2 d^2 / M)} \approx \frac{N^2}{N^2 d^2 / M} = \frac{M}{d^2}
-$$
-
-对于 A100 GPU（$M = 192$ KB $\approx 10^5$ 元素，$d = 64$）：
-
-$$
-\text{加速比} \approx \frac{10^5}{64^2} \approx 24\text{x}
-$$
-
-实际测量中，Flash Attention 通常实现 2-4 倍的壁钟时间加速（因为还有计算和其他开销的影响）。
-
----
+当 $N \gg d$ 时，两种访问复杂度的主导项之比随 $M/d^2$ 变化。这是渐近比较；常数、缓存命中和实际 tile 均未计入，无法从这个比值换算出延迟倍数。[用 FP16 数字区分存储与传输](/flashattention/01-theory/02-io-awareness/)
 
 ## 7. Flash Attention v1 vs v2 的关键改进
 
@@ -657,52 +569,33 @@ Flash Attention v2 对 GPU warp 的工作进行了更精细的划分：
 
 ### 7.6 v1 与 v2 架构对比
 
-```mermaid
-graph TB
-    subgraph v1["Flash Attention v1"]
-        direction TB
-        V1_OUTER["外层循环 - 遍历 K,V 块 (j=1..Tc)"]
-        V1_INNER["内层循环 - 遍历 Q 块 (i=1..Tr)"]
-        V1_LOAD["每次内层迭代 - 从 HBM 加载 O_i, m_i, l_i"]
-        V1_COMPUTE["计算并更新 O_i"]
-        V1_WRITE["每次内层迭代 - 写回 O_i, m_i, l_i 到 HBM"]
-        V1_PARALLEL["并行度 - B x h"]
-
-        V1_OUTER --> V1_INNER
-        V1_INNER --> V1_LOAD
-        V1_LOAD --> V1_COMPUTE
-        V1_COMPUTE --> V1_WRITE
-        V1_WRITE -->|"下一个 Q 块"| V1_INNER
-        V1_INNER -->|"下一个 KV 块"| V1_OUTER
-        V1_OUTER --> V1_PARALLEL
-    end
-
-    subgraph v2["Flash Attention v2"]
-        direction TB
-        V2_OUTER["外层循环 - 遍历 Q 块 (i=1..Tr)"]
-        V2_LOAD_Q["加载 Q_i, 初始化 O_i, m_i, l_i 在 SRAM"]
-        V2_INNER["内层循环 - 遍历 K,V 块 (j=1..Tc)"]
-        V2_COMPUTE["在 SRAM 中计算并更新 (无 HBM 读写)"]
-        V2_WRITE["内层循环结束后写回 O_i"]
-        V2_PARALLEL["并行度 - B x h x Tr"]
-
-        V2_OUTER --> V2_LOAD_Q
-        V2_LOAD_Q --> V2_INNER
-        V2_INNER --> V2_COMPUTE
-        V2_COMPUTE -->|"下一个 KV 块"| V2_INNER
-        V2_INNER -->|"所有 KV 块处理完毕"| V2_WRITE
-        V2_WRITE -->|"下一个 Q 块"| V2_OUTER
-        V2_OUTER --> V2_PARALLEL
-    end
-
-    v1 -->|"核心改进 - 循环顺序调换"| v2
-```
+{{< stateboard >}}
+title: "循环次序决定哪一块驻留"
+rows: ["当前 Q", "当前 KV", "保留或回写"]
+steps:
+  - title: "FA1 先读 KV0"
+    detail: "原始 FA1 算法把 KV0 装入片上，依次更新 Q0、Q1 对应的部分输出。"
+    cells: [["Q0 → Q1"], ["KV0"], ["回写 O"]]
+    focus: [[1, 0]]
+  - title: "FA1 再读 KV1"
+    detail: "再次更新相同的 Q 块时，取回部分输出与归一化统计量。"
+    cells: [["Q0 → Q1"], ["KV1"], ["读回 O"]]
+    focus: [[1, 0], [2, 0]]
+  - title: "FA2 固定 Q0"
+    detail: "FA2 前向将 Q 行块分给独立线程块。固定 Q0 后迭代 KV0、KV1，在片上累计 O0。"
+    cells: [["Q0"], ["KV0 → KV1"], ["保留 O0"]]
+    focus: [[0, 0], [2, 0]]
+  - title: "FA2 写回这一行块"
+    detail: "遍历完 Q0 可见的 KV 块，完成归一化并写回 O0。"
+    cells: [["Q0"], ["结束"], ["写回 O0"]]
+    focus: [[2, 0]]
+{{< /stateboard >}}
 
 ---
 
 ## 总结
 
-Flash Attention 的理论基础可以概括为三个核心支柱：
+把结果、存储和传输分别计量：
 
 1. **分块策略（Tiling）**：将 $N \times N$ 的注意力计算拆解为 $B_r \times B_c$ 的小块，使所有中间数据可以驻留在 GPU SRAM 中。
 
@@ -728,6 +621,6 @@ Flash Attention v2 在此基础上，通过调换循环顺序、减少非矩阵�
 
 ## 导航
 
-- 上一篇：[IO-Awareness 分析](02-io-awareness.md)
-- 下一篇：[Online Softmax 深度解析](../02-core-algorithm/01-online-softmax.md)
-- [返回目录](../README.md)
+- 上一篇：[IO-Awareness 分析](/flashattention/01-theory/02-io-awareness/)
+- 下一篇：[Online Softmax 深度解析](/flashattention/02-core-algorithm/01-online-softmax/)
+- [返回目录](/flashattention/00-overview/overview/)

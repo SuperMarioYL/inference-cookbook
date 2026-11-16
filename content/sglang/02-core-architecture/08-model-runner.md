@@ -3,20 +3,9 @@ title: "ModelRunner"
 weight: 5
 ---
 
-## 概述
+## 从一个调度批次找到设备输入
 
-### 本章学习目标
-- 理解 ModelRunner 的职责和初始化流程
-- 掌握 ForwardBatch 数据结构
-- 了解前向计算的执行流程
-- 学习 CUDA Graph 优化机制
-
-### 前置知识要求
-- 了解 PyTorch 模型执行
-- 熟悉 CUDA 编程基础
-- 理解 KV Cache 概念
-
----
+先确认 Scheduler 选择的前向模式、请求数和本轮新增 token 数，再看 ModelRunner 怎样准备本轮输入与缓存位置。CUDA Graph 在新版区分 decode 与 prefill runner，下面的通用前向和捕获步骤按教学控制流阅读。 [0.5.23 ModelRunner](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/model_executor/model_runner.py)
 
 ## ModelRunner 职责
 
@@ -196,21 +185,27 @@ class ForwardMode(IntEnum):
 
 ### 构建流程
 
-```mermaid
-graph TB
-    subgraph build["ForwardBatch 构建"]
-        MW["ModelWorkerBatch"]
-        INIT["ForwardBatch.init_new"]
-        POS["计算位置"]
-        LORA["LoRA 准备"]
-        FB["ForwardBatch"]
-
-        MW --> INIT
-        INIT --> POS
-        POS --> LORA
-        LORA --> FB
-    end
-```
+{{< trace >}}
+title: 从两条请求组装一次设备输入
+actors: ["调度批", "元数据", "ModelRunner"]
+steps:
+  - from: 0
+    to: 1
+    label: "选出 A 与 B"
+    detail: "A、B 各有一个待执行位置。"
+  - from: 1
+    to: 1
+    label: "保留请求映射"
+    detail: "每条输入都带着自己的位置、序列长度和 KV 索引。"
+  - from: 1
+    to: 2
+    label: "构造 ForwardBatch"
+    detail: "runner 得到与前向模式相符的输入张量和元数据。"
+  - from: 2
+    to: 2
+    label: "执行并分回"
+    detail: "模型一次执行两条输入，结果按原先的请求映射写回。"
+{{< /trace >}}
 
 ```python
 @classmethod
@@ -358,10 +353,11 @@ def forward_extend(self, forward_batch: ForwardBatch, ...):
 
 ### CudaGraphRunner 结构
 
-**关键文件**：`python/sglang/srt/model_executor/cuda_graph_runner.py`
+**关键文件**：`python/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py`
 
 ```python
-class CudaGraphRunner:
+# 教学示意，实际解码图由 DecodeCudaGraphRunner 组织。
+class GraphReplayExample:
     def __init__(self, model_runner: ModelRunner):
         # 批次大小列表
         self.capture_bs: List[int]
@@ -443,17 +439,27 @@ def capture_one_batch_size(self, bs: int, forward: Callable):
 
 ### 重放流程
 
-```mermaid
-graph TB
-    subgraph replay["CUDA Graph 重放"]
-        PREPARE["准备输入"]
-        COPY["复制到缓冲区"]
-        REPLAY["重放图"]
-        EXTRACT["提取输出"]
-
-        PREPARE --> COPY --> REPLAY --> EXTRACT
-    end
-```
+{{< trace >}}
+title: 已有图怎样执行一组新输入
+actors: ["调度器", "ModelRunner", "设备图"]
+steps:
+  - from: 0
+    to: 1
+    label: "送入批次"
+    detail: "本轮有两个请求，各提交一个新位置。"
+  - from: 1
+    to: 1
+    label: "匹配图形状"
+    detail: "runner 根据模式和批大小选择已捕获的图，并准备对应缓冲。"
+  - from: 1
+    to: 2
+    label: "重放"
+    detail: "设备读取这次写入缓冲的 token、长度和位置，运行录制好的计算。"
+  - from: 2
+    to: 1
+    label: "取回结果"
+    detail: "runner 把这次的输出关联到实际请求，padding 位置不会提交给客户端。"
+{{< /trace >}}
 
 ```python
 def replay(self, forward_batch: ForwardBatch, ...):
@@ -662,27 +668,11 @@ graph LR
 
 ---
 
-## 小结
-
-### 要点回顾
-
-1. **初始化**：分布式环境 → 模型加载 → 内存池 → 注意力后端 → CUDA Graph
-2. **ForwardBatch**：封装前向计算所需的所有信息
-3. **前向计算**：优先使用 CUDA Graph，否则动态执行
-4. **CUDA Graph**：捕获 → 缓冲区填充 → 重放
-
-### 关键代码文件
+## 模型执行源码索引
 
 | 文件 | 职责 |
 |------|------|
 | `model_runner.py` | 核心执行器 |
 | `forward_batch_info.py` | ForwardBatch 定义 |
-| `cuda_graph_runner.py` | CUDA Graph 管理 |
+| `python/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py` | CUDA Graph 管理 |
 | `input_buffers.py` | 缓冲区管理 |
-
-### 下一章预告
-
-在模块三《内存与缓存篇》中，我们将：
-- 深入理解 KV Cache 原理
-- 学习 RadixAttention 机制
-- 掌握内存池设计

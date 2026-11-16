@@ -3,8 +3,6 @@ title: "Module 07 - MooncakeBackend 深度解析"
 weight: 2
 ---
 
-# Module 07 - MooncakeBackend 深度解析
-
 ## 1. 概述
 
 MooncakeBackend 是一个完整的 PyTorch c10d 分布式通信后端实现,可以替代 NCCL 和 Gloo,为 MoE 推理场景提供容错集合通信能力。它基于 Mooncake Transfer Engine 构建,通过 RDMA 实现高效的跨节点数据传输,同时内置了节点故障检测与恢复机制。
@@ -194,44 +192,27 @@ c10::intrusive_ptr<c10d::Work> MooncakeBackend::alltoall(
 
 点对点操作(send/recv)使用独立的 Worker 线程实现,与集合操作的 Worker 解耦:
 
-```mermaid
-graph TB
-    subgraph user_thread["用户线程"]
-        A["dist.send(tensor, dst)"]
-        B["dist.recv(tensor, src)"]
-    end
-
-    subgraph send_path["Send 路径"]
-        C["p2pSendQueue_"]
-        D["P2P Send Worker Thread"]
-        E["processSendOp()"]
-    end
-
-    subgraph recv_path["Recv 路径"]
-        F["p2pRecvQueue_"]
-        G["P2P Recv Worker Thread"]
-        H["processRecvOp()"]
-    end
-
-    subgraph transport["传输层"]
-        I["Transfer Engine RDMA Write"]
-        J["c10d::Store 元数据同步"]
-    end
-
-    A --> C
-    C --> D
-    D --> E
-    E --> I
-    E --> J
-
-    B --> F
-    F --> G
-    G --> H
-    H --> J
-
-    A -.->|"返回 MooncakeP2PWork"| A
-    B -.->|"返回 MooncakeP2PWork"| B
-```
+{{< trace >}}
+title: "PyTorch 的异步 P2P 工作何时结束"
+actors: ["调用线程", "发送队列", "工作线程", "对端"]
+steps:
+  - from: 0
+    to: 1
+    label: "登记操作"
+    detail: "发送调用创建对应的工作项，并交给发送队列。"
+  - from: 1
+    to: 2
+    label: "取出任务"
+    detail: "后台线程与对端准备本次传输的缓冲和匹配信息。"
+  - from: 2
+    to: 3
+    label: "传输数据"
+    detail: "Transfer Engine 按目标地址执行数据移动。"
+  - from: 2
+    to: 0
+    label: "通知完成"
+    detail: "工作句柄反映此次操作的结果，等待方由此推进。"
+{{< /trace >}}
 
 ### 4.2 MooncakeP2PWork - 异步完成追踪
 
@@ -626,13 +607,11 @@ void MooncakeBackend::shutdown() {
 
 | 文件 | 路径 | 说明 |
 |------|------|------|
-| Backend 实现 | `mooncake-ep/src/mooncake_backend.cpp` | 集合操作、P2P、连接管理的完整实现 |
-| Backend 头文件 | `mooncake-ep/include/mooncake_backend.h` | 类声明、P2P 操作结构体、成员变量 |
-| Worker 定义 | `mooncake-ep/include/mooncake_worker.cuh` | MooncakeWorker、TransferGroupMeta、Task |
-| Python API 参考 | `docs/source/python-api-reference/ep-backend.md` | 用户面向的 API 文档 |
+| Backend 实现 | `mooncake-pg/torch/src/mooncake_backend.cpp` | 集合操作、P2P、连接管理的完整实现 |
+| Backend 头文件 | `mooncake-pg/torch/include/mooncake_backend.h` | 类声明、P2P 操作结构体、成员变量 |
+| Worker 定义 | `mooncake-pg/include/mooncake_worker.cuh` | MooncakeWorker、TransferGroupMeta、Task |
+| Python API 参考 | `docs/source/api-reference/python/ep-backend.md` | 用户面向的 API 文档 |
 
 ---
 
-> **上一篇**: [01-overview.md](01-overview.md) - Expert Parallelism 模块概览
 >
-> **下一篇**: [03-ibgda-kernel.md](03-ibgda-kernel.md) - IBGDA CUDA Kernel 深度解析

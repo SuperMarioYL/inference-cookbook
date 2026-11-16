@@ -12,8 +12,6 @@ Engine 的核心源码位于：
 - `torch/csrc/autograd/engine.cpp` - 引擎实现
 - `torch/csrc/autograd/graph_task.h` - 图任务定义
 
-本文将从整体架构到执行细节，深入剖析 Engine 的工作原理。
-
 ## 2. 核心数据结构全景
 
 在深入执行流程之前，先认识四个核心数据结构：
@@ -510,42 +508,27 @@ for (const auto i : c10::irange(num_outputs)) {
 
 ### 8.5 反向传播序列图
 
-```mermaid
-sequenceDiagram
-    participant Py as Python
-    participant Eng as Engine
-    participant GT as GraphTask
-    participant RQ as ReadyQueue
-    participant Node as Node.apply()
-
-    Py->>Eng: loss.backward()
-    Eng->>Eng: validate_outputs()
-    Eng->>GT: 创建 GraphTask(keep_graph, grad_mode)
-    Eng->>Eng: compute_dependencies() BFS 遍历
-    Eng->>RQ: push(NodeTask(GraphRoot))
-    Note over GT: outstanding_tasks_ = 1
-
-    loop thread_main 循环
-        RQ->>Eng: pop() 取最高优先级任务
-        Eng->>Node: evaluate_function() -> call_function()
-        Node->>Node: pre_hooks -> apply(inputs) -> post_hooks
-        Node-->>Eng: 返回 output gradients
-        Eng->>GT: 更新 dependencies_, not_ready_
-        alt 下游节点就绪
-            Eng->>RQ: push(NodeTask(next_node))
-            Note over GT: outstanding_tasks_++
-        else 下游节点未就绪
-            Eng->>GT: 存入 not_ready_[node] InputBuffer
-        end
-        Note over GT: outstanding_tasks_--
-        alt outstanding_tasks_ == 0
-            GT->>GT: mark_as_completed_and_run_post_processing()
-            GT->>Py: future_result_.markCompleted()
-        end
-    end
-
-    Py->>Py: 读取叶子张量的 .grad
-```
+{{< stateboard >}}
+title: "两个分支何时可以共同反传"
+rows: ["分支 A", "分支 B", "共享输入"]
+steps:
+  - title: "两条贡献都未到"
+    detail: "令 u=2x，输出 y=u²+3u，在 x=1 处计算梯度。反向需要合并两条通往 u 的贡献。"
+    cells: [["待算", "·"], ["待算", "·"], ["待到", "2 项"]]
+    focus: [[2, 0]]
+  - title: "收到平方分支"
+    detail: "按本例示意的执行顺序，平方项首先给出 du=2u=4。共享节点继续等待另一项。"
+    cells: [["完成", "4"], ["待算", "·"], ["已到", "1 项"]]
+    focus: [[0, 1], [2, 1]]
+  - title: "收到线性分支"
+    detail: "3u 给出 du=3，两条贡献相加后为 7，节点可以进入就绪队列。"
+    cells: [["完成", "4"], ["完成", "3"], ["就绪", "7"]]
+    focus: [[1, 1], [2, 1]]
+  - title: "共享节点执行"
+    detail: "u=2x，把 7 乘以局部导数 2，得到 dx=14。实际两个分支的先后顺序可互换。"
+    cells: [["完成", "4"], ["完成", "3"], ["dx", "14"]]
+    focus: [[2, 1]]
+{{< /stateboard >}}
 
 ## 9. 重入反向传播 (Reentrant Backward)
 

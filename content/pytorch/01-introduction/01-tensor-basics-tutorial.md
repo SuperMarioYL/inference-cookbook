@@ -3,7 +3,7 @@ title: "Tensor 基础教程"
 weight: 1
 ---
 
-> 本文面向 PyTorch 初学者，从零开始介绍 Tensor 的核心概念、创建方式、关键属性以及内存布局原理。
+用六个相邻的数排成一个 `2 × 3` 的矩阵。把它转置，再比较形状、stride 和底层指针，可以观察到同一段内存的两种读法。
 
 ---
 
@@ -214,38 +214,11 @@ print(t.data_ptr() == s.storage().data_ptr())  # True -- 共享同一块内存
 
 ## 5. Tensor 内存布局图
 
-下面的图展示了一个 `shape=(2, 3)` 的二维 Tensor 如何映射到一维的底层 Storage 上：
+六个数按行连续存储。转置交换两条轴的 stride，读取同一个物理元素时，它在 Storage 中的位置保持不变。
 
-```mermaid
-flowchart LR
-    subgraph tensor_view["Tensor 视图 - shape(2,3), stride(3,1)"]
-        direction TB
-        R0["行 0: t[0,0]=1  t[0,1]=2  t[0,2]=3"]
-        R1["行 1: t[1,0]=4  t[1,1]=5  t[1,2]=6"]
-    end
+{{< mechanism "torch-strides" >}}
 
-    subgraph storage["底层 Storage - 连续一维内存"]
-        direction LR
-        S0["[0] 1"]
-        S1["[1] 2"]
-        S2["[2] 3"]
-        S3["[3] 4"]
-        S4["[4] 5"]
-        S5["[5] 6"]
-    end
-
-    R0 -->|"storage_offset=0, stride[0]=3"| S0
-    R0 -->|"stride[1]=1"| S1
-    R0 -->|"stride[1]=1"| S2
-    R1 -->|"0 + 1*3 = 3"| S3
-    R1 -->|"0 + 1*3 + 1 = 4"| S4
-    R1 -->|"0 + 1*3 + 2 = 5"| S5
-
-    style tensor_view fill:#E8F4FD,stroke:#2196F3,stroke-width:2px
-    style storage fill:#FFF3E0,stroke:#FF9800,stroke-width:2px
-```
-
-> 地址计算公式: `address(t[i][j]) = storage_offset + i * stride[0] + j * stride[1]`
+元素偏移为 `storage_offset + i * stride[0] + j * stride[1]`。换算字节地址时，用偏移乘 `element_size()`，再加底层存储的起始地址。
 
 ---
 
@@ -305,37 +278,25 @@ print(c1.data_ptr() == t.data_ptr())  # False -- 不同的内存
 
 ### 6.3 View 共享关系图
 
-下面的图展示了多个 Tensor 视图如何共享同一块底层 Storage：
+令 `t=torch.arange(4)`，比较切片 `v=t[1:3]` 和它的副本 `c=v.clone()`。
 
-```mermaid
-flowchart TB
-    subgraph storage["共享 Storage - 12 个元素"]
-        MEM["[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]"]
-    end
-
-    subgraph views["多个 Tensor 视图"]
-        T["t: shape(3,4), stride(4,1), offset=0"]
-        V1["v1 = t.view(4,3): shape(4,3), stride(3,1), offset=0"]
-        V2["v2 = t[1:]: shape(2,4), stride(4,1), offset=4"]
-        V3["v3 = t.t(): shape(4,3), stride(1,4), offset=0"]
-    end
-
-    T -->|"共享内存"| MEM
-    V1 -->|"共享内存"| MEM
-    V2 -->|"offset=4"| MEM
-    V3 -->|"stride 变化"| MEM
-
-    subgraph copy_storage["独立 Storage - clone 副本"]
-        MEM2["[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]"]
-    end
-
-    C["c = t.clone(): shape(3,4), stride(4,1), offset=0"]
-    C -->|"独立内存"| MEM2
-
-    style storage fill:#E8F4FD,stroke:#2196F3,stroke-width:2px
-    style views fill:#F3E5F5,stroke:#9C27B0,stroke-width:2px
-    style copy_storage fill:#FFF3E0,stroke:#FF9800,stroke-width:2px
-```
+{{< stateboard >}}
+title: "视图写入如何影响原张量"
+rows: ["存储 0–3", "切片 v", "副本 c"]
+steps:
+  - title: "切片从偏移 1 开始"
+    detail: "t 含四个连续元素，v=t[1:3] 读取中间两个位置。"
+    cells: [["0", "1", "2", "3"], ["·", "1", "2", "·"], ["·", "·", "·", "·"]]
+    focus: [[1, 1], [1, 2]]
+  - title: "复制切片"
+    detail: "c=v.clone() 创建独立存储，复制时两个值均与 v 相同。"
+    cells: [["0", "1", "2", "3"], ["·", "1", "2", "·"], ["·", "1", "2", "·"]]
+    focus: [[2, 1], [2, 2]]
+  - title: "改写 v[0]"
+    detail: "写入 9 后，t[1] 和 v[0] 同时变为 9；副本 c[0] 保留 1。"
+    cells: [["0", "9", "2", "3"], ["·", "9", "2", "·"], ["·", "1", "2", "·"]]
+    focus: [[0, 1], [1, 1]]
+{{< /stateboard >}}
 
 ---
 
@@ -397,8 +358,8 @@ print(f"\n修改 t[1,0]=99 后, s[0,0] = {s[0, 0]}")  # tensor(99)
 | View | 视图 | 共享 Storage，不同的 shape/stride/offset |
 | Copy | 副本 | 独立的 Storage，数据互不影响 |
 
-理解了这些基础概念之后，你就具备了阅读 PyTorch C++ 源码（TensorImpl、StorageImpl 等）的前置知识。在下一篇文章中，我们将深入 `TensorImpl` 的 C++ 实现，看看这些概念在底层是如何表达的。
+
 
 ---
 
-> **下一篇**: [TensorImpl 深度解析 - Tensor 的 C++ 实现](./01-tensorimpl-deep-dive.md)
+> **下一篇**: [TensorImpl 深度解析 - Tensor 的 C++ 实现](/pytorch/02-fundamentals/01-tensorimpl-deep-dive/)

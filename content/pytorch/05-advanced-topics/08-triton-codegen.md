@@ -64,31 +64,27 @@ def {name}({self.args.signature()}):
 
 ### 主流程
 
-```mermaid
-sequenceDiagram
-    participant Scheduler
-    participant TritonScheduling
-    participant TritonKernel
-    participant Output
-
-    Scheduler->>TritonScheduling: FusedSchedulerNode
-    TritonScheduling->>TritonKernel: 创建 Kernel
-
-    loop 每个 Node
-        TritonScheduling->>TritonKernel: codegen_node()
-    end
-
-    TritonKernel->>TritonKernel: indexing()
-    Note over TritonKernel: 生成索引代码
-
-    TritonKernel->>TritonKernel: codegen_body()
-    Note over TritonKernel: 生成计算代码
-
-    TritonKernel->>TritonKernel: store_output()
-    Note over TritonKernel: 生成存储代码
-
-    TritonKernel->>Output: 完整 Triton 代码
-```
+{{< trace >}}
+title: "把一次融合逐元素操作写成 kernel"
+actors: ["调度节点", "索引", "Triton 内核", "输出"]
+steps:
+  - from: 0
+    to: 1
+    label: "确定迭代域"
+    detail: "令 out[i]=a[i]*2+b[i]，三个张量在该维连续，长度为 N。"
+  - from: 1
+    to: 2
+    label: "生成分块地址"
+    detail: "每个 program 构造一组 i。末块对 i<N 加 mask，保证读写保持在有效范围。"
+  - from: 2
+    to: 2
+    label: "读取并计算"
+    detail: "同一内核加载 a 和 b，计算乘加，中间乘积留在内核内。"
+  - from: 2
+    to: 3
+    label: "写入 out"
+    detail: "每个有效 i 写一次 out[i]，末块超出范围的 lane 不写。"
+{{< /trace >}}
 
 ---
 
@@ -479,8 +475,8 @@ for i in range(0, N, BLOCK):
 
 ## 13. 下一步
 
-- **[C++ 代码生成](./05-cpp-codegen.md)**: CPU 后端的代码生成
-- **[Inductor 调试](./06-inductor-debug.md)**: 调试技巧与常见问题
+- **[C++ 代码生成](https://github.com/pytorch/pytorch/blob/v2.15.0/torch/_inductor/codegen/cpp.py)**: CPU 后端的代码生成
+- **[Inductor 调试](https://docs.pytorch.org/docs/2.15/user_guide/torch_compiler/torch.compiler_troubleshooting.html)**: 调试技巧与常见问题
 
 ---
 
@@ -488,7 +484,7 @@ for i in range(0, N, BLOCK):
 
 | 组件 | 职责 | 关键文件 |
 |------|------|---------|
-| **TritonKernel** | 代码生成核心 | `codegen/triton.py` |
+| **TritonKernel** | 代码生成核心 | `torch/_inductor/codegen/triton.py` |
 | **indexing** | 索引计算 | `TritonKernel.indexing()` |
 | **codegen_body** | 计算逻辑 | `TritonKernel.codegen_body()` |
 | **Autotuning** | 配置搜索 | `select_algorithm.py` |

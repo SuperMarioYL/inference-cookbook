@@ -55,7 +55,7 @@ PyTorch 的算子分发系统核心，根据 DispatchKey 选择正确的算子�
 Tensor 元素的数据类型，如 `float32`、`int64`、`bfloat16`。
 
 ### Dynamo（TorchDynamo）
-PyTorch 2.0 的图捕获引擎，通过拦截 Python 字节码动态追踪模型执行。
+PyTorch 编译栈的图捕获前端，通过拦截 Python 字节码动态追踪模型执行。
 
 ## E
 
@@ -95,7 +95,7 @@ TorchDynamo 中用于验证编译图有效性的条件，如输入形状、类�
 ## I
 
 ### Inductor（TorchInductor）
-PyTorch 2.0 的代码生成后端，将 FX 图编译为高性能的 Triton（GPU）或 C++（CPU）代码。
+默认编译后端，负责 lowering、融合与设备代码生成，可以选择 Triton、C++、外部算子库或特定设备模板。
 
 ### In-place Operation（原地操作）
 直接修改 Tensor 数据而不创建副本的操作，如 `add_()`, `relu_()`。

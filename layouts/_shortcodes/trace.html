@@ -1,0 +1,61 @@
+{{- $chart := transform.Unmarshal (trim .Inner " \n\t\r") -}}
+{{- $actors := $chart.actors -}}
+{{- $steps := $chart.steps -}}
+{{- if or (lt (len $actors) 2) (lt (len $steps) 2) (not $chart.title) -}}
+  {{- errorf "Trace needs a title, actors, and at least two steps at %s" .Position -}}
+{{- end -}}
+{{- $widths := slice -}}
+{{- $naturalWidth := 0 -}}
+{{- range $actors -}}
+  {{ $span := int (math.Max 68 (add 20 (partial "figures/label-width.html" .))) }}
+  {{ $widths = $widths | append $span }}
+  {{ $naturalWidth = add $naturalWidth $span }}
+{{- end -}}
+{{- $width := int (math.Max 392 $naturalWidth) -}}
+{{- $extra := div (sub $width $naturalWidth) (len $actors) -}}
+{{- $centres := slice -}}
+{{- $left := 0 -}}
+{{- range $widths -}}
+  {{ $span := add . $extra }}
+  {{ $centres = $centres | append (add $left (div $span 2)) }}
+  {{ $left = add $left $span }}
+{{- end -}}
+{{- $height := add 63 (mul 44 (len $steps)) -}}
+{{- $id := printf "trace-%d" .Ordinal -}}
+<figure id="fig-{{ $chart.title | anchorize }}" class="mechanism sequence-figure" data-mechanism>
+  <div class="figure-heading" id="{{ $id }}-title">{{ $chart.title }}</div>
+  <div class="diagram-viewport">
+    <svg role="img" aria-labelledby="{{ $id }}-title" viewBox="0 0 {{ $width }} {{ $height }}" style="min-width: {{ int (mul $width 0.73) }}px; max-width: {{ int (mul $width 1.12) }}px">
+      <defs><marker id="{{ $id }}-tip" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path fill="currentColor" d="M0 0 L8 4 L0 8Z"/></marker></defs>
+      {{ range $i, $actor := $actors -}}
+        {{ $x := index $centres $i }}
+        <line class="lifeline" x1="{{ $x }}" x2="{{ $x }}" y1="32" y2="{{ sub $height 8 }}"/>
+        <text class="actor-label" x="{{ $x }}" y="22" text-anchor="middle">{{ $actor }}</text>
+      {{ end -}}
+      {{ range $i, $step := $steps -}}
+        {{ if or (not (isset $step "from")) (not (isset $step "to")) (lt (int $step.from) 0) (lt (int $step.to) 0) (ge (int $step.from) (len $actors)) (ge (int $step.to) (len $actors)) (not $step.label) (not $step.detail) }}
+          {{ errorf "Invalid trace event %d at %s" (add $i 1) $.Position }}
+        {{ end -}}
+        {{ $x1 := index $centres (int $step.from) }}
+        {{ $x2 := index $centres (int $step.to) }}
+        {{ $y := add 65 (mul $i 44) }}
+        {{ $path := printf "M%d %d H%d" $x1 $y $x2 }}
+        {{ $labelX := div (add $x1 $x2) 2 }}
+        {{ if eq $x1 $x2 }}
+          {{ $turn := cond (eq (int $step.from) (sub (len $actors) 1)) -32 32 }}
+          {{ $path = printf "M%d %d h%d v12 h%d" $x1 $y $turn (sub 0 $turn) }}
+          {{ $labelX = add $x1 (div $turn 2) }}
+        {{ end }}
+        {{ $half := int (math.Min (div $width 2) (add 10 (div (partial "figures/label-width.html" $step.label) 2))) }}
+        {{ $labelX = int (math.Max $half (math.Min $labelX (sub $width $half))) }}
+        <g class="trace-event" data-event="{{ $i }}">
+          <text x="{{ $labelX }}" y="{{ sub $y 7 }}" text-anchor="middle">{{ $step.label }}</text>
+          <path class="message-edge" d="{{ $path }}" pathLength="1" marker-end="url(#{{ $id }}-tip)"/>
+          <circle cx="{{ $x1 }}" cy="{{ $y }}" r="3" fill="currentColor"/>
+        </g>
+      {{ end -}}
+    </svg>
+  </div>
+  <figcaption>{{ partial "figures/controls.html" $steps }}</figcaption>
+</figure>
+{{- .Page.Store.Set "hasMechanism" true -}}

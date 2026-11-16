@@ -249,28 +249,29 @@ for each Q-block (m_block):          for each N-block (n_block):
 
 如果选择 Q-outer（像前向一样），那么 $dK$ 和 $dV$ 需要原子累加——两个矩阵都需要原子操作，代价高昂。
 
-选择 N-outer 后，$dK$ 和 $dV$ 在寄存器中累加（无需原子操作），只有 $dQ$ 需要原子累加。一个矩阵的原子操作总好过两个。
+在这个 N-outer 分工中，每个 KV 块的 dK、dV 可以在负责该块的任务内累加。不同 KV 块会同时贡献同一 Q 块的 dQ，这部分需要跨任务归并。
 
-```mermaid
-graph LR
-    subgraph qouter["Q-outer（不选）"]
-        direction TB
-        Q1["dK 需要 atomicAdd"]
-        Q2["dV 需要 atomicAdd"]
-        Q3["dQ 在寄存器累加"]
-        Q1 ~~~ Q2 ~~~ Q3
-    end
-
-    subgraph nouter["N-outer（选择）"]
-        direction TB
-        N1["dK 在寄存器累加"]
-        N2["dV 在寄存器累加"]
-        N3["dQ 需要 atomicAdd"]
-        N1 ~~~ N2 ~~~ N3
-    end
-
-    qouter -->|"2 个原子 vs 1 个原子"| nouter
-```
+{{< stateboard >}}
+title: "固定一个 KV 块时怎样累计梯度"
+rows: ["KV 块", "当前 Q", "局部结果"]
+steps:
+  - title: "固定 KV0"
+    detail: "以普通密集反向为例，一个任务先取得 KV0；准备它的 dK、dV 累加器。"
+    cells: [["KV0"], ["·"], ["清零"]]
+    focus: [[0, 0], [2, 0]]
+  - title: "处理 Q0"
+    detail: "从该行块的 dO 与重建权重生成第一份 dK、dV 贡献。"
+    cells: [["KV0"], ["Q0"], ["贡献 0"]]
+    focus: [[1, 0], [2, 0]]
+  - title: "处理 Q1"
+    detail: "同一任务读取另一块 Q，继续累加对于 KV0 的贡献。"
+    cells: [["KV0"], ["Q1"], ["贡献 0+1"]]
+    focus: [[1, 0], [2, 0]]
+  - title: "写回 KV0 的结果"
+    detail: "负责其他 KV 块的任务也会贡献 dQ；其累加或归并方式取决于对应内核。"
+    cells: [["KV0"], ["完成"], ["写 dK、dV"]]
+    focus: [[2, 0]]
+{{< /stateboard >}}
 
 ### 3.3 块坐标系统
 
@@ -452,52 +453,35 @@ for (auto work_tile_info = scheduler.get_initial_work(params.scheduler); ...) {
 
 ### 5.2 bwd_step — 单个 Q-block 的梯度计算
 
-`bwd_step` 是反向传播的计算核心，对一个 $(Q_m, K_n)$ 块对执行完整的梯度计算。以下是其七个步骤：
+`bwd_step` 是反向传播的计算核心，对一个 $(Q_m, K_n)$ 块对执行完整的梯度计算。沿输入和中间量的依赖，可以追出五个矩阵乘及 softmax 的行校正。
 
-```mermaid
-graph TB
-    subgraph step1["Step 1 - 重计算 S"]
-        S["S = Q_m @ K_n^T"]
-        S_note["GMMA(TiledMmaSdP)"]
-    end
+{{< trace >}}
+title: "反向时重建一个概率块"
+actors: ["Q 与 K", "行统计", "dO 与 V", "梯度"]
+steps:
+  - from: 0
+    to: 1
+    label: "重算 QK"
+    detail: "保留的 Q、K 产生当前块的缩放分数 S。"
+  - from: 1
+    to: 2
+    label: "利用 LSE"
+    detail: "P=exp(S−LSE)，复原该位置在整行中的概率；这里省略 dropout。"
+  - from: 2
+    to: 3
+    label: "计算 dV 与 dP"
+    detail: "用 P 的转置乘 dO 累加 dV，再以 dO 乘 V 的转置计算 dP。"
+  - from: 2
+    to: 1
+    label: "校正 softmax"
+    detail: "逐行使用 sum(dO*O) 得到 dS=P*(dP−sum(dO*O))。"
+  - from: 1
+    to: 3
+    label: "更新 dQ 和 dK"
+    detail: "dS 分别乘 K 与 Q，加上前向的缩放，得到这对 Q/K 块的梯度贡献。"
+{{< /trace >}}
 
-    subgraph step2["Step 2 - 计算 dP"]
-        dP["dP = dO_m @ V_n^T"]
-        dP_note["GMMA(TiledMmaSdP) 与 Step 1 流水线重叠"]
-    end
-
-    subgraph step3["Step 3 - 恢复 P 并计算 dS"]
-        P["P = exp2(S * scale_log2 - LSE)"]
-        mask["apply_mask(S) if causal/local"]
-        dS["dS = P * (dP - dPsum)"]
-        softcap["dS *= dtanh if softcap"]
-    end
-
-    subgraph step4["Step 4 - 类型转换与共享内存写入"]
-        conv["P, dS: fp32 → fp16/bf16"]
-        smem["Write P, dS → smem"]
-    end
-
-    subgraph step5["Step 5 - 累加 dV"]
-        dV["dV += P^T @ dO"]
-        dV_note["GMMA(TiledMmadKV), zero_init=false"]
-    end
-
-    subgraph step6["Step 6 - 累加 dK 并计算 dQ"]
-        dK["dK += dS^T @ Q"]
-        dQ["dQ = dS @ K"]
-        dK_note["GMMA(TiledMmadKV), zero_init=false"]
-        dQ_note["GMMA(TiledMmadQ), zero_init=true"]
-    end
-
-    subgraph step7["Step 7 - 存储 dQ"]
-        store["dQ → atomicAdd/TMA → dQaccum"]
-    end
-
-    step1 --> step2 --> step3 --> step4 --> step5 --> step6 --> step7
-```
-
-下面逐步详解每个步骤的代码实现。
+下面的源码片段跟踪分数、权重和各个梯度缓冲。
 
 #### Step 1: 重计算 S = QK^T
 
@@ -894,12 +878,12 @@ Flash Attention 的反向传播通过以下核心设计实现了 IO 最优的梯
 | **dQ 原子/TMA 双模式** | 适配不同 headdim | 大/小 headdim 各有最优路径 |
 | **Masking 分离** | 边界块与完整块独立循环 | 消除主循环分支开销 |
 
-> 更详细的 CUDA 内核代码逐行解析见 [反向内核实现解析](../03-cuda-kernel/04-backward-kernel-impl.md)。
+> 更详细的 CUDA 内核代码逐行解析见 [反向内核实现解析](/flashattention/03-cuda-kernel/04-backward-kernel-impl/)。
 
 ---
 
 ## 导航
 
-- 上一篇：[前向传播算法详解](03-forward-pass.md)
-- 下一篇：[GPU 编程基础](../03-cuda-kernel/01-gpu-programming-basics.md)
-- [返回目录](../README.md)
+- 上一篇：[前向传播算法详解](/flashattention/02-core-algorithm/03-forward-pass/)
+- 下一篇：[GPU 编程基础](/flashattention/03-cuda-kernel/01-gpu-programming-basics/)
+- [返回目录](/flashattention/00-overview/overview/)

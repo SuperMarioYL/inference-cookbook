@@ -3,20 +3,10 @@ title: "KV Cache 基础原理"
 weight: 4
 ---
 
-> 深入理解 KV Cache 的工作原理、存储结构和优化方法，这是理解 CacheBlend 的核心前提。
+模型读完手册后留下各层的 K 和 V。下一次请求能复用多少，取决于输入 token 和它们之前的上下文。
 
 ---
 
-## 目录
-
-- [1. 为什么需要 KV Cache](#1-为什么需要-kv-cache)
-- [2. KV Cache 的存储结构](#2-kv-cache-的存储结构)
-- [3. KV Cache 的内存计算](#3-kv-cache-的内存计算)
-- [4. KV Cache 复用](#4-kv-cache-复用)
-- [5. KV Cache 优化技术](#5-kv-cache-优化技术)
-- [6. RAG 场景的 KV Cache 挑战](#6-rag-场景的-kv-cache-挑战)
-
----
 
 ## 1. 为什么需要 KV Cache
 
@@ -42,19 +32,32 @@ graph TB
 
 缓存已经计算过的 K 和 V，新 token 只需计算自己的 KV 并追加：
 
-```mermaid
-graph TB
-    subgraph "With KV Cache"
-        S1["Step 1: 计算 [A] 的 KV, 缓存"]
-        S2["Step 2: 计算 [B] 的 KV, 追加"]
-        S3["Step 3: 计算 [C] 的 KV, 追加"]
-        S4["Step 4: 计算 [D] 的 KV, 追加"]
-
-        S1 --> S2 --> S3 --> S4
-
-        Note2["每步只计算新 token"]
-    end
-```
+{{< stateboard >}}
+title: "生成第三个词时复用前两个位置"
+rows: ["输入", "已存 KV", "本步新增"]
+steps:
+  - title: "第一个词"
+    detail: "处理 A 后留下它在各层的 K、V。"
+    cells:
+      - ["A", "·", "·"]
+      - ["A", "·", "·"]
+      - ["A", "·", "·"]
+    focus: [[2, 0]]
+  - title: "第二个词"
+    detail: "B 读取 A 的缓存，并把自己的 K、V 追加到第二个位置。"
+    cells:
+      - ["A", "B", "·"]
+      - ["A", "B", "·"]
+      - ["·", "B", "·"]
+    focus: [[1, 1], [2, 1]]
+  - title: "第三个词"
+    detail: "C 读取 A、B 的缓存，更新的位置只有第三格。"
+    cells:
+      - ["A", "B", "C"]
+      - ["A", "B", "C"]
+      - ["·", "·", "C"]
+    focus: [[1, 2], [2, 2]]
+{{< /stateboard >}}
 
 ### 1.3 计算量对比
 
@@ -182,10 +185,10 @@ def calculate_kv_cache_memory(
     )
     return memory_bytes
 
-# LLaMA-7B, 2048 tokens, batch_size=1
+# 一个 32 层 GQA 模型，2048 tokens，batch_size=1
 memory = calculate_kv_cache_memory()
-print(f"KV Cache Memory: {memory / 1024**2:.2f} MB")
-# 约 256 MB
+print(f"KV Cache Memory: {memory / 1024**2:.2f} MiB")
+# 256 MiB
 
 # LLaMA-70B, 8192 tokens, batch_size=8
 memory_70b = calculate_kv_cache_memory(
@@ -195,21 +198,35 @@ memory_70b = calculate_kv_cache_memory(
     head_dim=128,
     batch_size=8
 )
-print(f"KV Cache Memory (70B): {memory_70b / 1024**3:.2f} GB")
-# 约 10 GB
+print(f"KV Cache Memory (70B): {memory_70b / 1024**3:.2f} GiB")
+# 20 GiB
 ```
 
 ### 3.3 KV Cache 内存占用趋势
 
-```mermaid
-graph LR
-    subgraph "KV Cache 内存增长"
-        S1["1K tokens<br>128 MB"] --> S2["4K tokens<br>512 MB"]
-        S2 --> S3["16K tokens<br>2 GB"]
-        S3 --> S4["64K tokens<br>8 GB"]
-        S4 --> S5["128K tokens<br>16 GB"]
-    end
-```
+{{< stateboard >}}
+title: "每个输入位置占 128 KiB 时"
+rows: ["窗口长度", "有效 KV"]
+steps:
+  - title: "一个窗口"
+    detail: "32 层、8 个 KV 头、每头 128 维、FP16，一条序列每个 token 用 128 KiB。"
+    cells:
+      - ["1 Ki"]
+      - ["128 MiB"]
+    focus: [[0, 0], [1, 0]]
+  - title: "窗口延长四倍"
+    detail: "同一条序列增长到 4096 token，各层的有效 KV 一起增加为 512 MiB。"
+    cells:
+      - ["4 Ki"]
+      - ["512 MiB"]
+    focus: [[0, 0], [1, 0]]
+  - title: "长序列"
+    detail: "16384 token 对应 2 GiB。这里计算张量有效字节，块对齐另算。"
+    cells:
+      - ["16 Ki"]
+      - ["2 GiB"]
+    focus: [[0, 0], [1, 0]]
+{{< /stateboard >}}
 
 **关键观察**: KV Cache 内存随序列长度**线性增长**，成为长上下文的主要瓶颈。
 
@@ -236,17 +253,32 @@ graph TB
 
 **原理**: 缓存相同前缀的 KV Cache
 
-```mermaid
-graph LR
-    subgraph "Prefix Caching"
-        Input1["System + Query1"] --> |"复用 System KV"| Output1["Response1"]
-        Input2["System + Query2"] --> |"复用 System KV"| Output2["Response2"]
-
-        Cache["Cached: System KV"]
-        Cache --> Input1
-        Cache --> Input2
-    end
-```
+{{< stateboard >}}
+title: "相同前缀在哪一块结束"
+rows: ["请求甲", "请求乙", "匹配"]
+steps:
+  - title: "比较第一块"
+    detail: "示例每格是一块。两个请求从相同的系统提示开始。"
+    cells:
+      - ["系统", "手册", "甲问"]
+      - ["系统", "手册", "乙问"]
+      - ["命中", "·", "·"]
+    focus: [[0, 0], [1, 0], [2, 0]]
+  - title: "继续向后"
+    detail: "手册前面具有相同上下文，第二个完整块也命中。"
+    cells:
+      - ["系统", "手册", "甲问"]
+      - ["系统", "手册", "乙问"]
+      - ["命中", "命中", "·"]
+    focus: [[0, 1], [1, 1], [2, 1]]
+  - title: "遇到分歧"
+    detail: "两个问题的 token 不同，乙的引擎复用前两块，计算自己的问题。"
+    cells:
+      - ["系统", "手册", "甲问"]
+      - ["系统", "手册", "乙问"]
+      - ["命中", "命中", "计算"]
+    focus: [[0, 2], [1, 2], [2, 2]]
+{{< /stateboard >}}
 
 **限制**: 只能复用**连续的前缀**，中间的 chunk 无法复用。
 
@@ -391,23 +423,32 @@ graph TB
 
 当直接复用 KV Cache 时，**Cross-Attention 会丢失**：
 
-```mermaid
-graph TB
-    subgraph "Cross-Attention 丢失问题"
-        subgraph "正确的 Attention"
-            A1["Chunk 1"] --> |"Self-Attention"| A1
-            A2["Chunk 2"] --> |"Self-Attention"| A2
-            A1 --> |"Cross-Attention"| A2
-            A2 --> |"Cross-Attention"| A1
-        end
-
-        subgraph "复用 KV 后"
-            B1["Chunk 1 (缓存)"] --> |"Self-Attention OK"| B1
-            B2["Chunk 2 (缓存)"] --> |"Self-Attention OK"| B2
-            B1 -.- |"Cross-Attention 缺失!"| B2
-        end
-    end
-```
+{{< stateboard >}}
+title: "M 的位置和上文同时改变"
+rows: ["首次输入", "新输入", "M 的上下文"]
+steps:
+  - title: "收集手册"
+    detail: "缓存来自单独输入的手册 M。"
+    cells:
+      - ["M", "问题"]
+      - ["·", "·"]
+      - ["起始", "·"]
+    focus: [[0, 0]]
+  - title: "检索顺序变化"
+    detail: "下一次请求把检索材料 R 拼在 M 前面。"
+    cells:
+      - ["M", "问题"]
+      - ["R", "M"]
+      - ["R 在前", "·"]
+    focus: [[1, 0], [1, 1]]
+  - title: "比较旧缓存"
+    detail: "M 的起点右移，也可以读到 R。位置修正和上下文重算分别处理这两个变化。"
+    cells:
+      - ["M", "问题"]
+      - ["R", "M"]
+      - ["新位置", "新上文"]
+    focus: [[2, 0], [2, 1]]
+{{< /stateboard >}}
 
 ### 6.4 CacheBlend 的解决方案
 
@@ -431,8 +472,6 @@ graph TB
 ---
 
 ## 总结
-
-本文介绍了 KV Cache 的核心概念：
 
 1. **为什么需要 KV Cache**: 避免自回归生成中的重复计算
 2. **存储结构**: 每层独立存储 K 和 V 张量

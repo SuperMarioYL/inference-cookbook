@@ -3,14 +3,9 @@ title: "投机解码"
 weight: 1
 ---
 
+## 按实际提交长度评估一轮验证
 
-## 概述
-
-投机解码（Speculative Decoding）是一种加速大语言模型推理的技术。其核心思想是：**使用一个小型的 Draft 模型快速生成多个候选 token，然后让大型的 Target 模型并行验证这些候选 token**。由于验证比逐个生成更高效，这种方法可以显著加速推理过程。
-
-本文将深入分析 vLLM 中投机解码的实现原理和代码细节。
-
----
+选择草稿长度时，记录一轮提议、通过验证和最终提交的 token 数。把提交长度除以本轮耗时，再和普通解码的输出速度比较。0.33.0 通过 `speculative_config` 选择算法。 [0.33.0 支持的投机算法](https://github.com/vllm-project/vllm/blob/v0.33.0/docs/features/speculative_decoding/README.md)
 
 ## 为什么需要投机解码
 
@@ -131,7 +126,8 @@ graph TD
 ```
 vllm/v1/spec_decode/
 ├── __init__.py
-├── eagle.py           # EAGLE 基类和 Proposer
+├── llm_base_proposer.py # 基于模型的 proposer 共用实现
+├── eagle.py           # EAGLE Proposer
 ├── draft_model.py     # Draft Model Proposer
 ├── medusa.py          # Medusa Head
 ├── metadata.py        # 投机解码元数据
@@ -143,7 +139,7 @@ vllm/v1/spec_decode/
 vllm/v1/worker/gpu/spec_decode/
 ├── eagle.py              # EAGLE CUDA Graph 支持
 ├── eagle_cudagraph.py    # CUDA Graph 实现
-└── rejection_sample.py   # 拒绝采样内核
+└── rejection_sampler.py   # 拒绝采样内核
 ```
 
 ---
@@ -152,10 +148,10 @@ vllm/v1/worker/gpu/spec_decode/
 
 ### 类定义与初始化
 
-`SpecDecodeBaseProposer` 是所有投机解码方法的基类：
+`SpecDecodeBaseProposer` 是 EAGLE 与 draft-model 等基于模型的 proposer 共用的基类：
 
 ```python
-# vllm/v1/spec_decode/eagle.py
+# vllm/v1/spec_decode/llm_base_proposer.py（以下为教学简化）
 
 class SpecDecodeBaseProposer:
     def __init__(
@@ -495,7 +491,7 @@ def load_model(self, target_model: nn.Module) -> None:
 拒绝采样确保输出分布与 Target 模型一致：
 
 ```python
-# vllm/v1/worker/gpu/spec_decode/rejection_sample.py
+# vllm/v1/worker/gpu/spec_decode/rejection_sampler.py
 
 @triton.jit
 def _rejection_sample_kernel(
@@ -542,21 +538,23 @@ def _rejection_sample_kernel(
 
 ### 工作流程图解
 
-```mermaid
-flowchart TD
-    A[Draft: t1, t2, t3, t4, t5] --> B[Target 验证]
-    B --> C{t1 匹配?}
-    C -->|是| D{t2 匹配?}
-    C -->|否| E[拒绝 t1, t2, t3, t4, t5<br/>输出 target_t1]
-    D -->|是| F{t3 匹配?}
-    D -->|否| G[拒绝 t2, t3, t4, t5<br/>输出 t1, target_t2]
-    F -->|是| H{t4 匹配?}
-    F -->|否| I[拒绝 t3, t4, t5<br/>输出 t1, t2, target_t3]
-    H -->|是| J{t5 匹配?}
-    H -->|否| K[拒绝 t4, t5<br/>输出 t1, t2, t3, target_t4]
-    J -->|是| L[全部接受<br/>输出 t1-t5 + bonus token]
-    J -->|否| M[拒绝 t5<br/>输出 t1-t4, target_t5]
-```
+{{< stateboard >}}
+title: 在第 3 个草稿位置停下
+rows: ["草稿", "验证", "输出"]
+steps:
+  - title: "草稿长度 4"
+    detail: "同一段已确认上下文后，草稿模型提出 a、b、c、d。"
+    cells: [["a", "b", "c", "d"], ["·", "·", "·", "·"], ["·", "·", "·", "·"]]
+    focus: [[0, 0], [0, 1], [0, 2], [0, 3]]
+  - title: "前两项被接受"
+    detail: "目标验证通过 a、b 的候选，累计提交两项。"
+    cells: [["a", "b", "c", "d"], ["通过", "通过", "·", "·"], ["a", "b", "·", "·"]]
+    focus: [[2, 0], [2, 1]]
+  - title: "第 3 项被拒绝"
+    detail: "在第 3 个位置按验证算法取替代 token x。后面的 d 原先依赖 c，随草稿尾部一起丢弃。"
+    cells: [["a", "b", "c", "d"], ["通过", "通过", "拒绝", "丢弃"], ["a", "b", "x", "·"]]
+    focus: [[1, 2], [1, 3], [2, 2]]
+{{< /stateboard >}}
 
 ---
 
@@ -653,40 +651,33 @@ def propose_tree(
 
 ## 投机解码配置与使用
 
-### 配置参数
+### 离线的 n-gram 示例
+
+字符串中重复出现的 token 序列可以提供草稿候选，无需额外草稿模型。下面固定目标模型和方法，实际是否受益取决于可匹配的历史与验证成本。
 
 ```python
 from vllm import LLM, SamplingParams
 
-llm = LLM(
-    model="meta-llama/Llama-3.1-70B-Instruct",
-    speculative_model="meta-llama/Llama-3.2-1B-Instruct",
-    num_speculative_tokens=5,  # 每次投机生成的 token 数
+model = LLM(
+    model="Qwen/Qwen3-0.6B",
+    speculative_config={
+        "method": "ngram",
+        "num_speculative_tokens": 5,
+        "prompt_lookup_max": 4,
+    },
 )
-
-llm = LLM(
-    model="meta-llama/Llama-3.1-70B-Instruct",
-    speculative_model="path/to/eagle-head",
-    speculative_method="eagle",
-    num_speculative_tokens=5,
-)
+result = model.generate(["red blue red blue red blue"], SamplingParams(max_tokens=16))
+print(result[0].outputs[0].text)
 ```
 
-### 命令行使用
+### 在线服务中使用单独的草稿模型
 
 ```bash
-# 使用 Draft 模型
-vllm serve meta-llama/Llama-3.1-70B-Instruct \
-    --speculative-model meta-llama/Llama-3.2-1B-Instruct \
-    --num-speculative-tokens 5
-
-vllm serve meta-llama/Llama-3.1-70B-Instruct \
-    --speculative-model path/to/eagle-head \
-    --speculative-method eagle \
-    --num-speculative-tokens 5
+vllm serve Qwen/Qwen3-8B --max-model-len 2048 \
+  --speculative-config '{"method":"draft_model","model":"Qwen/Qwen3-0.6B","num_speculative_tokens":5}'
 ```
 
----
+两种方法使用相同的聊天或补全 HTTP 路径。EAGLE 需要能和目标模型配套的草稿 head；按发行版核对方法名及模型配对。[n-gram 示例](https://github.com/vllm-project/vllm/blob/v0.33.0/docs/features/speculative_decoding/n_gram.md) · [草稿模型部署](https://github.com/vllm-project/vllm/blob/v0.33.0/docs/features/speculative_decoding/draft_model.md) · [EAGLE 部署](https://github.com/vllm-project/vllm/blob/v0.33.0/docs/features/speculative_decoding/eagle.md)
 
 ## 性能优化
 
@@ -777,40 +768,12 @@ def prepare_inputs_padded(
 
 ---
 
-## 总结
-
-投机解码是加速 LLM 推理的重要技术：
-
-```mermaid
-graph TD
-    A[投机解码核心思想] --> B[Draft Model 预测]
-    A --> C[Target Model 验证]
-    A --> D[拒绝采样保证正确性]
-
-    E[vLLM 实现特点] --> F[多种方法支持]
-    E --> G[CUDA Graph 优化]
-    E --> H[Tree Attention]
-    E --> I[权重共享]
-
-    J[最佳实践] --> K[选择合适的 K 值]
-    J --> L[监控接受率]
-    J --> M[选择匹配的 Draft 模型]
-```
-
-关键要点：
-1. **核心原理**：用小模型快速预测，大模型并行验证
-2. **无损加速**：拒绝采样保证输出分布不变
-3. **vLLM 优化**：CUDA Graph、权重共享、批量处理
-4. **实际效果**：通常可获得 1.5x-3x 的加速
-
----
-
 ## 参考资料
 
 1. [Speculative Decoding 原论文](https://arxiv.org/abs/2211.17192)
 2. [EAGLE 论文](https://arxiv.org/abs/2401.15077)
 3. [Medusa 论文](https://arxiv.org/abs/2401.10774)
-4. [vLLM 投机解码文档](https://docs.vllm.ai/en/latest/features/spec_decode.html)
+4. [vLLM 0.33.0 投机解码文档](https://docs.vllm.ai/en/v0.33.0/features/speculative_decoding/)
 
 ---
 

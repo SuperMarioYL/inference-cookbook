@@ -1,52 +1,15 @@
 ---
-title: "代码索引"
+title: "原型和 LMCache 的源码入口"
 weight: 1
 ---
 
-本文档提供 CacheBlend 核心实现代码的快速索引，帮助开发者快速定位关键功能的实现位置。
+|希望追踪的行为|入口|
+|---|---|
+|原型收集旧 KV、组合文档并执行对照|[example/blend.py](https://github.com/YaoJiayi/CacheBlend/blob/55ad02675939f783a38d579393527d218a7fd581/example/blend.py)|
+|原型逐层切换检查与重算状态|[llama.py](https://github.com/YaoJiayi/CacheBlend/blob/55ad02675939f783a38d579393527d218a7fd581/vllm_blend/vllm/model_executor/models/llama.py)|
+|原型筛选位置并更新缓存|[xformers.py](https://github.com/YaoJiayi/CacheBlend/blob/55ad02675939f783a38d579393527d218a7fd581/vllm_blend/vllm/attention/backends/xformers.py)|
+|多进程模块的查找、登记和读取协议|[LMCache Blend 模块说明](https://github.com/LMCache/LMCache/blob/v0.5.7.post1/docs/design/v1/multiprocess/modules/blend.md)|
+|当前服务的位置匹配|[matcher.py](https://github.com/LMCache/LMCache/blob/v0.5.7.post1/lmcache/v1/multiprocess/modules/blend/matcher.py)|
+|把匹配结果组装成读取计划|[retrieve.py](https://github.com/LMCache/LMCache/blob/v0.5.7.post1/lmcache/v1/multiprocess/modules/blend/retrieve.py)|
 
----
-
-## 代码位置索引
-
-| 功能 | 文件 | 位置 |
-|------|------|------|
-| cache_fuse_metadata 定义 | llama.py | 第 300-310 行 |
-| old_kvs 定义 | llama.py | 第 312 行 |
-| 状态机实现 | llama.py | 第 330-376 行 |
-| RoPE 位置恢复 | llama.py | 第 174-179 行 |
-| hack_kv 收集 | llama.py | 第 181-182 行 |
-| HKVD 选择 | xformers.py | 第 204-221 行 |
-| KV 融合 | xformers.py | 第 240-245 行 |
-| 注意力计算 | xformers.py | 第 426-444 行 |
-
----
-
-## 核心组件说明
-
-### cache_fuse_metadata
-
-存储 CacheBlend 运行时所需的元数据，包括：
-- `check`: 是否启用 CacheBlend
-- `collect`: 是否收集 KV
-- `check_layers`: HKVD 选择层
-- `recomp_ratio`: 重计算比例
-- `suffix_len`: 后缀长度
-
-### old_kvs
-
-存储预计算的 KV Cache，用于后续的融合操作。
-
-### 状态机实现
-
-控制 CacheBlend 的三种状态：
-- 状态 0: 普通 Prefill
-- 状态 1: HKVD 选择阶段
-- 状态 2: 选择性重计算阶段
-
----
-
-## 参考文献
-
-1. CacheBlend 论文: https://arxiv.org/abs/2405.16444
-2. LMCache 项目: https://github.com/LMCache/LMCache
+原型里的 `old_kvs` 和 `cache_fuse_metadata` 由模型与注意力后端直接共享。多进程服务把文本匹配和缓存读取改为进程间协议，推理端的重算还需要相应插件。[部署指南](../07-advanced/03-deployment-guide.md)

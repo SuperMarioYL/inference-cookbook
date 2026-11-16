@@ -3,20 +3,9 @@ title: "连续批处理"
 weight: 1
 ---
 
-## 概述
+## 从两轮观察同一条运行请求
 
-### 本章学习目标
-- 理解连续批处理的原理和优势
-- 对比 Prefill 和 Decode 阶段的特点
-- 掌握动态批处理的实现机制
-- 了解吞吐量提升的关键因素
-
-### 前置知识要求
-- 了解 LLM 推理流程
-- 熟悉批处理概念
-- 理解 GPU 并行计算
-
----
+A 再生成一个 token 就结束，B 还会继续。两者一同执行后，引擎回收 A 的位置，新请求可以进入下一轮。0.5.23 的普通循环从 `ingest_requests` 走到 `get_next_batch_to_run` 和 `process_batch_result`。 [0.5.23 调度循环](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/managers/scheduler.py)
 
 ## 传统静态批处理
 
@@ -87,27 +76,23 @@ graph TB
 
 ### 动态调整
 
-```mermaid
-sequenceDiagram
-    participant Q as 等待队列
-    participant B as 运行批次
-    participant GPU
-
-    Note over Q,GPU: 连续批处理
-
-    Q->>B: R1, R2, R3 加入
-    B->>GPU: 执行
-
-    GPU-->>B: R1 完成
-    B->>Q: R1 离开
-    Q->>B: R4 加入
-    B->>GPU: 继续执行
-
-    GPU-->>B: R2 完成
-    B->>Q: R2 离开
-    Q->>B: R5 加入
-    B->>GPU: 继续执行
-```
+{{< stateboard >}}
+title: 三个执行位置怎样换人
+rows: ["槽 0", "槽 1", "槽 2"]
+steps:
+  - title: "首轮"
+    detail: "R1、R2、R3 进入同一批，R4、R5 在等待。"
+    cells: [["R1"], ["R2"], ["R3"]]
+    focus: [[0, 0], [1, 0], [2, 0]]
+  - title: "R1 先结束"
+    detail: "下一次选批时 R4 占用腾出的执行位置，R2 与 R3 继续。"
+    cells: [["R4"], ["R2"], ["R3"]]
+    focus: [[0, 0]]
+  - title: "R2 到达停止条件"
+    detail: "下一轮把 R5 加入，另外两个请求沿用各自的历史 KV。"
+    cells: [["R4"], ["R5"], ["R3"]]
+    focus: [[1, 0]]
+{{< /stateboard >}}
 
 ---
 
@@ -434,27 +419,3 @@ def get_forward_mode(self) -> ForwardMode:
 ```
 
 ---
-
-## 小结
-
-### 要点回顾
-
-1. **连续批处理**：请求完成立即释放，新请求动态加入
-2. **两阶段特点**：Prefill 计算密集，Decode 内存带宽密集
-3. **动态批次**：根据资源情况自动调整批次大小
-4. **吞吐量优化**：最大化批次、平衡 Prefill/Decode、缓存复用
-
-### 关键优势
-
-| 优势 | 说明 |
-|------|------|
-| 高 GPU 利用率 | 避免空闲等待 |
-| 低平均延迟 | 短请求不等长请求 |
-| 高吞吐量 | 资源持续利用 |
-
-### 下一章预告
-
-在下一章《Chunked Prefill 机制》中，我们将：
-- 了解长上下文处理挑战
-- 学习分块 Prefill 原理
-- 掌握混合模式调度

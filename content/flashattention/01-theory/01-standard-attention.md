@@ -3,7 +3,7 @@ title: "标准 Attention 机制 - 理论基础"
 weight: 1
 ---
 
-> 本文从数学原理出发，系统推导自注意力（Self-Attention）机制的完整计算过程，分析多头注意力的三种主流变体（MHA / GQA / MQA），并对标准实现的计算复杂度与内存访问瓶颈进行深入剖析。
+一个查询向量产生一行注意力：先与各个键做点积，按行归一化，再用权重对值向量求和。用同一行的输入可以跟完整个过程。
 
 ---
 
@@ -82,47 +82,23 @@ $$
 
 ### 1.4 计算流程图
 
-```mermaid
-flowchart LR
-    subgraph input["输入矩阵"]
-        Q["Q (N, d)"]
-        K["K (N, d)"]
-        V["V (N, d)"]
-    end
-
-    subgraph step1["第一步 - 计算注意力分数"]
-        KT["K 转置 (d, N)"]
-        MatMul1["矩阵乘法 QK^T"]
-        Scale["除以 sqrt(d)"]
-        S["S (N, N)"]
-    end
-
-    subgraph step2["第二步 - Softmax 归一化"]
-        Softmax["逐行 Softmax"]
-        P["P (N, N)"]
-    end
-
-    subgraph step3["第三步 - 加权求和"]
-        MatMul2["矩阵乘法 PV"]
-        O["O (N, d)"]
-    end
-
-    K -->|"转置"| KT
-    Q --> MatMul1
-    KT --> MatMul1
-    MatMul1 --> Scale
-    Scale --> S
-    S --> Softmax
-    Softmax --> P
-    P --> MatMul2
-    V --> MatMul2
-    MatMul2 --> O
-
-    style input fill:#e8f4fd,stroke:#1a73e8
-    style step1 fill:#fce8e6,stroke:#d93025
-    style step2 fill:#fef7e0,stroke:#f9ab00
-    style step3 fill:#e6f4ea,stroke:#1e8e3e
-```
+{{< stateboard >}}
+title: "一行打分如何变成输出"
+rows: ["位置", "权重", "加权值"]
+steps:
+  - title: "给两个位置打分"
+    detail: "假设缩放后的两个分数为 0 和 ln 3，两个 V 为 2 和 6。"
+    cells: [["K₀", "K₁"], ["·", "·"], ["·", "·"]]
+    focus: [[0, 0], [0, 1]]
+  - title: "按行归一化"
+    detail: "指数之比为 1:3，以行和归一化得到两项概率 0.25 和 0.75。"
+    cells: [["K₀", "K₁"], ["0.25", "0.75"], ["·", "·"]]
+    focus: [[1, 0], [1, 1]]
+  - title: "累加两个 V"
+    detail: "第一项贡献 0.25×2=0.5，第二项贡献 0.75×6=4.5，输出为 5。"
+    cells: [["K₀", "K₁"], ["0.25", "0.75"], ["0.5", "4.5"]]
+    focus: [[2, 0], [2, 1]]
+{{< /stateboard >}}
 
 ---
 
@@ -156,7 +132,7 @@ MQA（Shazeer, 2019）通过让所有 Query 头**共享**同一组 Key 和 Value
 
 - **头数配置**：$h_q = h$，$h_k = h_v = 1$
 - **KV Cache 缩减**：相比 MHA 减少为 $1/h$
-- **效果**：推理速度显著提升，精度略有下降
+- **代价与收益**：减少 KV 读写量。模型质量和实际延迟由训练方式、输入与实现决定。
 
 ### 2.3 GQA - Grouped Query Attention
 
@@ -182,52 +158,27 @@ GQA（Ainslie et al., 2023）是 MHA 与 MQA 之间的折中方案：
 
 ### 2.5 MHA / GQA / MQA 对比图
 
-以 $h = 8$ 个 Query 头为例：
+固定四个 Q 头，比较它们各自读取哪套 K/V。
 
-```mermaid
-flowchart TB
-    subgraph mha["MHA - Multi-Head Attention (h_q=8, h_kv=8)"]
-        direction LR
-        Q1_mha["Q1"] --- K1_mha["K1, V1"]
-        Q2_mha["Q2"] --- K2_mha["K2, V2"]
-        Q3_mha["Q3"] --- K3_mha["K3, V3"]
-        Q4_mha["Q4"] --- K4_mha["K4, V4"]
-        Q5_mha["Q5"] --- K5_mha["K5, V5"]
-        Q6_mha["Q6"] --- K6_mha["K6, V6"]
-        Q7_mha["Q7"] --- K7_mha["K7, V7"]
-        Q8_mha["Q8"] --- K8_mha["K8, V8"]
-    end
+{{< stateboard >}}
+title: "保持四个 Q 头，改变 KV 头数"
+rows: ["Q 头", "读哪个 KV"]
+steps:
+  - title: "MHA"
+    detail: "四个查询头各读一套独立的 K、V。"
+    cells: [["Q0", "Q1", "Q2", "Q3"], ["KV0", "KV1", "KV2", "KV3"]]
+    focus: [[1, 0], [1, 1], [1, 2], [1, 3]]
+  - title: "GQA"
+    detail: "两套 K、V，每一套被两个相邻的 Q 头共享；各头仍独立计算注意力输出。"
+    cells: [["Q0", "Q1", "Q2", "Q3"], ["KV0", "KV0", "KV1", "KV1"]]
+    focus: [[1, 0], [1, 1]]
+  - title: "MQA"
+    detail: "四个 Q 头全部读 KV0。相同序列长度、每头维度及 dtype 下，存储的 KV 数据量是本例 MHA 的四分之一。"
+    cells: [["Q0", "Q1", "Q2", "Q3"], ["KV0", "KV0", "KV0", "KV0"]]
+    focus: [[1, 0], [1, 1], [1, 2], [1, 3]]
+{{< /stateboard >}}
 
-    subgraph gqa["GQA - Grouped Query Attention (h_q=8, h_kv=2)"]
-        direction LR
-        Q1_gqa["Q1"] --- KG1["K1, V1"]
-        Q2_gqa["Q2"] --- KG1
-        Q3_gqa["Q3"] --- KG1
-        Q4_gqa["Q4"] --- KG1
-        Q5_gqa["Q5"] --- KG2["K2, V2"]
-        Q6_gqa["Q6"] --- KG2
-        Q7_gqa["Q7"] --- KG2
-        Q8_gqa["Q8"] --- KG2
-    end
-
-    subgraph mqa["MQA - Multi-Query Attention (h_q=8, h_kv=1)"]
-        direction LR
-        Q1_mqa["Q1"] --- KS["K1, V1"]
-        Q2_mqa["Q2"] --- KS
-        Q3_mqa["Q3"] --- KS
-        Q4_mqa["Q4"] --- KS
-        Q5_mqa["Q5"] --- KS
-        Q6_mqa["Q6"] --- KS
-        Q7_mqa["Q7"] --- KS
-        Q8_mqa["Q8"] --- KS
-    end
-
-    style mha fill:#e8f4fd,stroke:#1a73e8
-    style gqa fill:#fef7e0,stroke:#f9ab00
-    style mqa fill:#fce8e6,stroke:#d93025
-```
-
-**核心思路**：从 MHA 到 MQA，KV 头数逐步减少，KV Cache 内存占用随之降低，推理效率提升。GQA 在精度与效率之间取得了良好平衡，已成为当前大模型的主流选择。
+长度、头维和精度相同时，KV 缓存字节数与 KV 头数成正比。GQA 保留每个 Q 头的独立输出，同时减少需要保存的 K/V。
 
 ---
 
@@ -457,8 +408,8 @@ memory_analysis(1, 32, 32768, 128) # 长上下文场景
 这意味着：
 
 - GPU 的计算单元（Tensor Core）大部分时间**处于空闲状态**，在等待 HBM 中的数据
-- 真正的执行时间由 HBM 的带宽决定，而非计算能力
-- 优化方向应是**减少 HBM 访问量**，而非单纯提升计算效率
+- 若 HBM 吞吐接近上限，减少中间矩阵的读写可以缩短关键路径
+- 用 profiler 的 DRAM 字节数和内核耗时检验这一判断
 
 ### 5.3 反向传播的额外开销
 
@@ -558,6 +509,6 @@ FlashAttention 通过**分块计算（Tiling）**和**重计算（Recomputation�
 
 ## 导航
 
-- 上一篇：[快速上手](../00-overview/03-quick-start.md)
-- 下一篇：[IO-Awareness 分析](02-io-awareness.md)
-- [返回目录](../README.md)
+- 上一篇：[快速上手](/flashattention/00-overview/03-quick-start/)
+- 下一篇：[IO-Awareness 分析](/flashattention/01-theory/02-io-awareness/)
+- [返回目录](/flashattention/00-overview/overview/)

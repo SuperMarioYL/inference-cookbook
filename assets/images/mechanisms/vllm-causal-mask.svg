@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 472 265" role="img" aria-labelledby="vllm-causal-mask-title">
+  <title id="vllm-causal-mask-title">四个位置的因果掩码</title>
+  <desc>每一行是一条 query，每一列是一个 key。读表示允许，叉表示屏蔽，点表示该行还未展示。</desc>
+  <text x="16" y="29" class="diagram-title" text-anchor="start">四个位置的因果掩码</text>
+  <text x="303" y="64" class="label" text-anchor="middle">键的位置 K</text>
+  <text x="42" y="151" class="label" text-anchor="middle">查询 Q</text>
+  <text x="164" y="89" class="label" text-anchor="middle">0</text>
+  <text x="222" y="89" class="label" text-anchor="middle">1</text>
+  <text x="280" y="89" class="label" text-anchor="middle">2</text>
+  <text x="338" y="89" class="label" text-anchor="middle">3</text>
+  <text x="111" y="123" class="label" text-anchor="middle">0</text>
+  <text x="111" y="160" class="label" text-anchor="middle">1</text>
+  <text x="111" y="197" class="label" text-anchor="middle">2</text>
+  <text x="111" y="234" class="label" text-anchor="middle">3</text>
+  <g data-frame="0">
+    <title>计算 Q0</title>
+    <desc>位置 0 可读取位置 0 到 0 的键值。后面的位置由因果掩码屏蔽。</desc>
+    <rect x="138" y="101" width="50" height="29" rx="5" class="fresh"/><text x="163.0" y="120.5" class="label" text-anchor="middle">读</text>
+    <rect x="196" y="101" width="50" height="29" rx="5" class="idle"/><text x="221.0" y="120.5" class="label" text-anchor="middle">×</text>
+    <rect x="254" y="101" width="50" height="29" rx="5" class="idle"/><text x="279.0" y="120.5" class="label" text-anchor="middle">×</text>
+    <rect x="312" y="101" width="50" height="29" rx="5" class="idle"/><text x="337.0" y="120.5" class="label" text-anchor="middle">×</text>
+    <rect x="138" y="138" width="50" height="29" rx="5" class="idle"/><text x="163.0" y="157.5" class="label" text-anchor="middle">·</text>
+    <rect x="196" y="138" width="50" height="29" rx="5" class="idle"/><text x="221.0" y="157.5" class="label" text-anchor="middle">·</text>
+    <rect x="254" y="138" width="50" height="29" rx="5" class="idle"/><text x="279.0" y="157.5" class="label" text-anchor="middle">·</text>
+    <rect x="312" y="138" width="50" height="29" rx="5" class="idle"/><text x="337.0" y="157.5" class="label" text-anchor="middle">·</text>
+    <rect x="138" y="175" width="50" height="29" rx="5" class="idle"/><text x="163.0" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="196" y="175" width="50" height="29" rx="5" class="idle"/><text x="221.0" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="254" y="175" width="50" height="29" rx="5" class="idle"/><text x="279.0" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="312" y="175" width="50" height="29" rx="5" class="idle"/><text x="337.0" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="138" y="212" width="50" height="29" rx="5" class="idle"/><text x="163.0" y="231.5" class="label" text-anchor="middle">·</text>
+    <rect x="196" y="212" width="50" height="29" rx="5" class="idle"/><text x="221.0" y="231.5" class="label" text-anchor="middle">·</text>
+    <rect x="254" y="212" width="50" height="29" rx="5" class="idle"/><text x="279.0" y="231.5" class="label" text-anchor="middle">·</text>
+    <rect x="312" y="212" width="50" height="29" rx="5" class="idle"/><text x="337.0" y="231.5" class="label" text-anchor="middle">·</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>计算 Q1</title>
+    <desc>位置 1 可读取位置 0 到 1 的键值。后面的位置由因果掩码屏蔽。</desc>
+    <rect x="138" y="101" width="50" height="29" rx="5" class="stored"/><text x="163.0" y="120.5" class="label" text-anchor="middle">读</text>
+    <rect x="196" y="101" width="50" height="29" rx="5" class="idle"/><text x="221.0" y="120.5" class="label" text-anchor="middle">×</text>
+    <rect x="254" y="101" width="50" height="29" rx="5" class="idle"/><text x="279.0" y="120.5" class="label" text-anchor="middle">×</text>
+    <rect x="312" y="101" width="50" height="29" rx="5" class="idle"/><text x="337.0" y="120.5" class="label" text-anchor="middle">×</text>
+    <rect x="138" y="138" width="50" height="29" rx="5" class="fresh"/><text x="163.0" y="157.5" class="label" text-anchor="middle">读</text>
+    <rect x="196" y="138" width="50" height="29" rx="5" class="fresh"/><text x="221.0" y="157.5" class="label" text-anchor="middle">读</text>
+    <rect x="254" y="138" width="50" height="29" rx="5" class="idle"/><text x="279.0" y="157.5" class="label" text-anchor="middle">×</text>
+    <rect x="312" y="138" width="50" height="29" rx="5" class="idle"/><text x="337.0" y="157.5" class="label" text-anchor="middle">×</text>
+    <rect x="138" y="175" width="50" height="29" rx="5" class="idle"/><text x="163.0" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="196" y="175" width="50" height="29" rx="5" class="idle"/><text x="221.0" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="254" y="175" width="50" height="29" rx="5" class="idle"/><text x="279.0" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="312" y="175" width="50" height="29" rx="5" class="idle"/><text x="337.0" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="138" y="212" width="50" height="29" rx="5" class="idle"/><text x="163.0" y="231.5" class="label" text-anchor="middle">·</text>
+    <rect x="196" y="212" width="50" height="29" rx="5" class="idle"/><text x="221.0" y="231.5" class="label" text-anchor="middle">·</text>
+    <rect x="254" y="212" width="50" height="29" rx="5" class="idle"/><text x="279.0" y="231.5" class="label" text-anchor="middle">·</text>
+    <rect x="312" y="212" width="50" height="29" rx="5" class="idle"/><text x="337.0" y="231.5" class="label" text-anchor="middle">·</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>计算 Q2</title>
+    <desc>位置 2 可读取位置 0 到 2 的键值。后面的位置由因果掩码屏蔽。</desc>
+    <rect x="138" y="101" width="50" height="29" rx="5" class="stored"/><text x="163.0" y="120.5" class="label" text-anchor="middle">读</text>
+    <rect x="196" y="101" width="50" height="29" rx="5" class="idle"/><text x="221.0" y="120.5" class="label" text-anchor="middle">×</text>
+    <rect x="254" y="101" width="50" height="29" rx="5" class="idle"/><text x="279.0" y="120.5" class="label" text-anchor="middle">×</text>
+    <rect x="312" y="101" width="50" height="29" rx="5" class="idle"/><text x="337.0" y="120.5" class="label" text-anchor="middle">×</text>
+    <rect x="138" y="138" width="50" height="29" rx="5" class="stored"/><text x="163.0" y="157.5" class="label" text-anchor="middle">读</text>
+    <rect x="196" y="138" width="50" height="29" rx="5" class="stored"/><text x="221.0" y="157.5" class="label" text-anchor="middle">读</text>
+    <rect x="254" y="138" width="50" height="29" rx="5" class="idle"/><text x="279.0" y="157.5" class="label" text-anchor="middle">×</text>
+    <rect x="312" y="138" width="50" height="29" rx="5" class="idle"/><text x="337.0" y="157.5" class="label" text-anchor="middle">×</text>
+    <rect x="138" y="175" width="50" height="29" rx="5" class="fresh"/><text x="163.0" y="194.5" class="label" text-anchor="middle">读</text>
+    <rect x="196" y="175" width="50" height="29" rx="5" class="fresh"/><text x="221.0" y="194.5" class="label" text-anchor="middle">读</text>
+    <rect x="254" y="175" width="50" height="29" rx="5" class="fresh"/><text x="279.0" y="194.5" class="label" text-anchor="middle">读</text>
+    <rect x="312" y="175" width="50" height="29" rx="5" class="idle"/><text x="337.0" y="194.5" class="label" text-anchor="middle">×</text>
+    <rect x="138" y="212" width="50" height="29" rx="5" class="idle"/><text x="163.0" y="231.5" class="label" text-anchor="middle">·</text>
+    <rect x="196" y="212" width="50" height="29" rx="5" class="idle"/><text x="221.0" y="231.5" class="label" text-anchor="middle">·</text>
+    <rect x="254" y="212" width="50" height="29" rx="5" class="idle"/><text x="279.0" y="231.5" class="label" text-anchor="middle">·</text>
+    <rect x="312" y="212" width="50" height="29" rx="5" class="idle"/><text x="337.0" y="231.5" class="label" text-anchor="middle">·</text>
+  </g>
+  <g data-frame="3" display="none">
+    <title>计算 Q3</title>
+    <desc>Q3 可以读取 K0 到 K3。逐行叠起来就是完整的下三角可见区域。</desc>
+    <rect x="138" y="101" width="50" height="29" rx="5" class="stored"/><text x="163.0" y="120.5" class="label" text-anchor="middle">读</text>
+    <rect x="196" y="101" width="50" height="29" rx="5" class="idle"/><text x="221.0" y="120.5" class="label" text-anchor="middle">×</text>
+    <rect x="254" y="101" width="50" height="29" rx="5" class="idle"/><text x="279.0" y="120.5" class="label" text-anchor="middle">×</text>
+    <rect x="312" y="101" width="50" height="29" rx="5" class="idle"/><text x="337.0" y="120.5" class="label" text-anchor="middle">×</text>
+    <rect x="138" y="138" width="50" height="29" rx="5" class="stored"/><text x="163.0" y="157.5" class="label" text-anchor="middle">读</text>
+    <rect x="196" y="138" width="50" height="29" rx="5" class="stored"/><text x="221.0" y="157.5" class="label" text-anchor="middle">读</text>
+    <rect x="254" y="138" width="50" height="29" rx="5" class="idle"/><text x="279.0" y="157.5" class="label" text-anchor="middle">×</text>
+    <rect x="312" y="138" width="50" height="29" rx="5" class="idle"/><text x="337.0" y="157.5" class="label" text-anchor="middle">×</text>
+    <rect x="138" y="175" width="50" height="29" rx="5" class="stored"/><text x="163.0" y="194.5" class="label" text-anchor="middle">读</text>
+    <rect x="196" y="175" width="50" height="29" rx="5" class="stored"/><text x="221.0" y="194.5" class="label" text-anchor="middle">读</text>
+    <rect x="254" y="175" width="50" height="29" rx="5" class="stored"/><text x="279.0" y="194.5" class="label" text-anchor="middle">读</text>
+    <rect x="312" y="175" width="50" height="29" rx="5" class="idle"/><text x="337.0" y="194.5" class="label" text-anchor="middle">×</text>
+    <rect x="138" y="212" width="50" height="29" rx="5" class="fresh"/><text x="163.0" y="231.5" class="label" text-anchor="middle">读</text>
+    <rect x="196" y="212" width="50" height="29" rx="5" class="fresh"/><text x="221.0" y="231.5" class="label" text-anchor="middle">读</text>
+    <rect x="254" y="212" width="50" height="29" rx="5" class="fresh"/><text x="279.0" y="231.5" class="label" text-anchor="middle">读</text>
+    <rect x="312" y="212" width="50" height="29" rx="5" class="fresh"/><text x="337.0" y="231.5" class="label" text-anchor="middle">读</text>
+  </g>
+</svg>

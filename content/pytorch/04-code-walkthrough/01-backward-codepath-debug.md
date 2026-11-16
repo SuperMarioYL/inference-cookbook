@@ -5,7 +5,7 @@ weight: 1
 
 ## 概述
 
-当你调用 `loss.backward()` 时，PyTorch 内部发生了什么？本文将逐层剖析从 Python 入口到 C++ Engine 的完整调用链路，深入到引擎的依赖计算、任务调度、节点执行和梯度累积的每一个步骤。本文面向希望深入理解或调试 autograd 引擎的高级用户。
+执行 `loss.backward()` 后，可以在同一次调用中看到两件事：反向算子的依赖什么时候满足，叶子参数的梯度什么时候写入 `.grad`。
 
 ---
 
@@ -224,27 +224,27 @@ auto Engine::compute_dependencies(
 }
 ```
 
-```mermaid
-flowchart TD
-    subgraph bfs["BFS 依赖计算过程"]
-        ROOT["GraphRoot\n(初始梯度)"] --> MUL["MulBackward0\ndeps=1"]
-        ROOT --> ADD["AddBackward0\ndeps=1"]
-        MUL --> RELU["ReluBackward0\ndeps=1"]
-        ADD --> RELU
-        RELU -->|"deps 增加"| RELU2["ReluBackward0\ndeps=2"]
-        RELU2 --> ACC_W["AccumulateGrad(W)\ndeps=1"]
-        RELU2 --> ACC_B["AccumulateGrad(b)\ndeps=1"]
-    end
-
-    subgraph legend["依赖计数说明"]
-        L1["deps=N 表示该节点有 N 个上游输入"]
-        L2["当 deps 递减到 0 时节点变为就绪"]
-    end
-
-    style ROOT fill:#ffcdd2,stroke:#e53935
-    style ACC_W fill:#c8e6c9,stroke:#43a047
-    style ACC_B fill:#c8e6c9,stroke:#43a047
-```
+{{< trace >}}
+title: "共享节点怎样等齐两个梯度"
+actors: ["输出节点", "分支 A", "分支 B", "共享节点"]
+steps:
+  - from: 0
+    to: 1
+    label: "下传梯度"
+    detail: "假设输出是两个分支之和，两端都接收到种子梯度 1。"
+  - from: 0
+    to: 2
+    label: "进入另一分支"
+    detail: "两个分支引用同一中间张量，各自产生一个贡献。"
+  - from: 1
+    to: 3
+    label: "写入第一份贡献"
+    detail: "依赖计数从 2 变为 1，尚不能调度共享节点。"
+  - from: 2
+    to: 3
+    label: "合并第二份贡献"
+    detail: "计数降到 0，共享节点进入 ready 队列，使用合并后的梯度继续反传。"
+{{< /trace >}}
 
 `dependencies_` 映射记录了每个节点需要接收多少个上游梯度才能开始执行。当一个节点的依赖计数递减到 0 时，它就被推入就绪队列。
 

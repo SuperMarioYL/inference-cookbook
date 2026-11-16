@@ -3,17 +3,7 @@ title: "Dispatch 代码路径调试"
 weight: 2
 ---
 
-> 掌握理论只是第一步，真正理解 PyTorch 分发机制需要在实际代码中追踪执行路径。
-> 本文提供一整套调试工具链——从环境变量、Python 内省 API 到 GDB/LLDB 断点，
-> 帮助你端到端地追踪一个算子从 Python 调用到硬件内核的完整分发路径。
-
----
-
-## 1. 概述
-
-算子分发系统的复杂性在于其**多层嵌套的 redispatch 链**——一次 `torch.mm()` 调用可能依次经过 Autograd、AutoCast、ADInplaceOrView 等多个 dispatch key 的处理，最终才到达 CPU/CUDA 计算内核。仅靠阅读源码很难完整理解运行时的实际路径。
-
-本文聚焦于**调试方法论**，提供以下工具的详细使用指南：
+在 CPU 上调用 `torch.mm(a, b)`，先用 `torch._C._dispatch_dump("aten::mm")` 找出本机注册的实现。打开自动求导或 autocast 后，再跟踪同一个调用，观察哪个分发键先接手，什么时候才进入矩阵乘内核。
 
 | 工具类别 | 代表工具 | 适用场景 |
 |---------|---------|---------|
@@ -160,21 +150,18 @@ print(f"aten::mm 有 Meta 内核: {has_meta}")  # True
 print(torch._C._dispatch_dump("aten::mm"))
 ```
 
-典型输出：
+在 PyTorch 2.15.0 的 macOS arm64 wheel 上，`aten::mm` 的输出包含以下条目。此处省略 wheel 构建目录的绝对前缀和函数签名。
 
-```
+```text
 name: aten::mm
 schema: aten::mm(Tensor self, Tensor mat2) -> Tensor
-debug: registered at aten/src/ATen/RegisterSchema.cpp:6
-alias analysis kind: FROM_SCHEMA
-
-CPU: registered at aten/src/ATen/RegisterCPU.cpp:...
-CUDA: registered at aten/src/ATen/RegisterCUDA.cpp:...
-Meta: registered at aten/src/ATen/RegisterMeta.cpp:...
-AutogradCPU: registered at torch/csrc/autograd/generated/VariableType_4.cpp:...
-AutogradCUDA: registered at torch/csrc/autograd/generated/VariableType_4.cpp:...
-CompositeImplicitAutograd: fallthrough registered at aten/src/ATen/RegisterCompositeImplicitAutograd.cpp:...
+debug: registered at …/build/aten/src/ATen/RegisterSchema.cpp:6
+CPU: registered at …/build/aten/src/ATen/RegisterCPU_0.cpp:3246
+MPS: registered at …/build/aten/src/ATen/RegisterMPS_0.cpp:12779
+Meta: registered at …/torch/_meta_registrations.py:53
 ```
+
+`RegisterCPU_0.cpp` 是构建时生成的注册文件。换一个构建，分片或行号都可能变化。要找实际的矩阵乘法实现，可以从分发表拿到后端，再到该后端源码搜索算子名。
 
 还可以查看**计算后的分发表**（包含 fallback 和 fallthrough 解析结果）：
 
@@ -624,3 +611,5 @@ with torch.autocast(device_type="cuda"):
 - **Module 2 - Autograd 机制**：`grad_fn` 的创建与反向传播图的构建
 - **Module 0 - 04 代码导航与调试技巧**：更多通用 PyTorch 调试方法
 - **PyTorch 官方文档 - Dispatcher 深入解析**：[https://pytorch.org/tutorials/advanced/dispatcher.html](https://pytorch.org/tutorials/advanced/dispatcher.html)
+
+分派器选定设备实现之后，就进入具体算子的代码。可以对照 [FlashAttention 的前向调用链](/flashattention/05-code-walkthrough/01-forward-call-trace/)，看 Python 入口怎样把 Q、K、V 交给内核。

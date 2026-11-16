@@ -5,7 +5,7 @@ weight: 3
 
 ## 1. 什么是 nn.Module
 
-`torch.nn.Module` 是 PyTorch 中所有神经网络模块的基类。无论是简单的全连接层，还是包含数十亿参数的大语言模型，它们的基石都是 `nn.Module`。理解 `nn.Module` 的使用方法，是掌握 PyTorch 的第一步。
+给模块加上一层 `self.proj = nn.Linear(4, 2)` 后，`model.parameters()` 就能遍历到它的权重。模块注册、参数保存和设备迁移都能用这一层观察。
 
 `nn.Module` 提供了以下核心能力：
 

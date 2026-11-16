@@ -1,7 +1,7 @@
 # Hugo
 title = "Inference Cookbook"
-description = "面向深度学习初学者的 LLM 推理框架技术文档，涵盖 vLLM、SGLang、UCM、Dynamo、CacheBlend、Mooncake 等框架的核心算法解析"
-images = ["cover.png"]
+description = "从 PyTorch、FlashAttention 到 vLLM、SGLang，再到 Dynamo、Mooncake、UCM 与 CacheBlend 的中文推理手册"
+images = ["cover.jpg"]
 
 # mainSections
 mainSections = ["vllm", "sglang", "ucm", "dynamo", "cacheblend", "mooncake", "pytorch", "flashattention"]
@@ -133,7 +133,7 @@ mainSections = ["vllm", "sglang", "ucm", "dynamo", "cacheblend", "mooncake", "py
     logo = "favicon-512x512.png" # Logo of Organization — favicon-512x512.png (default)
     name = "Inference Cookbook" # Name of Organization or Person
     sameAs = ["https://github.com/SuperMarioYL/inference-cookbook"] # E.g. ["https://github.com/thuliteio/thulite", "https://fosstodon.org/@thulite"]
-    images = ["cover.png"] # ["cover.png"] (default)
+    images = ["cover.jpg"] # ["cover.png"] (default)
     article = [] # Article sections
     newsArticle = [] # NewsArticle sections
     blogPosting = ["blog"] # BlogPosting sections

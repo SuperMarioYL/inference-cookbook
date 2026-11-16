@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 464 254" role="img" aria-labelledby="cacheblend-hkvd-bars-title">
+  <title id="cacheblend-hkvd-bars-title">重算预算只够一个文档位置</title>
+  <desc>柱高表示四个文档 token 的 V 平方差；右侧是始终加入计算的新后缀。</desc>
+  <text x="15" y="27" text-anchor="start" class="diagram-title">重算预算只够一个文档位置</text>
+  <g data-frame="0">
+    <title>比较旧 V 与新 V</title>
+    <desc>沿 KV 头和维度求和，得到每个文档位置的差值。</desc>
+    <text x="16" y="61" text-anchor="start" class="subhead">文档位置的 V 平方差</text>
+    <path d="M 30 175 H 304" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="0.65" stroke-dasharray="none"/>
+    <rect x="51" y="172" width="34" height="3" rx="2" class="stored"/>
+    <text x="68" y="164" text-anchor="middle" class="note">0.1</text>
+    <text x="68" y="196" text-anchor="middle" class="label">A</text>
+    <rect x="117" y="88" width="34" height="87" rx="2" class="stored"/>
+    <text x="134" y="80" text-anchor="middle" class="note">4.0</text>
+    <text x="134" y="196" text-anchor="middle" class="label">B</text>
+    <rect x="183" y="168" width="34" height="7" rx="2" class="stored"/>
+    <text x="200" y="160" text-anchor="middle" class="note">0.3</text>
+    <text x="200" y="196" text-anchor="middle" class="label">C</text>
+    <rect x="249" y="170" width="34" height="5" rx="2" class="stored"/>
+    <text x="266" y="162" text-anchor="middle" class="note">0.2</text>
+    <text x="266" y="196" text-anchor="middle" class="label">D</text>
+    <path d="M 317 83 V 197" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="0.55" stroke-dasharray="3 3"/>
+    <text x="380" y="101" text-anchor="middle" class="note">新后缀</text>
+    <rect x="348" y="119" width="66" height="42" rx="5" class="idle"/>
+    <text x="381.0" y="145.0" text-anchor="middle" class="label">Q</text>
+    <text x="16" y="244" text-anchor="start" class="note">四个分数是教学示例，纵轴为平方差。</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>按预算保留最大值</title>
+    <desc>四个文档位置、25% 的预算给出 top-1。B 的分数最高。</desc>
+    <text x="16" y="61" text-anchor="start" class="subhead">文档位置的 V 平方差</text>
+    <path d="M 30 175 H 304" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="0.65" stroke-dasharray="none"/>
+    <rect x="51" y="172" width="34" height="3" rx="2" class="stored"/>
+    <text x="68" y="164" text-anchor="middle" class="note">0.1</text>
+    <text x="68" y="196" text-anchor="middle" class="label">A</text>
+    <rect x="117" y="88" width="34" height="87" rx="2" class="fresh"/>
+    <text x="134" y="80" text-anchor="middle" class="note">4.0</text>
+    <text x="134" y="196" text-anchor="middle" class="label">B</text>
+    <rect x="183" y="168" width="34" height="7" rx="2" class="stored"/>
+    <text x="200" y="160" text-anchor="middle" class="note">0.3</text>
+    <text x="200" y="196" text-anchor="middle" class="label">C</text>
+    <rect x="249" y="170" width="34" height="5" rx="2" class="stored"/>
+    <text x="266" y="162" text-anchor="middle" class="note">0.2</text>
+    <text x="266" y="196" text-anchor="middle" class="label">D</text>
+    <path d="M 317 83 V 197" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="0.55" stroke-dasharray="3 3"/>
+    <text x="380" y="101" text-anchor="middle" class="note">新后缀</text>
+    <rect x="348" y="119" width="66" height="42" rx="5" class="idle"/>
+    <text x="381.0" y="145.0" text-anchor="middle" class="label">Q</text>
+    <path d="M 134 200 V 207 Q 134 212 141 212 H 182" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="1" stroke-dasharray="none"/>
+    <text x="191" y="217" text-anchor="start" class="subhead">保留 B</text>
+    <text x="16" y="244" text-anchor="start" class="note">文档预算 25%，四个位置中选一个。</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>追加新问题</title>
+    <desc>原型按原位置排序后再追加后缀位置，后续层计算 B 和 Q。</desc>
+    <text x="16" y="61" text-anchor="start" class="subhead">文档位置的 V 平方差</text>
+    <path d="M 30 175 H 304" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="0.65" stroke-dasharray="none"/>
+    <rect x="51" y="172" width="34" height="3" rx="2" class="stored"/>
+    <text x="68" y="164" text-anchor="middle" class="note">0.1</text>
+    <text x="68" y="196" text-anchor="middle" class="label">A</text>
+    <rect x="117" y="88" width="34" height="87" rx="2" class="fresh"/>
+    <text x="134" y="80" text-anchor="middle" class="note">4.0</text>
+    <text x="134" y="196" text-anchor="middle" class="label">B</text>
+    <rect x="183" y="168" width="34" height="7" rx="2" class="stored"/>
+    <text x="200" y="160" text-anchor="middle" class="note">0.3</text>
+    <text x="200" y="196" text-anchor="middle" class="label">C</text>
+    <rect x="249" y="170" width="34" height="5" rx="2" class="stored"/>
+    <text x="266" y="162" text-anchor="middle" class="note">0.2</text>
+    <text x="266" y="196" text-anchor="middle" class="label">D</text>
+    <path d="M 317 83 V 197" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="0.55" stroke-dasharray="3 3"/>
+    <text x="380" y="101" text-anchor="middle" class="note">新后缀</text>
+    <rect x="348" y="119" width="66" height="42" rx="5" class="fresh"/>
+    <text x="381.0" y="145.0" text-anchor="middle" class="label">Q</text>
+    <path d="M 134 200 V 207 Q 134 212 141 212 H 182" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="1" stroke-dasharray="none"/>
+    <text x="191" y="217" text-anchor="start" class="subhead">保留 B</text>
+    <path d="M 381 164 V 208 Q 381 212 376 212 H 326" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="1" stroke-dasharray="none"/>
+    <text x="316" y="217" text-anchor="end" class="subhead">加入 Q</text>
+    <text x="16" y="244" text-anchor="start" class="note">本次工作集由文档位置 B 和新后缀 Q 组成。</text>
+  </g>
+</svg>

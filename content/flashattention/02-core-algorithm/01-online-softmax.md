@@ -18,7 +18,7 @@ weight: 1
 
 ## 1. 从理论到实现 - 回顾与动机
 
-在 [Flash Attention 核心理论](../01-theory/03-flash-attention-theory.md) 中，我们推导了 Online Softmax 的递推公式。处理到第 $j$ 个 K/V 块后，状态 $(m^{(j)}, l^{(j)}, O^{(j)})$ 通过以下递推关系更新：
+在 [Flash Attention 核心理论](/flashattention/01-theory/03-flash-attention-theory/) 中，我们推导了 Online Softmax 的递推公式。处理到第 $j$ 个 K/V 块后，状态 $(m^{(j)}, l^{(j)}, O^{(j)})$ 通过以下递推关系更新：
 
 $$
 m^{(j)} = \max\left(m^{(j-1)},\; \text{rowmax}(S_{ij})\right)
@@ -32,17 +32,29 @@ $$
 O^{(j)} = \exp\left(m^{(j-1)} - m^{(j)}\right) \cdot O^{(j-1)} + \exp\left(S_{ij} - m^{(j)}\right) \cdot V_j
 $$
 
-理论推导保证了数学正确性，但从理论到高性能 GPU 实现，还有若干关键的工程问题需要解决：
+在 Hopper 前向中，每个线程只持有分数块的一部分。实现需要决定何时做跨线程归约、何时重标定输出，以及以哪种精度把权重交给 PV。
 
 1. **`exp` 函数的效率**：GPU 上 `expf(x)` 不是最快的指数函数，如何优化？
 2. **跨线程归约**：GPU 的 Tensor Core 以 warp（32 线程）为单位计算，`row_max` 和 `row_sum` 如何跨线程高效归约？
 3. **归一化时机**：在主循环中每步都归一化还是延迟到最后？
-4. **FP8 精度范围**：FP8 的有效范围仅 [0,1]（exp 输出），如何扩展利用？
+4. **FP8 转换**：行最大值平移后的未归一化指数权重最大为 1，小权重转 E4M3 时如何避免下溢？
 5. **反向传播的 LSE**：如何高效计算 $\text{LSE} = \log(\sum \exp)$ 供反向传播使用？
 
-本文将逐一回答这些问题，完整解析 `hopper/softmax.h` 中的实现。
-
 ---
+
+
+### 一行注意力，两块数据
+
+设分数已经包含缩放，第一块分数为 `[0, ln 2]`，对应 V 为 `[1, 3]`；第二块分数为 `[ln 4, 0]`，V 为 `[2, 4]`。每行保留最大分数 $m$、按该最大值缩放后的指数和 $l$，以及尚未除以 $l$ 的加权和 $u$。例中 V 是标量，实际内核中 $u$ 是一行向量。
+
+| 已处理的数据 | 更新 | $m$ | $l$ | $u$ |
+|---|---|---:|---:|---:|
+| 第一块 | 权重为 `[1/2, 1]` | $\ln 2$ | 1.5 | 3.5 |
+| 第二块 | 最大值升高，旧统计量乘以 `1/2`；新块权重为 `[1, 1/4]` | $\ln 4$ | 2 | 4.75 |
+
+最后除一次得到 $u/l=2.375$。将四个分数一次性做 softmax，未归一化权重为 `[1, 2, 4, 1]`，加权结果同样是 `19/8`。如果第二块到来时只累加两个块各自的归一化输出，就会丢掉它们之间的相对权重。
+
+{{< mechanism "fa-tiles" >}}
 
 ## 2. 三种 Softmax 实现策略对比
 
@@ -132,7 +144,7 @@ graph TB
     flash -->|"HBM 读取 N 次"| perf3["最优 - 所有计算在 SRAM"]
 ```
 
-关键区别在于：方案三不是单纯地计算 Softmax，而是将 Softmax 计算 **嵌入到** 分块矩阵乘法的主循环中，使得 K/V 数据只需从 HBM 加载一次。
+读到一个 K/V 分块，内核就用它更新当前 Q 分块的最大值、归一化和与输出累加量。完整的分数和概率矩阵因此无需写回 HBM。
 
 ---
 
@@ -574,7 +586,7 @@ float const softmax_scale_log2 = softmax_scale * M_LOG2E;
 
 ### 6.1 问题：FP8 的有限范围
 
-FP8 E4M3 格式的有效范围约为 $[-448, 448]$，但 Softmax 的输出 $P_{ij} = \exp(S_{ij} - m) \in [0, 1]$，只利用了 FP8 正数范围的很小一部分 $[0, 1]$，导致严重的精度损失。
+E4M3FN 的有限数值范围是 $[-448,448]$。减去行最大值后，未归一化的指数权重落在 $(0,1]$，被遮蔽的位置可为 0。很小的正权重可能在 E4M3FN 中舍入为零。
 
 ### 6.2 解决方案：Max_offset = 8
 
@@ -585,13 +597,13 @@ FP8 E4M3 格式的有效范围约为 $[-448, 448]$，但 Softmax 的输出 $P_{i
 tensor(mi, ni) = exp2f(tensor(mi, ni) * scale - (max * scale - Max_offset));
 ```
 
-即在减去最大值后，**加上** `Max_offset = 8`，使得 Softmax 输出变为：
+即在减去最大值后，**加上** `Max_offset = 8`，使得写给低精度矩阵乘的未归一化权重变为：
 
 $$
 P'_{ij} = 2^{(S_{ij} - m) \cdot \text{scale} + 8} = P_{ij} \cdot 2^8 = P_{ij} \cdot 256
 $$
 
-这将输出范围从 $[0, 1]$ 扩展到 $[0, 256]$，充分利用了 FP8 E4M3 的正数范围。
+这将输出范围从 $[0, 1]$ 扩展到 $[0, 256]$，降低了较小权重直接向零舍入的机会。该缩放不改变 E4M3FN 的取值范围。
 
 ### 6.3 补偿
 
@@ -604,7 +616,7 @@ if constexpr (Max_offset != 0) {
 }
 ```
 
-LSE 的计算使用修正后的 `sum`，确保反向传播的正确性。而输出累加器 `acc_o` 的补偿在 epilogue 中通过 `final_scale` 参数完成。
+该实现先用放大后的行和求倒数来归一化同样被放大的输出累加器，再为 LSE 把行和除以 256。最终归一化的概率不随这个偏移放大。[Hopper softmax 源码](https://github.com/Dao-AILab/flash-attention/blob/fa4-v4.0.0.beta39/hopper/softmax.h)
 
 ---
 
@@ -693,9 +705,9 @@ $$
 2. 利用保存的 $\text{LSE}_i$ 直接恢复 $P_{ij}$（无需再执行 Online Softmax）
 3. 计算梯度 $dQ$, $dK$, $dV$
 
-这正是 Flash Attention 内存高效的关键所在——前向传播只需额外存储 $O(N)$ 的 LSE，而非 $O(N^2)$ 的 $P$ 矩阵。
+每行保存一个 LSE，反向可按块重建 P；LSE 的额外存储随行数线性增长。
 
-> 详见 [反向传播算法详解](./04-backward-pass.md) 中关于重计算策略的讨论。
+> 详见 [反向传播算法详解](/flashattention/02-core-algorithm/04-backward-pass/) 中关于重计算策略的讨论。
 
 ---
 
@@ -707,16 +719,16 @@ Online Softmax 是 Flash Attention 的核心算法构件，将数值稳定的 So
 |------|---------|------|
 | **指数函数优化** | `exp2f` + FFMA 融合 | 减少指令数，降低延迟 |
 | **延迟归约** | `warp_reduce=false` | 减少主循环中的同步开销 |
-| **FP8 范围扩展** | `Max_offset=8` | 将有效范围从 [0,1] 扩展到 [0,256] |
+| **FP8 权重缩放** | `Max_offset=8` | 将传给 FP8 转换的未归一化权重乘以 256 |
 | **数值安全** | `-inf` / NaN 检测 | 避免 mask 导致的数值错误 |
 | **LSE 复用** | `row_sum` 存储 LSE | 零额外寄存器开销 |
 
-这些优化共同确保了 Online Softmax 在 GPU 上的高效、稳定执行，为 Flash Attention 的整体性能奠定了基础。
+
 
 ---
 
 ## 导航
 
-- 上一篇：[Flash Attention 核心理论](../01-theory/03-flash-attention-theory.md)
-- 下一篇：[分块策略与调度](02-tiling-strategy.md)
-- [返回目录](../README.md)
+- 上一篇：[Flash Attention 核心理论](/flashattention/01-theory/03-flash-attention-theory/)
+- 下一篇：[分块策略与调度](/flashattention/02-core-algorithm/02-tiling-strategy/)
+- [返回目录](/flashattention/00-overview/overview/)

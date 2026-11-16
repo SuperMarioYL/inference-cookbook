@@ -3,7 +3,7 @@ title: "LLM 推理基础"
 weight: 1
 ---
 
-> 本文介绍大语言模型（LLM）推理的基础知识，包括 Transformer 架构原理、自回归生成过程，以及 Prefill/Decode 两阶段的特性差异。
+一条生成请求先利用提示建立各层状态，再根据已知 token 逐步预测后续输出。下文以普通自回归注意力为例；跨 GPU 时，模型的缓存还要在相应设备上可见。[Dynamo 1.6.2 对 P/D 交接的说明](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/docs/fern/pages/developer-guide/knowledge-base/concepts/system-architecture/disaggregated-serving.md)
 
 ---
 
@@ -154,7 +154,7 @@ sequenceDiagram
 
     loop 直到生成结束符
         Model->>KVCache: 读取历史 K, V
-        Note right of Model: 只计算新 token 的 Q
+        Note right of Model: 为当前位置计算 Q、K、V
         Note right of Model: Attention 使用缓存的 K, V
         Model->>KVCache: 追加新的 K, V
         Model->>User: 输出 token
@@ -171,9 +171,9 @@ sequenceDiagram
 |------|---------|--------|
 | Token 数量 | 多（整个 prompt） | 1（每次） |
 | 并行度 | 高 | 低 |
-| 计算瓶颈 | GPU 算力 | 内存带宽 |
-| GPU 利用率 | 高（60-90%） | 低（5-30%） |
-| 批处理收益 | 线性提升 | 显著提升 |
+| 常见瓶颈 | 长输入下可能受算力或 attention 实现限制 | 低并发可能受权重与 KV 读取带宽限制 |
+| 观察重点 | 提示长度、分块与每轮 token 数 | 活动请求数、读取的 KV 和每轮时间 |
+| 批处理影响 | 改变本轮 token 和数据复用 | 多条请求可共同摊薄权重读取，收益受带宽及并行限制 |
 
 ### 3.2 计算特性图解
 
@@ -231,36 +231,31 @@ flowchart LR
 | **Throughput** | 吞吐量 | tokens/s 或 requests/s |
 | **Latency** | 端到端延迟 | 完整请求的响应时间 |
 
-```mermaid
-sequenceDiagram
-    participant Client as 客户端
-    participant Server as 服务端
-
-    Note over Client,Server: TTFT
-    Client->>Server: 发送请求
-    Server-->>Client: 第一个 Token
-
-    Note over Client,Server: ITL (重复)
-    Server-->>Client: Token 2
-    Server-->>Client: Token 3
-    Server-->>Client: Token N
-
-    Note over Client,Server: 端到端延迟
-    Server-->>Client: ["完成"]
-```
-
----
-
-## 小结
-
-本文介绍了 LLM 推理的核心基础：
-
-1. **Transformer 架构**：Self-Attention 机制是核心，Multi-Head 并行计算
-2. **自回归生成**：逐 token 生成，分为 Prefill 和 Decode 两阶段
-3. **两阶段差异**：Prefill 计算密集，Decode 内存带宽受限
-4. **KV Cache**：存储历史计算结果，避免重复计算
-
-理解这些基础知识，有助于理解后续章节中 Dynamo 如何优化这些问题。
+{{< trace >}}
+title: 从客户端时钟读 TTFT 与 ITL
+actors: ["客户端", "Frontend", "Worker"]
+steps:
+  - from: 0
+    to: 1
+    label: "0 ms · 发出"
+    detail: "请求开始计时。"
+  - from: 1
+    to: 2
+    label: "15 ms · 分发"
+    detail: "Frontend 已选中模型 worker，服务端继续预填充。"
+  - from: 2
+    to: 0
+    label: "90 ms · 首个 token"
+    detail: "结果经前端发回客户端。TTFT 从 0 ms 算起，为 90 ms。"
+  - from: 2
+    to: 0
+    label: "110 ms · 第二个"
+    detail: "这一段 ITL 为 20 ms。"
+  - from: 2
+    to: 0
+    label: "135 ms · 第三个"
+    detail: "第二段 ITL 为 25 ms；三次输出只有两个相邻间隔。"
+{{< /trace >}}
 
 ---
 

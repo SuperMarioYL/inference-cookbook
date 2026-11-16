@@ -3,104 +3,22 @@ title: "整体架构设计"
 weight: 1
 ---
 
-[上一篇：核心概念与关键技术](../01-overview/02-core-concepts.md) | [目录](../README.md) | [下一篇：请求处理流程详解](02-request-lifecycle.md)
-
----
-
-# 整体架构设计
-
 ### 3.1 架构总览
 
-Mooncake 采用了一个精心设计的分层架构，将 LLM 推理系统分解为多个独立但协作的组件。这种设计使得系统能够在保持高性能的同时，实现灵活的资源管理和调度。
-
-#### 3.1.1 核心组件
+Mooncake 提供负责索引、存储和传输的组件。v0.3.14 的开源 Conductor 持有各实例的前缀命中信息，接收请求和分配 P/D 的逻辑在上层路由器。Transfer Engine 根据配置搬运字节；使用共享存储时，Store Master 管理对象和副本位置。
 
 ```mermaid
-graph TB
-    subgraph "控制平面 (Control Plane)"
-        Conductor[Conductor<br/>全局调度器]
-        MetaStore[Metadata Store<br/>元数据存储]
-    end
-
-    subgraph "数据平面 (Data Plane)"
-        subgraph "Prefill 节点池"
-            P1[Prefill Node 1]
-            P2[Prefill Node 2]
-            Pn[Prefill Node N]
-        end
-
-        subgraph "Decode 节点池"
-            D1[Decode Node 1]
-            D2[Decode Node 2]
-            Dn[Decode Node N]
-        end
-
-        subgraph "Mooncake Store (分布式 KVCache)"
-            MS1[Store Node 1<br/>CPU/GPU/SSD]
-            MS2[Store Node 2<br/>CPU/GPU/SSD]
-            MSn[Store Node N<br/>CPU/GPU/SSD]
-        end
-    end
-
-    subgraph "传输层 (Transfer Layer)"
-        TE[Transfer Engine<br/>RDMA/TCP/NVMe-oF]
-    end
-
-    Client[客户端请求] --> Conductor
-    Conductor --> P1 & P2 & Pn
-    Conductor --> D1 & D2 & Dn
-    P1 & P2 & Pn <--> TE
-    D1 & D2 & Dn <--> TE
-    TE <--> MS1 & MS2 & MSn
-    Conductor <--> MetaStore
+flowchart LR
+    R["推理网关或路由器"] --> C["Conductor 前缀查询"]
+    R --> P["Prefill 池"]
+    R --> D["Decode 池"]
+    P <-->|"直传"| D
+    P <--> S["Mooncake Store"]
+    D <--> S
+    S --> M["Master 管可读副本和位置"]
 ```
 
-Mooncake 系统由以下核心组件构成：
-
-| 组件 | 职责 | 关键特性 |
-|------|------|----------|
-| **Conductor** | 全局调度器 | Cache-aware 调度、负载均衡、SLO 保证 |
-| **Prefill Nodes** | 处理输入 tokens | 计算密集型、生成 KVCache |
-| **Decode Nodes** | 生成输出 tokens | 内存密集型、消费 KVCache |
-| **Mooncake Store** | 分布式 KVCache 存储 | 多级存储、跨节点共享 |
-| **Transfer Engine** | 高性能数据传输 | RDMA、拓扑感知、多协议支持 |
-| **Metadata Store** | 元数据管理 | 基于 etcd、高可用 |
-
-#### 3.1.2 代码模块对应关系
-
-Mooncake 的代码结构与上述架构紧密对应：
-
-```
-Mooncake/
-├── mooncake-transfer-engine/    # Transfer Engine 核心实现
-│   ├── include/
-│   │   ├── transfer_engine.h    # 主入口 API
-│   │   ├── transport/           # 各种传输协议实现
-│   │   │   ├── rdma_transport/  # RDMA 传输
-│   │   │   ├── tcp_transport/   # TCP 传输
-│   │   │   └── nvmeof_transport/# NVMe-oF 传输
-│   │   ├── topology.h           # 拓扑发现
-│   │   └── transfer_metadata.h  # 元数据管理
-│   └── src/
-│       ├── transfer_engine.cpp  # Transfer Engine 实现
-│       └── transport/           # 传输层实现
-│
-├── mooncake-store/              # Mooncake Store 实现
-│   ├── include/
-│   │   ├── storage_backend.h    # 存储后端抽象
-│   │   ├── eviction_strategy.h  # 缓存驱逐策略
-│   │   ├── master_service.h     # Master 服务
-│   │   └── ha_helper.h          # 高可用支持
-│   └── src/
-│       ├── ha_helper.cpp        # Leader 选举实现
-│       └── master_service.cpp   # Master 服务实现
-│
-├── mooncake-integration/        # 与推理框架的集成
-│   ├── vllm/                    # vLLM 集成
-│   └── sglang/                  # SGLang 集成
-│
-└── mooncake-wheel/              # Python 包装器和 CLI 工具
-```
+[当前架构](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/docs/source/design/architecture.md) · [FAST 论文](https://www.usenix.org/conference/fast25/presentation/qin)
 
 ### 3.2 P/D 分离架构详解
 
@@ -124,7 +42,7 @@ graph TB
 
     subgraph "Mooncake P/D 分离架构"
         direction LR
-        MR[请求] --> MC[Conductor]
+        MR["请求"] --> MC["路由器"]
         MC --> MP1[Prefill 1]
         MC --> MP2[Prefill 2]
         MP1 --> MKV[KVCache<br/>传输]
@@ -376,153 +294,10 @@ enum TransferStatusEnum {
 };
 ```
 
-### 3.5 Conductor 调度器概览
+### 3.5 缓存位置与路由
 
-Conductor 是 Mooncake 的全局调度器，负责将请求分配到合适的 Prefill 和 Decode 节点。
+路由器将提示 token 和模型、租户等条件传给 Conductor。后者根据引擎和 Store 的缓存事件回答各实例与存储层的前缀覆盖情况。路由器才会把命中与等待队列、可用设备及 SLO 一起考虑。[索引的调用顺序](../12-code-walkthrough/05-conductor-scheduling-trace.md)
 
-#### 3.5.1 调度目标
+### 3.6 两种元数据
 
-Conductor 需要同时优化多个目标：
-
-```mermaid
-graph LR
-    subgraph "调度目标"
-        G1[最小化 TTFT]
-        G2[满足 TBT SLO]
-        G3[最大化 Cache 命中]
-        G4[负载均衡]
-    end
-
-    subgraph "约束条件"
-        C1[节点容量]
-        C2[网络带宽]
-        C3[SLO 阈值]
-    end
-
-    G1 & G2 & G3 & G4 --> D[调度决策]
-    C1 & C2 & C3 --> D
-```
-
-#### 3.5.2 Cache-aware 调度
-
-Conductor 的核心创新是 **Cache-aware** 调度——将请求调度到能够复用最多 KVCache 的节点：
-
-```mermaid
-sequenceDiagram
-    participant R as 新请求
-    participant C as Conductor
-    participant MS as Mooncake Store
-    participant P as Prefill Nodes
-
-    R->>C: 请求 (prefix tokens)
-    C->>MS: 查询 prefix 位置
-    MS-->>C: 返回各节点缓存情况
-    C->>C: 计算最优节点<br/>(最大缓存复用 + 负载均衡)
-    C->>P: 调度到最优 Prefill 节点
-```
-
-**调度算法核心思想**：
-
-给定请求 $r$ 和候选节点集合 $N$，调度得分为：
-
-$$score(r, n) = \alpha \cdot \frac{cached\_prefix\_length(r, n)}{total\_prefix\_length(r)} + \beta \cdot (1 - load(n))$$
-
-其中：
-- $cached\_prefix\_length(r, n)$：节点 $n$ 上已缓存的请求 $r$ 的前缀长度
-- $total\_prefix\_length(r)$：请求 $r$ 的总前缀长度
-- $load(n)$：节点 $n$ 的当前负载
-- $\alpha, \beta$：权重参数
-
-### 3.6 元数据管理
-
-Mooncake 使用 etcd 作为分布式元数据存储，管理以下信息：
-
-#### 3.6.1 元数据类型
-
-| 元数据类型 | 内容 | 更新频率 |
-|------------|------|----------|
-| Segment 信息 | 节点地址、端口、协议 | 节点启动/退出时 |
-| Buffer 描述 | 内存地址、大小、rkey | 内存注册时 |
-| 拓扑信息 | NIC 配置、存储层次 | 节点启动时 |
-| Master 视图 | 当前 Master 地址 | Leader 选举时 |
-
-#### 3.6.2 高可用设计
-
-从 `ha_helper.cpp` 可以看到 Master 选举机制：
-
-```cpp
-void MasterViewHelper::ElectLeader(const std::string& master_address,
-                                   ViewVersionId& version,
-                                   EtcdLeaseId& lease_id) {
-    while (true) {
-        // 1. 检查是否已有 Leader
-        auto ret = EtcdHelper::Get(master_view_key_, ...);
-
-        if (ret != ErrorCode::ETCD_KEY_NOT_EXIST) {
-            // 已有 Leader，等待其失效
-            EtcdHelper::WatchUntilDeleted(master_view_key_, ...);
-            continue;
-        }
-
-        // 2. 尝试成为 Leader
-        // 获取租约
-        EtcdHelper::GrantLease(ETCD_MASTER_VIEW_LEASE_TTL, lease_id);
-
-        // 原子创建 key (带租约)
-        ret = EtcdHelper::CreateWithLease(master_view_key_, master_address,
-                                          lease_id, version);
-
-        if (ret == ErrorCode::OK) {
-            // 成功成为 Leader
-            return;
-        }
-        // 失败则重试
-    }
-}
-```
-
-**选举流程**：
-
-```mermaid
-sequenceDiagram
-    participant N1 as 节点 1
-    participant N2 as 节点 2
-    participant E as etcd
-
-    N1->>E: 检查 master_view key
-    E-->>N1: key 不存在
-    N2->>E: 检查 master_view key
-    E-->>N2: key 不存在
-
-    N1->>E: 获取 lease
-    E-->>N1: lease_id = 123
-    N2->>E: 获取 lease
-    E-->>N2: lease_id = 456
-
-    N1->>E: CreateWithLease(master_view, "N1", 123)
-    E-->>N1: 成功！
-    N2->>E: CreateWithLease(master_view, "N2", 456)
-    E-->>N2: 失败 (key 已存在)
-
-    Note over N1: 成为 Leader
-    Note over N2: 等待 Leader 失效
-
-    loop 保持 Leader
-        N1->>E: KeepAlive(lease_id=123)
-    end
-```
-
-### 3.7 本章小结
-
-本章介绍了 Mooncake 的整体架构设计：
-
-1. **分层架构**：控制平面（Conductor）、数据平面（P/D 节点）、存储层（Mooncake Store）、传输层（Transfer Engine）
-2. **P/D 分离**：消除阶段干扰、支持独立资源配置和弹性伸缩
-3. **Mooncake Store**：多级存储层次、树形 KVCache 组织、分片与复制
-4. **Transfer Engine**：协议抽象、拓扑感知、多网卡聚合
-5. **Conductor**：Cache-aware 调度、负载均衡、SLO 保证
-6. **元数据管理**：基于 etcd、Leader 选举、高可用
-
----
-
-[上一篇：核心概念与关键技术](../01-overview/02-core-concepts.md) | [目录](../README.md) | [下一篇：请求处理流程详解](02-request-lifecycle.md)
+Store Master 持有对象副本与放置信息。Transfer Engine 则需交换 peer、segment 等连接信息；`P2PHANDSHAKE` 可直接交换，也可按部署选 HTTP 等元数据后端。Master 高可用的选主与快照又有自己的部署要求。用本地 TCP 验证时可以只启动 Store Master 和客户端。[官方部署说明](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/docs/source/deployment/mooncake-store-deployment-guide.md)

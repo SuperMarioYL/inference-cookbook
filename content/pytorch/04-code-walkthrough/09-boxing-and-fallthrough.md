@@ -3,7 +3,7 @@ title: "Boxing 和 Fallthrough"
 weight: 9
 ---
 
-> Boxing 和 Fallthrough 是 PyTorch 分发系统中两个深层机制。Boxing 解决"如何在类型擦除的世界里调用强类型内核"的问题，Fallthrough 解决"如何让某些 DispatchKey 对特定算子透明跳过"的问题。理解它们，才能真正理解 Python fallback、JIT 执行、functorch 转换等高级功能的底层运作。
+Boxing 把参数放入统一的 `IValue` 栈，让一个通用入口能接收多种算子签名。Fallthrough 则允许分发过程跳过某个键，继续寻找下一个内核。
 
 ---
 
@@ -15,7 +15,7 @@ PyTorch 的分发器（Dispatcher）在设计上面临两个核心挑战：
 
 2. **分发链的灵活跳过**：并非所有 DispatchKey 对所有算子都有意义。例如 `ADInplaceOrView` 对纯 functional 算子没有任何工作要做。Fallthrough 机制允许算子在特定 DispatchKey 上"透传"，跳过该层直接进入下一层分发。
 
-这两个机制共同构成了分发系统灵活性和性能的基石。
+
 
 ## 2. 前置知识
 
@@ -513,7 +513,7 @@ TORCH_LIBRARY_IMPL(_, BackendSelect, m) {
 
 ### 9.1 Functionalization 的作用
 
-Functionalization 变换的目标是消除 inplace 和 view 操作，将它们转换为 functional（纯函数）等价形式。这对于编译器优化至关重要 - `torch.compile` 的 Inductor 后端要求输入图不包含 inplace/view 操作。
+Functionalization 可以把对张量的原地修改改写成显式的值更新。编译器由此能追踪各个使用方读到哪个版本的值。
 
 ### 9.2 FunctionalizeFallback 内核
 

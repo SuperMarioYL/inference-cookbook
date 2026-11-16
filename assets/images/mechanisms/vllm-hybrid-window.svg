@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 452 250" role="img" aria-labelledby="vllm-hybrid-window-title">
+  <title id="vllm-hybrid-window-title">同一条序列，两种可见范围</title>
+  <desc>块长为 2，滑动窗口含当前位置共 4 个 token。绿格是可读取的历史，黄格是当前位置。</desc>
+  <defs><marker id="vllm-hybrid-window-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" class="arrowhead"/></marker></defs>
+  <text x="15" y="28" class="diagram-title" text-anchor="start">同一条序列，两种可见范围</text>
+  <text x="15" y="103" class="label" text-anchor="start">全注意力</text>
+  <text x="15" y="166" class="label" text-anchor="start">滑动窗口</text>
+  <text x="122" y="70" class="label" text-anchor="start">块 A</text>
+  <text x="230" y="70" class="label" text-anchor="start">块 B</text>
+  <text x="338" y="70" class="label" text-anchor="start">块 C</text>
+  <g data-frame="0">
+    <title>处理位置 4</title>
+    <desc>两个层都可以读取位置 1 到 4，位置 1 和 2 同属块 A。</desc>
+    <rect x="107" y="82" width="45" height="34" rx="5" class="stored"/>
+    <text x="129.5" y="104.0" class="label" text-anchor="middle">1</text>
+    <rect x="161" y="82" width="45" height="34" rx="5" class="stored"/>
+    <text x="183.5" y="104.0" class="label" text-anchor="middle">2</text>
+    <rect x="215" y="82" width="45" height="34" rx="5" class="stored"/>
+    <text x="237.5" y="104.0" class="label" text-anchor="middle">3</text>
+    <rect x="269" y="82" width="45" height="34" rx="5" class="fresh"/>
+    <text x="291.5" y="104.0" class="label" text-anchor="middle">4</text>
+    <rect x="323" y="82" width="45" height="34" rx="5" class="idle"/>
+    <text x="345.5" y="104.0" class="label" text-anchor="middle">5</text>
+    <rect x="377" y="82" width="45" height="34" rx="5" class="idle"/>
+    <text x="399.5" y="104.0" class="label" text-anchor="middle">6</text>
+    <rect x="107" y="144" width="45" height="34" rx="5" class="stored"/>
+    <text x="129.5" y="166.0" class="label" text-anchor="middle">1</text>
+    <rect x="161" y="144" width="45" height="34" rx="5" class="stored"/>
+    <text x="183.5" y="166.0" class="label" text-anchor="middle">2</text>
+    <rect x="215" y="144" width="45" height="34" rx="5" class="stored"/>
+    <text x="237.5" y="166.0" class="label" text-anchor="middle">3</text>
+    <rect x="269" y="144" width="45" height="34" rx="5" class="fresh"/>
+    <text x="291.5" y="166.0" class="label" text-anchor="middle">4</text>
+    <rect x="323" y="144" width="45" height="34" rx="5" class="idle"/>
+    <text x="345.5" y="166.0" class="label" text-anchor="middle">5</text>
+    <rect x="377" y="144" width="45" height="34" rx="5" class="idle"/>
+    <text x="399.5" y="166.0" class="label" text-anchor="middle">6</text>
+    <text x="15" y="224" class="note" text-anchor="start">两个层都能读取位置 1–4</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>处理位置 5</title>
+    <desc>滑动窗口移到 2–5，块 A 中的位置 2 仍在窗口内。全注意力层继续读取整个前缀。</desc>
+    <rect x="107" y="82" width="45" height="34" rx="5" class="stored"/>
+    <text x="129.5" y="104.0" class="label" text-anchor="middle">1</text>
+    <rect x="161" y="82" width="45" height="34" rx="5" class="stored"/>
+    <text x="183.5" y="104.0" class="label" text-anchor="middle">2</text>
+    <rect x="215" y="82" width="45" height="34" rx="5" class="stored"/>
+    <text x="237.5" y="104.0" class="label" text-anchor="middle">3</text>
+    <rect x="269" y="82" width="45" height="34" rx="5" class="stored"/>
+    <text x="291.5" y="104.0" class="label" text-anchor="middle">4</text>
+    <rect x="323" y="82" width="45" height="34" rx="5" class="fresh"/>
+    <text x="345.5" y="104.0" class="label" text-anchor="middle">5</text>
+    <rect x="377" y="82" width="45" height="34" rx="5" class="idle"/>
+    <text x="399.5" y="104.0" class="label" text-anchor="middle">6</text>
+    <rect x="107" y="144" width="45" height="34" rx="5" class="idle"/>
+    <text x="129.5" y="166.0" class="label" text-anchor="middle">1</text>
+    <rect x="161" y="144" width="45" height="34" rx="5" class="stored"/>
+    <text x="183.5" y="166.0" class="label" text-anchor="middle">2</text>
+    <rect x="215" y="144" width="45" height="34" rx="5" class="stored"/>
+    <text x="237.5" y="166.0" class="label" text-anchor="middle">3</text>
+    <rect x="269" y="144" width="45" height="34" rx="5" class="stored"/>
+    <text x="291.5" y="166.0" class="label" text-anchor="middle">4</text>
+    <rect x="323" y="144" width="45" height="34" rx="5" class="fresh"/>
+    <text x="345.5" y="166.0" class="label" text-anchor="middle">5</text>
+    <rect x="377" y="144" width="45" height="34" rx="5" class="idle"/>
+    <text x="399.5" y="166.0" class="label" text-anchor="middle">6</text>
+    <text x="15" y="224" class="note" text-anchor="start">窗口左移；第一块中仍需位置 2</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>处理位置 6</title>
+    <desc>滑动窗口只读 3–6，已经用不到块 A。全注意力层仍然需要它。图画的是本轮能读的 KV，物理块何时归还还取决于缓存策略和引用。</desc>
+    <rect x="107" y="82" width="45" height="34" rx="5" class="stored"/>
+    <text x="129.5" y="104.0" class="label" text-anchor="middle">1</text>
+    <rect x="161" y="82" width="45" height="34" rx="5" class="stored"/>
+    <text x="183.5" y="104.0" class="label" text-anchor="middle">2</text>
+    <rect x="215" y="82" width="45" height="34" rx="5" class="stored"/>
+    <text x="237.5" y="104.0" class="label" text-anchor="middle">3</text>
+    <rect x="269" y="82" width="45" height="34" rx="5" class="stored"/>
+    <text x="291.5" y="104.0" class="label" text-anchor="middle">4</text>
+    <rect x="323" y="82" width="45" height="34" rx="5" class="stored"/>
+    <text x="345.5" y="104.0" class="label" text-anchor="middle">5</text>
+    <rect x="377" y="82" width="45" height="34" rx="5" class="fresh"/>
+    <text x="399.5" y="104.0" class="label" text-anchor="middle">6</text>
+    <rect x="107" y="144" width="45" height="34" rx="5" class="idle"/>
+    <text x="129.5" y="166.0" class="label" text-anchor="middle">1</text>
+    <rect x="161" y="144" width="45" height="34" rx="5" class="idle"/>
+    <text x="183.5" y="166.0" class="label" text-anchor="middle">2</text>
+    <rect x="215" y="144" width="45" height="34" rx="5" class="stored"/>
+    <text x="237.5" y="166.0" class="label" text-anchor="middle">3</text>
+    <rect x="269" y="144" width="45" height="34" rx="5" class="stored"/>
+    <text x="291.5" y="166.0" class="label" text-anchor="middle">4</text>
+    <rect x="323" y="144" width="45" height="34" rx="5" class="stored"/>
+    <text x="345.5" y="166.0" class="label" text-anchor="middle">5</text>
+    <rect x="377" y="144" width="45" height="34" rx="5" class="fresh"/>
+    <text x="399.5" y="166.0" class="label" text-anchor="middle">6</text>
+    <text x="15" y="224" class="note" text-anchor="start">第一块已完全落在窗口外</text>
+  </g>
+</svg>

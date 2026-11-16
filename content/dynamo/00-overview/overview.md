@@ -1,100 +1,16 @@
 ---
-title: "Overview"
+title: "NVIDIA Dynamo 1.6.2 阅读指南"
 slug: "overview"
 weight: 0
 ---
 
-本文档系列旨在帮助开发者深入理解 NVIDIA Dynamo —— 一个高吞吐、低延迟的分布式推理框架，专为在多节点环境中服务生成式 AI 和推理模型而设计。
+Dynamo 在多个推理 worker 前面提供统一服务入口。运行时发现可用实例，路由器选择目标，推理后端执行模型。本文以 **1.6.2** 为基线。该版本官方 CUDA 13 镜像分别采用 vLLM **0.31.0** 或 SGLang **0.5.21**。复现集成示例时，应使用 Dynamo 对应后端的镜像；独立项目栏目的新版有各自的接口与依赖。
 
-## 你将学到
+1. [在本机启动 frontend 与 worker](/dynamo/06-python-sdk/05-cli-tools/)，查询模型并发一条聊天请求。
+2. [区分发现、请求和事件三个平面](/dynamo/05-distributed-communication/02-three-plane-architecture/)。理解为什么单机快速开始可以使用文件发现。
+3. [比较不同 worker 的前缀重叠和负载](/dynamo/04-kv-cache-system/03-kv-aware-router/)，再看[预填充与解码如何交接 KV](/dynamo/03-llm-inference-layer/05-disaggregated-serving/)。
+4. 没有 GPU 可先用两个 Python 进程运行[已验证的 echo 服务与客户端](/dynamo/06-python-sdk/03-service-decorators/)入手，沿 client、runtime 和 handler 看边界。
 
-- Dynamo 的五层架构设计
-- Rust 异步编程和分布式运行时
-- 多引擎抽象层（vLLM、TensorRT-LLM、SGLang）
-- KV Cache 智能路由和 RadixTree 索引
-- Disaggregated Serving（Prefill/Decode 分离）
-- 三平面通信架构（控制平面、事件平面、数据平面）
+集群部署还需要核对 Operator、资源定义、模型存储和设备网络。单机一次正确响应可以验证 HTTP 到执行后端的路径；P/D 实际传输能力与多节点表现需要在目标环境测量。
 
-## 学习路线图
-
-### 路径一：基础路径（推荐新手）
-
-适合刚接触分布式推理框架的读者。
-
-```mermaid
-flowchart TD
-    subgraph stage1["第一阶段 - 理解背景"]
-        A["LLM 推理基础"] --> B["行业痛点"]
-        B --> C["Dynamo 设计理念"]
-    end
-
-    subgraph stage2["第二阶段 - 架构总览"]
-        C --> D["系统架构"]
-        D --> E["部署模式"]
-    end
-
-    subgraph stage3["第三阶段 - 运行时层"]
-        E --> F["Rust 异步编程"]
-        F --> G["Runtime 设计"]
-        G --> H["Component 系统"]
-    end
-
-    subgraph stage4["第四阶段 - 推理层"]
-        H --> I["多引擎抽象"]
-        I --> J["Worker 设计"]
-        J --> K["Disaggregated Serving"]
-    end
-
-    style A fill:#e1f5fe
-    style K fill:#c8e6c9
-```
-
-### 路径二：进阶路径（适合有基础的读者）
-
-如果你已经了解 LLM 推理的基本概念，可以直接进入核心内容。
-
-```mermaid
-flowchart TD
-    subgraph s1["架构理解"]
-        A["系统架构"] --> B["部署模式"]
-    end
-
-    subgraph s2["核心组件"]
-        B --> C["Runtime 设计"]
-        C --> D["Component 系统"]
-        D --> E["Pipeline 架构"]
-    end
-
-    subgraph s3["KV Cache"]
-        E --> F["KV-Aware Router"]
-        F --> G["RadixTree 索引"]
-        G --> H["KV Cache Manager"]
-    end
-
-    subgraph s4["通信与 API"]
-        H --> I["三平面架构"]
-        I --> J["Python SDK"]
-        J --> K["HTTP API"]
-    end
-
-    style A fill:#e1f5fe
-    style K fill:#c8e6c9
-```
-
-## 文档结构
-
-| 章节 | 内容 |
-|------|------|
-| 整体架构与设计理念 | LLM 推理基础、行业痛点、设计理念、系统架构、部署模式 |
-| 运行时层原理 | Rust 异步编程、分布式系统基础、Runtime 设计、Component 系统、Pipeline 架构、服务发现 |
-| LLM 推理层原理 | 推理引擎原理、vLLM 技术解析、多引擎抽象、Worker 设计、Disaggregated Serving、请求处理 |
-| KV Cache 管理与路由 | KV Cache 原理、优化技术综述、KV-Aware Router、RadixTree 索引、KV Cache Manager、事件系统 |
-| 分布式通信机制 | 通信基础、三平面架构、etcd 集成、NATS 集成、NIXL 传输、TCP Pipeline |
-| Python SDK 原理 | Rust-Python 互操作、PyO3 绑定、服务装饰器、DynamoService 类、CLI 工具 |
-| HTTP API 层原理 | REST API 基础、HTTP Server 设计、OpenAI 兼容 API、流式响应、错误处理 |
-
-## 文档版本
-
-- **Dynamo 版本**：基于 NVIDIA Dynamo
-- **文档版本**：1.0
-- **最后更新**：2025 年 1 月
+[单机快速开始](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/docs/fern/pages/cli/getting-started/quickstart.mdx) · [镜像实际依赖](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/container/context.yaml) · [系统架构](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/docs/fern/pages/developer-guide/knowledge-base/concepts/system-architecture/architecture.md)

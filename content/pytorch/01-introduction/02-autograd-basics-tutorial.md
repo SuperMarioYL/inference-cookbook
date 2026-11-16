@@ -102,31 +102,27 @@ graph LR
 
 ### 前向与反向传播对比
 
-```mermaid
-graph TB
-    subgraph forward["前向传播 - 构建计算图"]
-        direction LR
-        F1["输入张量 x, w, b"] --> F2["执行运算 y = x * w"]
-        F2 --> F3["执行运算 z = y + b"]
-        F3 --> F4["输出结果 z"]
-        F2 -.->|"记录 MulBackward0"| G1["计算图节点"]
-        F3 -.->|"记录 AddBackward0"| G1
-    end
-
-    subgraph backward["反向传播 - 沿图计算梯度"]
-        direction RL
-        B1["从 z 开始, grad = 1"] --> B2["AddBackward0.apply()"]
-        B2 -->|"链式法则"| B3["MulBackward0.apply()"]
-        B2 --> B4["b.grad = 1.0"]
-        B3 --> B5["x.grad = w = 3.0"]
-        B3 --> B6["w.grad = x = 2.0"]
-    end
-
-    forward --> backward
-
-    style forward fill:#e8f5e9,stroke:#4CAF50
-    style backward fill:#fce4ec,stroke:#E91E63
-```
+{{< stateboard >}}
+title: "一次标量反向传播"
+rows: ["变量", "前向值", "梯度"]
+steps:
+  - title: "记录乘法"
+    detail: "输入 x=2、w=3、b=1，先算 p=x*w。"
+    cells: [["x", "w", "b", "p", "z"], ["2", "3", "1", "6", "·"], ["·", "·", "·", "·", "·"]]
+    focus: [[1, 3]]
+  - title: "得到输出"
+    detail: "z=p+b=7，从标量 z 开始 backward，初始梯度为 1。"
+    cells: [["x", "w", "b", "p", "z"], ["2", "3", "1", "6", "7"], ["·", "·", "·", "·", "1"]]
+    focus: [[1, 4], [2, 4]]
+  - title: "通过加法"
+    detail: "加法把上游 1 分给 p 和 b。图中显示反向传播的局部梯度，并不要求非叶张量保留 .grad。"
+    cells: [["x", "w", "b", "p", "z"], ["2", "3", "1", "6", "7"], ["·", "·", "1", "1", "1"]]
+    focus: [[2, 2], [2, 3]]
+  - title: "通过乘法"
+    detail: "dx=dp*w=3，dw=dp*x=2，三个叶张量各自收到梯度。"
+    cells: [["x", "w", "b", "p", "z"], ["2", "3", "1", "6", "7"], ["3", "2", "1", "1", "1"]]
+    focus: [[2, 0], [2, 1]]
+{{< /stateboard >}}
 
 ## 4. 反向传播基本用法
 
@@ -235,7 +231,7 @@ print(d2y_dx2)  # tensor(12.)  即 6x = 12
 
 ## 6. 梯度累加与清零
 
-理解梯度累加机制对正确使用 Autograd 至关重要：
+连续调用两次 `backward()` 时，第二次产生的梯度会加到已有的 `.grad` 上。
 
 ```python
 x = torch.tensor(3.0, requires_grad=True)
@@ -290,4 +286,4 @@ y = x.detach()  # y 与 x 共享数据，但不追踪梯度
 | 叶子张量 | 用户创建、`is_leaf=True`、梯度存储在 `.grad` |
 | 非叶子张量 | 运算产生、有 `grad_fn`、默认不保留梯度 |
 
-Autograd 是 PyTorch 深度学习框架的基石。理解这些基础概念后，可以继续深入学习计算图的内部结构（Node、Edge）、引擎执行机制以及自定义 autograd.Function 等进阶主题。
+要查看一次反向传播经过哪些节点，可以从输出张量的 `grad_fn` 开始，沿 `next_functions` 追到叶子参数。

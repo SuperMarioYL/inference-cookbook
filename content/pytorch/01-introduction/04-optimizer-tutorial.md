@@ -3,7 +3,7 @@ title: "Optimizer 教程"
 weight: 4
 ---
 
-> 本文面向初学者，介绍 PyTorch 中 SGD、Adam 的基本用法，参数组（param_groups）机制，学习率调度器（lr_scheduler）的使用方式，以及标准训练循环的执行模式。
+训练一个线性层时，可以先打印 `param.grad`，再调用 `optimizer.step()`，观察梯度怎样改变参数。
 
 ## 1. 什么是优化器
 
@@ -216,20 +216,27 @@ for epoch in range(num_epochs):
 
 ### 6.1 训练循环状态图
 
-```mermaid
-stateDiagram-v2
-    [*] --> ZeroGrad["zero_grad() - 清零梯度"]
-    ZeroGrad --> Forward["forward() - 前向传播"]
-    Forward --> ComputeLoss["loss = criterion(output, target) - 计算损失"]
-    ComputeLoss --> Backward["loss.backward() - 反向传播"]
-    Backward --> Step["optimizer.step() - 更新参数"]
-    Step --> CheckBatch{"还有更多 batch?"}
-    CheckBatch --> ZeroGrad: Yes
-    CheckBatch --> SchedulerStep["scheduler.step() - 调整学习率"]
-    SchedulerStep --> CheckEpoch{"还有更多 epoch?"}
-    CheckEpoch --> ZeroGrad: Yes
-    CheckEpoch --> [*]: No
-```
+{{< stateboard >}}
+title: "一步 SGD 更新一个权重"
+rows: ["权重 w", "损失 L", "梯度"]
+steps:
+  - title: "清除旧梯度"
+    detail: "令 w=2，学习率为 0.1，采用没有动量和权重衰减的 SGD。zero_grad(set_to_none=True) 重置梯度。"
+    cells: [["2"], ["·"], ["None"]]
+    focus: [[2, 0]]
+  - title: "前向计算"
+    detail: "L=w²，代入 w=2 得到损失 4。"
+    cells: [["2"], ["4"], ["None"]]
+    focus: [[1, 0]]
+  - title: "反向计算"
+    detail: "对 L 求导得 2w=4，梯度写入 w.grad；此时权重仍为 2。"
+    cells: [["2"], ["4"], ["4"]]
+    focus: [[2, 0]]
+  - title: "更新参数"
+    detail: "optimizer.step() 计算 2−0.1×4=1.6；已有梯度在下一次清零前仍留在参数上。"
+    cells: [["1.6"], ["4"], ["4"]]
+    focus: [[0, 0]]
+{{< /stateboard >}}
 
 ### 6.2 各步骤详解
 

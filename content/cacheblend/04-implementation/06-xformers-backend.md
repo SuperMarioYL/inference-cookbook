@@ -3,7 +3,7 @@ title: "xFormers 后端"
 weight: 6
 ---
 
-本文档详细介绍 CacheBlend 的 XFormers 注意力后端实现，包括 HKVD 选择算法、注意力掩码处理，以及示例代码 blend.py 的完整执行流程解析。
+融合请求把新算出的 V 和旧 V 传给 xFormers 后端。后端用两者的差值选出文档位置，再把新问题的后缀加入下一步计算。
 
 ## XFormersImpl 类概述
 
@@ -171,26 +171,7 @@ def forward(
 
 ## HKVD 选择算法详解
 
-```mermaid
-graph TB
-    subgraph "HKVD 选择算法"
-        V["Value (新)"] --> Diff["计算差异"]
-        VO["Value_old (旧)"] --> Diff
-
-        Diff --> D["temp_diff = Σ(V - V_old)²"]
-        D --> TopK["torch.topk(temp_diff, k)"]
-
-        TopK --> Sort["torch.sort(top_indices)"]
-        Sort --> Merge["合并后缀索引"]
-
-        SL["suffix_len"] --> Last["last_indices"]
-        Last --> Merge
-
-        Merge --> Imp["imp_indices"]
-        Imp --> Filter["过滤 Query"]
-        Imp --> Save["保存到 metadata"]
-    end
-```
+令本层某个 token 的新旧 V 差为 `[1, 2]`，它的示例分数就是 `1²+2²=5`。将各文档位置的分数一起排序即可取 top-k；新后缀随后追加。完整数值例子见 [HKVD 选择](../05-algorithms/02-hkvd-selection.md)。
 
 **代码实现**：
 ```python
@@ -210,7 +191,9 @@ top_indices = torch.topk(temp_diff, k=topk_num).indices
 
 ## 注意力掩码处理
 
-CacheBlend 使用特殊的注意力掩码 `LowerTriangularFromBottomRightMask`：
+作者原型将筛出的 query 压成较短的张量，再把 `LowerTriangularFromBottomRightMask` 传给 xFormers。这个掩码按 Q、KV 的长度右对齐。举例来说，2 行 Q、4 列 KV 时，第一行开放 K0–K2，第二行开放 K0–K3。若 `imp_indices=[1,3]`，第一行原本来自位置 1，掩码依然允许它读 K2；代码中按具体索引构造 partial bias 的调用已注释。
+
+[矩形掩码逐行演示](../00-prerequisites/02-attention-mechanism.md) · [原型 xFormers 后端](https://github.com/YaoJiayi/CacheBlend/blob/55ad02675939f783a38d579393527d218a7fd581/vllm_blend/vllm/attention/backends/xformers.py)
 
 ```python
 def _run_memory_efficient_xformers_forward(
@@ -257,30 +240,27 @@ def _run_memory_efficient_xformers_forward(
 
 ## 完整执行流程图
 
-```mermaid
-sequenceDiagram
-    participant LlamaAttn as LlamaAttention
-    participant XFormers as XFormersImpl
-    participant PagedAttn as PagedAttention
-
-    LlamaAttn->>XFormers: forward(Q, K, V, status, old_kv)
-
-    alt status == 1 (Check)
-        XFormers->>XFormers: 计算 V - V_old 差异
-        XFormers->>XFormers: topk 选择 HKVD
-        XFormers->>XFormers: 保存 imp_indices
-        XFormers->>XFormers: query = query[imp_indices]
-        XFormers->>XFormers: 设置特殊 attn_bias
-    else status == 2 (After Check)
-        XFormers->>XFormers: key_old[imp_indices] = key
-        XFormers->>XFormers: value_old[imp_indices] = value
-        XFormers->>XFormers: key, value = key_old, value_old
-    end
-
-    XFormers->>PagedAttn: write_to_paged_cache
-    XFormers->>XFormers: _run_memory_efficient_xformers_forward
-    XFormers-->>LlamaAttn: 返回 attention output
-```
+{{< trace >}}
+title: "一次检查与后续一层各改哪份数据"
+actors: ["模型层", "xFormers", "位置表", "旧 KV"]
+steps:
+  - from: 0
+    to: 1
+    label: "检查层送入 V"
+    detail: "工作序列及对应旧 V 都进入后端。"
+  - from: 1
+    to: 2
+    label: "填入位置表"
+    detail: "以 V 的平方差选择文档位置，附加后缀，保存 imp_indices。"
+  - from: 2
+    to: 0
+    label: "对齐工作张量"
+    detail: "模型整理下一层使用的隐藏状态、位置和残差。"
+  - from: 1
+    to: 3
+    label: "后续层写回"
+    detail: "状态为 2 时，以 imp_indices 定位旧 KV 中要被新值覆盖的格子。"
+{{< /trace >}}
 
 ---
 
@@ -431,82 +411,31 @@ for sample_idx in range(1, 11):
 
 ### 执行流程图
 
-```mermaid
-graph TB
-    subgraph "blend.py 执行流程"
-        A[初始化 LLM] --> B[加载数据]
-        B --> C[获取 cache_fuse_metadata]
-        C --> D[设置 collect=True]
-
-        subgraph "收集阶段"
-            D --> E[循环处理每个 Chunk]
-            E --> F[运行 Prefill]
-            F --> G[读取 hack_kv]
-            G --> H[拼接到 chunk_past_key_values]
-            H --> I[更新 old_kvs]
-            I --> E
-        end
-
-        I --> J[构建完整输入]
-        J --> K[设置 check=True]
-
-        subgraph "融合推理"
-            K --> L[运行 CacheBlend 推理]
-            L --> M[输出结果 + TTFT]
-        end
-
-        M --> N[设置 check=False]
-
-        subgraph "对比推理"
-            N --> O[运行 Full Prefill]
-            O --> P[输出结果 + TTFT]
-        end
-    end
-```
+脚本的前半段按文档收集各层 KV，后半段用同一条组合提示运行融合与完整 prefill。下面沿着这两次调用看状态如何切换。
 
 ### 数据流详解
 
-```mermaid
-sequenceDiagram
-    participant Main as blend.py
-    participant LLM as vLLM
-    participant Model as LlamaModel
-    participant Attn as LlamaAttention
-
-    Note over Main,Attn: === 收集阶段 ===
-    Main->>Model: collect=True, check=False
-
-    loop 每个 Chunk
-        Main->>LLM: generate(chunk)
-        LLM->>Model: forward()
-        Model->>Attn: forward()
-        Note right of Attn: hack_kv = [K, V]
-        Attn-->>Main:
-        Main->>Attn: 读取 hack_kv
-        Main->>Main: 拼接到 chunk_past_key_values
-    end
-
-    Main->>Model: old_kvs = chunk_past_key_values
-
-    Note over Main,Attn: === 融合推理阶段 ===
-    Main->>Model: check=True, collect=False
-    Main->>Model: suffix_len = last_len
-    Main->>LLM: generate(full_input)
-
-    LLM->>Model: forward()
-    Note right of Model: Layer 0: status=0
-    Model->>Attn: forward(status=0)
-
-    Note right of Model: Layer 1: status=1 (Check)
-    Model->>Attn: forward(status=1, old_kv)
-    Note right of Attn: 计算 V 差异<br>选择 HKVD<br>保存 imp_indices
-
-    Note right of Model: Layer 2+: status=2
-    Model->>Attn: forward(status=2, old_kv)
-    Note right of Attn: 更新 old_kv[imp_indices]<br>使用融合 KV
-
-    LLM-->>Main: 输出 + TTFT
-```
+{{< trace >}}
+title: "示例脚本如何复用一次收集结果"
+actors: ["blend.py", "文档块", "模型层", "完整提示"]
+steps:
+  - from: 0
+    to: 1
+    label: "分开输入"
+    detail: "示例先把各个文档块单独送进 prefill。"
+  - from: 1
+    to: 2
+    label: "收集各层"
+    detail: "打开 collect，读取每层保存下来的 K、V。"
+  - from: 2
+    to: 0
+    label: "拼接结果"
+    detail: "脚本按组合提示的顺序整理各层张量，交给模型的 old_kvs。"
+  - from: 0
+    to: 3
+    label: "用同一提示对照"
+    detail: "先运行融合，再关闭检查运行完整 prefill，比较结果和脚本计时。"
+{{< /trace >}}
 
 ### 关键参数配置
 

@@ -4,7 +4,12 @@ weight: 3
 ---
 
 
-本文档汇总了学习 vLLM 和 LLM 推理优化所需的关键参考资料。
+本栏的源码解释针对 **vLLM 0.33.0**。调度器和 CLI 以固定版本为准；早期论文解释设计起点，其报告的实验数字应按当时的硬件、模型和对照组理解。
+
+- [0.33.0 架构与进程](https://github.com/vllm-project/vllm/blob/v0.33.0/docs/design/arch_overview.md)
+- [0.33.0 混合 KV 管理器](https://github.com/vllm-project/vllm/blob/v0.33.0/docs/design/hybrid_kv_cache_manager.md)
+- [0.33.0 自动前缀缓存](https://github.com/vllm-project/vllm/blob/v0.33.0/docs/design/prefix_caching.md)
+- [按职责查看源码](/vllm/appendix/code-map/)
 
 ---
 
@@ -140,8 +145,8 @@ weight: 3
 
 ### NVIDIA 官方
 
-- **CUDA C++ Programming Guide**
-  - 链接: https://docs.nvidia.com/cuda/cuda-c-programming-guide/
+- **CUDA Programming Guide**
+  - 链接: https://docs.nvidia.com/cuda/cuda-programming-guide/
   - 要点: CUDA 编程基础
 
 - **NCCL Documentation**
@@ -220,8 +225,8 @@ weight: 3
 
 ### 讨论论坛
 
-- **vLLM Discord**
-  - 链接: https://discord.com/invite/vllm
+- **vLLM 官方论坛**
+  - 链接: https://discuss.vllm.ai/
   - 说明: 官方交流社区
 
 - **Hugging Face Forums**
@@ -257,4 +262,4 @@ weight: 3
 
 **导航**
 - 上一篇：[代码文件索引](code-map.md)
-- 返回：[README](../README.md)
+- 返回：[README](/vllm/00-overview/overview/)

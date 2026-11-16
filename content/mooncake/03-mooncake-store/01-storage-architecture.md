@@ -3,13 +3,7 @@ title: "存储架构设计"
 weight: 1
 ---
 
-# 存储架构设计
-
-[上一篇](../02-architecture/) | [目录](../README.md) | [下一篇](02-master-service.md)
-
----
-
-本部分深入分析 Mooncake Store 的内部实现，包括存储架构设计、元数据管理、内存分配器、副本管理、驱逐策略以及高可用机制。
+一个 key 可以有多个副本。Master 记录它们属于哪个租户、在哪个 segment、是否已写完；客户端拿到可读位置后再传输字节。
 
 ## 5.1 整体存储架构
 
@@ -122,17 +116,39 @@ struct ReplicateConfig {
 
 副本状态转换图：
 
-```mermaid
-stateDiagram-v2
-    [*] --> UNDEFINED
-    UNDEFINED --> INITIALIZED: allocate()
-    INITIALIZED --> PROCESSING: start_write()
-    PROCESSING --> COMPLETE: mark_complete()
-    PROCESSING --> FAILED: write_error()
-    COMPLETE --> REMOVED: evict()/remove()
-    FAILED --> REMOVED: cleanup()
-    REMOVED --> [*]
-```
+{{< stateboard >}}
+title: "一个副本从分配到可读"
+rows: ["副本位置", "写入状态", "读者"]
+steps:
+  - title: "获得位置"
+    detail: "Master 分配位置，写入方拿到描述符，读者还拿不到可读副本。"
+    cells:
+      - ["S0"]
+      - ["处理中"]
+      - ["等待"]
+    focus: [[0, 0], [1, 0]]
+  - title: "传输数据"
+    detail: "写者正在填充 S0，Master 尚未得到完成通知。"
+    cells:
+      - ["S0"]
+      - ["写入中"]
+      - ["等待"]
+    focus: [[1, 0]]
+  - title: "发布副本"
+    detail: "写者完成数据传输并成功结束写入，有效副本才可供查询。"
+    cells:
+      - ["S0"]
+      - ["已完成"]
+      - ["能读取"]
+    focus: [[1, 0], [2, 0]]
+  - title: "移除副本"
+    detail: "驱逐或删除使 S0 退出可读集合；其他副本按各自状态处理。"
+    cells:
+      - ["·"]
+      - ["已移除"]
+      - ["查其他"]
+    focus: [[0, 0], [2, 0]]
+{{< /stateboard >}}
 
 ### 5.2.3 Replica 类实现
 
@@ -524,28 +540,29 @@ public:
 
 分配决策流程：
 
-```mermaid
-flowchart TD
-    A[分配请求] --> B{有首选 segment?}
-    B -->|是| C[尝试首选 segment]
-    C --> D{分配成功?}
-    D -->|是| E{副本数满足?}
-    E -->|是| F[返回副本列表]
-    E -->|否| G[继续分配]
-    D -->|否| G
-    B -->|否| G
-    G --> H[筛选可用 allocators]
-    H --> I[随机排序]
-    I --> J[依次尝试分配]
-    J --> K{分配成功?}
-    K -->|是| L{副本数满足?}
-    L -->|是| F
-    L -->|否| J
-    K -->|否| M{还有候选?}
-    M -->|是| J
-    M -->|否| N[返回已分配副本或错误]
-```
-
----
-
-[上一篇](../02-architecture/) | [目录](../README.md) | [下一篇](02-master-service.md)
+{{< stateboard >}}
+title: "请求两份副本时怎样遍历候选"
+rows: ["候选", "剩余空间", "结果"]
+steps:
+  - title: "先看首选段"
+    detail: "假设本次对象需 8 MiB，A 只剩 4 MiB，B、C 空间足够。"
+    cells:
+      - ["A", "B", "C"]
+      - ["4", "16", "12"]
+      - ["·", "·", "·"]
+    focus: [[0, 0], [1, 0]]
+  - title: "选择两处"
+    detail: "策略从剩余合格候选取得两个不同位置，先为 B 分配。"
+    cells:
+      - ["A", "B", "C"]
+      - ["4", "8", "12"]
+      - ["跳过", "副本1", "·"]
+    focus: [[1, 1], [2, 1]]
+  - title: "达到副本数"
+    detail: "C 也成功分配，返回两份描述符。图中剩余容量的单位是 MiB。"
+    cells:
+      - ["A", "B", "C"]
+      - ["4", "8", "4"]
+      - ["跳过", "副本1", "副本2"]
+    focus: [[1, 2], [2, 2]]
+{{< /stateboard >}}

@@ -16,7 +16,7 @@ weight: 2
 
 ## 1. 分块策略概述
 
-在 [Flash Attention 核心理论](../01-theory/03-flash-attention-theory.md) 中，我们推导了分块计算的基本原理：将 $Q, K, V$ 矩阵按行分为大小为 $B_r \times d$ 和 $B_c \times d$ 的块，使中间计算 $S_{ij} = Q_i K_j^T$ 可以驻留在 GPU 的 SRAM 中。
+在 [Flash Attention 核心理论](/flashattention/01-theory/03-flash-attention-theory/) 中，我们推导了分块计算的基本原理：将 $Q, K, V$ 矩阵按行分为大小为 $B_r \times d$ 和 $B_c \times d$ 的块，使中间计算 $S_{ij} = Q_i K_j^T$ 可以驻留在 GPU 的 SRAM 中。
 
 从理论到实际的 GPU 内核实现，分块策略需要回答三个核心问题：
 
@@ -154,21 +154,23 @@ return {128, use_blockN_128 ? 128 : 176, true, true};
 
 标准 Causal Attention 需要对 $N \times N$ 矩阵应用下三角遮蔽。但逐元素检查遮蔽条件非常低效。Flash Attention 的关键优化是在 **块级别** 跳过完全不需要计算的块。
 
-```mermaid
-graph TB
-    subgraph matrix["注意力矩阵 (分块视图)"]
-        direction TB
-        R0["Q块 0: 全部计算 | 全部计算 | 部分计算 | 跳过"]
-        R1["Q块 1: 全部计算 | 全部计算 | 全部计算 | 部分计算"]
-        R2["Q块 2: 全部计算 | 全部计算 | 全部计算 | 全部计算"]
-    end
-
-    subgraph legend["图例"]
-        FULL["全部计算 - 块内所有元素有效"]
-        PARTIAL["部分计算 - 需逐元素 mask"]
-        SKIP["跳过 - 整块被 mask"]
-    end
-```
+{{< stateboard >}}
+title: "因果分块的上界随 Q 位置移动"
+rows: ["Q 行范围", "KV0 [0,1]", "KV1 [2,3]", "KV2 [4,5]"]
+steps:
+  - title: "从 Q 行 0、1 开始"
+    detail: "等长自注意力，每块两行。未来的两个 KV 块可整块跳过。"
+    cells: [["0–1"], ["逐项 mask"], ["跳过"], ["跳过"]]
+    focus: [[1, 0]]
+  - title: "移到 Q 行 2、3"
+    detail: "KV0 全部可见，KV1 穿过对角线，KV2 对这两行仍全在未来。"
+    cells: [["2–3"], ["整块可见"], ["逐项 mask"], ["跳过"]]
+    focus: [[2, 0]]
+  - title: "移到 Q 行 4、5"
+    detail: "前两个 KV 块全部可见，现在只有 KV2 需要逐项区分。"
+    cells: [["4–5"], ["整块可见"], ["整块可见"], ["逐项 mask"]]
+    focus: [[3, 0]]
+{{< /stateboard >}}
 
 对于 Causal Attention，第 $i$ 个 Q 块只需与前 $n_{\text{max}}$ 个 K 块计算：
 
@@ -531,6 +533,6 @@ Flash Attention 的分块策略是一个多层次的优化系统：
 
 ## 导航
 
-- 上一篇：[Online Softmax 算法详解](01-online-softmax.md)
-- 下一篇：[前向传播算法详解](03-forward-pass.md)
-- [返回目录](../README.md)
+- 上一篇：[Online Softmax 算法详解](/flashattention/02-core-algorithm/01-online-softmax/)
+- 下一篇：[前向传播算法详解](/flashattention/02-core-algorithm/03-forward-pass/)
+- [返回目录](/flashattention/00-overview/overview/)

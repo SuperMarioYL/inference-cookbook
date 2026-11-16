@@ -3,16 +3,7 @@ title: "注意力机制原理"
 weight: 3
 ---
 
-
-> 本章将深入介绍自注意力机制的数学原理和计算过程，这是理解 vLLM 核心优化的关键。
-
----
-
-## 引言
-
-注意力机制是 Transformer 的核心创新，也是 vLLM 优化的主要目标。理解注意力机制的计算过程，对于理解 KV Cache 和 PagedAttention 至关重要。
-
----
+处理一句话的最后一个 token 时，模型用它的查询向量 Q 与可见位置的 K 求相似度，再用得到的权重对 V 求和。下面把这个过程写成张量运算，并比较 MHA、GQA 和 MQA 中 KV 头的数量。
 
 ## 1. 注意力的直觉理解
 
@@ -323,23 +314,9 @@ hidden_dim = num_heads × head_dim
 
 ### 5.1 为什么需要掩码
 
-在语言模型中，预测下一个 token 时**不能看到未来的 token**。因果掩码确保每个位置只能关注它之前的位置。
+预测下一个 token 时，位置 i 的查询可读取位置 0 到 i 的键值，包括 i 自身。右侧尚未出现的位置被屏蔽。
 
-```mermaid
-graph LR
-    subgraph no_mask["无掩码 - 双向注意力"]
-        A1[token 1] <--> A2[token 2]
-        A1 <--> A3[token 3]
-        A2 <--> A3
-    end
-
-    subgraph with_mask["有掩码 - 单向注意力"]
-        B1[token 1]
-        B2[token 2] --> B1
-        B3[token 3] --> B1
-        B3 --> B2
-    end
-```
+{{< mechanism "vllm-causal-mask" >}}
 
 ### 5.2 掩码矩阵
 
@@ -429,7 +406,7 @@ graph LR
     end
 ```
 
-当序列长度增加 4 倍，计算量增加 16 倍！这是长序列 LLM 面临的核心挑战。
+在全注意力 prefill 中，序列长度变为 4 倍，分数矩阵的元素数变为 16 倍。
 
 ### 6.4 优化方法简介
 
@@ -479,7 +456,7 @@ graph TB
 **示例**（LLaMA-2-70B）：
 - Q heads: 64
 - KV heads: 8
-- KV Cache 减少 8 倍！
+- 同模型形状和精度下，KV 字节数是 64 个 KV 头时的 1/8。
 
 ---
 
@@ -496,54 +473,41 @@ graph TB
 
 ### 8.2 预览：KV Cache 的作用
 
-```mermaid
-sequenceDiagram
-    participant New as 新 Token
-    participant Cache as KV Cache
-    participant ATT as Attention
-
-    Note over Cache: 存储历史 token 的 K, V
-
-    New->>ATT: 计算新 token 的 Q, K, V
-    Cache->>ATT: 提供历史 K, V
-    ATT->>ATT: Q_new x [K_cache, K_new]^T
-    ATT->>ATT: Attention x [V_cache, V_new]
-    ATT->>Cache: 将 K_new, V_new 加入缓存
-```
+{{< trace >}}
+title: 下一个位置怎样读取历史 KV
+actors: ["新位置", "注意力层", "KV 缓存"]
+steps:
+  - from: 0
+    to: 1
+    label: "输入位置 3"
+    detail: "位置 3 的隐藏状态进入这一层。"
+  - from: 1
+    to: 1
+    label: "投影 Q、K、V"
+    detail: "产生当前位置的查询和键值，历史位置已计算过。"
+  - from: 2
+    to: 1
+    label: "读 K₀ 至 K₂"
+    detail: "缓存给出位置 0 到 2 的键与值。"
+  - from: 1
+    to: 1
+    label: "求加权和"
+    detail: "Q₃ 对 K₀…K₃ 求分数，归一化后汇总 V₀…V₃。"
+  - from: 1
+    to: 2
+    label: "保留 K₃、V₃"
+    detail: "完成本轮后，下个位置可读取四个位置。具体写入可与设备计算融合。"
+{{< /trace >}}
 
 ---
 
-## 9. 本章小结
-
-### 核心公式
+## 注意力输出的计算式
 
 $$
 \text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right) V
 $$
 
-### 关键概念
-
-| 概念 | 说明 |
-|------|------|
-| Q/K/V | Query（查询）、Key（键）、Value（值） |
-| 缩放因子 | $\sqrt{d_k}$，防止 softmax 饱和 |
-| 多头注意力 | 并行学习多种注意力模式 |
-| 因果掩码 | 防止看到未来 token |
-| GQA | 减少 KV heads，降低内存占用 |
-
-### 计算复杂度
-
-- 时间复杂度：$O(n^2 d)$
-- 空间复杂度：$O(n^2)$
-- 长序列是主要挑战
-
-### 与 vLLM 的关联
-
-- KV Cache 是注意力优化的核心
-- PagedAttention 优化 K/V 的内存管理
-- Flash Attention 优化注意力计算速度
-
----
+分数矩阵增大时，还可以沿 K/V 序列分块读取。[FlashAttention 的两块手算例子](/flashattention/02-core-algorithm/01-online-softmax/) 展示怎样保留行最大值和加权和，最后得到同一个注意力输出。
 
 ## 思考题
 
@@ -553,8 +517,4 @@ $$
 
 ---
 
-## 下一步
-
-理解了注意力机制后，我们将深入学习 KV Cache 的概念和作用：
-
-👉 [下一章：KV Cache 概念](04-kv-cache-concept.md)
+[计算一次生成需要保留多少 KV](04-kv-cache-concept.md)

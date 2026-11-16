@@ -3,7 +3,7 @@ title: "Pipeline 优化"
 weight: 4
 ---
 
-本文档介绍 CacheBlend 的流水线优化策略，通过将 KV Cache 加载与选择性重计算并行化，实现延迟隐藏，最大限度减少 TTFT（Time To First Token）。
+第 0 层拿到 KV 后就可以开始重算。存储端若同时读取第 1 层，模型进入下一层时的等待就会缩短。
 
 ---
 
@@ -11,24 +11,32 @@ weight: 4
 
 CacheBlend 的一个关键优化是将 KV 加载与选择性重计算流水线化：
 
-```mermaid
-gantt
-    title CacheBlend 流水线时序
-    dateFormat X
-    axisFormat %s
-
-    section Layer 1
-    加载 KV     :a1, 0, 16
-    重计算      :a2, after a1, 3
-
-    section Layer 2
-    加载 KV     :b1, after a1, 16
-    重计算      :b2, after b1, 3
-
-    section Layer 3
-    加载 KV     :c1, after b1, 16
-    重计算      :c2, after c1, 3
-```
+{{< stateboard >}}
+title: "第二层的加载覆盖了多少重算"
+rows: ["时段", "读 KV", "计算"]
+steps:
+  - title: "首先加载"
+    detail: "用三个时间段表示相邻两层，第一段只读取第一层 KV。"
+    cells:
+      - ["时段1", "时段2", "时段3"]
+      - ["读 L0", "·", "·"]
+      - ["·", "·", "·"]
+    focus: [[1, 0]]
+  - title: "两项工作重叠"
+    detail: "L0 数据就绪后开始重算，I/O 同时预取 L1。"
+    cells:
+      - ["时段1", "时段2", "时段3"]
+      - ["读 L0", "读 L1", "·"]
+      - ["·", "算 L0", "·"]
+    focus: [[1, 1], [2, 1]]
+  - title: "流水线排空"
+    detail: "L1 就绪后才能执行它的重算，图中的三段表示先后关系。"
+    cells:
+      - ["时段1", "时段2", "时段3"]
+      - ["读 L0", "读 L1", "·"]
+      - ["·", "算 L0", "算 L1"]
+    focus: [[2, 2]]
+{{< /stateboard >}}
 
 ## 3.5.2 两线程实现
 
@@ -44,47 +52,36 @@ gantt
 - KV 重计算延迟被完全隐藏
 - TTFT 不增加额外延迟
 
-```mermaid
-graph LR
-    subgraph "延迟隐藏"
-        A["无流水线<br>TTFT = T_load + T_recompute"]
-        B["有流水线<br>TTFT = max(T_load, T_recompute)"]
-
-        A -->|"流水线优化"| B
-    end
-
-    style B fill:#90EE90
-```
+以相邻层为例，顺序执行的时间按读取与计算相加；充分重叠时，稳态由较慢的一项决定。第一层先读、最后一层再算，首尾两段仍计入 TTFT。
 
 ## 3.5.4 系统完整流程
 
 将所有组件整合在一起：
 
-```mermaid
-sequenceDiagram
-    participant User as 用户
-    participant LC as Loading Controller
-    participant KS as KV Cache Manager
-    participant F as Fusor
-    participant LLM as LLM Engine
-
-    User->>LC: 1. 提交问题 + 相关文本块列表
-    LC->>KS: 2. 查询 KV Cache 存在性和位置
-    KS->>LC: 3. 返回信息
-    LC->>LC: 4. 计算理想重计算比例
-    LC->>F: 5. 发送比例
-    LC->>F: 6. 开始加载 KV Cache 到 GPU 队列
-
-    loop 每一层
-        F->>F: 7. 在队列中的 KV Cache 上重计算
-    end
-
-    F->>LLM: 8. 提供融合的 KV Cache
-    LLM->>User: 9. 基于 KV Cache 生成答案
-```
+{{< trace >}}
+title: "一条融合请求怎样进入逐层流水线"
+actors: ["请求", "加载控制器", "缓存存储", "模型层"]
+steps:
+  - from: 0
+    to: 1
+    label: "文档到达"
+    detail: "请求包含两段已编码文档和一个新问题。"
+  - from: 1
+    to: 2
+    label: "发起读取"
+    detail: "控制器安排读取对应文档的缓存。"
+  - from: 2
+    to: 3
+    label: "首层可用"
+    detail: "模型用已经返回的层数据开始融合。"
+  - from: 1
+    to: 2
+    label: "预取下一层"
+    detail: "当前层计算期间准备下层缓存；下层开算前消费对应结果。"
+{{< /trace >}}
 
 ---
 
 **上一步**: [KV Cache Store 与 Fusor](./03-kv-cache-store.md)
 
-**下一步**: [第四部分 - 代码实现深度解析](../04-implementation/README.md)
+**下一步**: [第四部分 - 代码实现深度解析](../04-implementation/01-project-structure.md)

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 472 248" role="img" aria-labelledby="dynamo-transfer-ready-title">
+  <title id="dynamo-transfer-ready-title">两份地址空间中的一次 KV 交接</title>
+  <desc>以 vLLM 与 NixlConnector 为例。上方传递交接信息，下方传输模型所需的 KV。</desc>
+  <text x="16" y="29" class="diagram-title" text-anchor="start">两份地址空间中的一次 KV 交接</text>
+  <text x="80" y="72" class="label" text-anchor="middle">Prefill GPU</text>
+  <text x="390" y="72" class="label" text-anchor="middle">Decode GPU</text>
+  <path d="M143 101 L324 101" class="edge"/>
+  <path d="M143 163 L324 163" class="edge"/>
+  <text x="235" y="92" class="note" text-anchor="middle">交接信息</text>
+  <text x="235" y="153" class="note" text-anchor="middle">KV 数据</text>
+  <g data-frame="0">
+    <title>P 完成预填充</title>
+    <desc>源端块 7、9 存着请求 R 的前缀 KV。目的端的本地块号属于另一地址空间。</desc>
+    <rect x="12" y="84" width="130" height="39" rx="5" class="stored"/><text x="77.0" y="108.5" class="label" text-anchor="middle">块 7、9</text>
+    <rect x="325" y="84" width="132" height="39" rx="5" class="idle"/><text x="391.0" y="108.5" class="label" text-anchor="middle">槽未就绪</text>
+    <text x="236" y="220" class="number" text-anchor="middle">R 的 KV 位于 P</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>D 获得描述</title>
+    <desc>P 给出此次请求的交接参数，D 借此标识远端引擎和块并协调本地目的空间。</desc>
+    <rect x="12" y="84" width="130" height="39" rx="5" class="stored"/><text x="77.0" y="108.5" class="label" text-anchor="middle">块 7、9</text>
+    <rect x="325" y="84" width="132" height="39" rx="5" class="fresh"/><text x="391.0" y="108.5" class="label" text-anchor="middle">槽 2、4</text>
+    <text x="236" y="220" class="number" text-anchor="middle">描述信息抵达 D</text>
+    <circle cx="317" cy="101" r="4" class="packet" data-dx="-154" data-dy="0"/>
+  </g>
+  <g data-frame="2" display="none">
+    <title>传输进行中</title>
+    <desc>连接器把这两块的 KV 写向 D 的本地槽 2、4。此时已有描述，数据尚在传送。</desc>
+    <rect x="12" y="84" width="130" height="39" rx="5" class="stored"/><text x="77.0" y="108.5" class="label" text-anchor="middle">块 7、9</text>
+    <rect x="325" y="84" width="132" height="39" rx="5" class="fresh"/><text x="391.0" y="108.5" class="label" text-anchor="middle">写入中</text>
+    <text x="236" y="220" class="number" text-anchor="middle">R 等待所需 KV</text>
+    <circle cx="317" cy="163" r="4" class="packet" data-dx="-154" data-dy="0"/>
+  </g>
+  <g data-frame="3" display="none">
+    <title>所需 KV 已就绪</title>
+    <desc>传输完成后，D 使用本地已就绪的缓存继续解码。源端归还资源按后端的完成协议处理。</desc>
+    <rect x="12" y="84" width="130" height="39" rx="5" class="stored"/><text x="77.0" y="108.5" class="label" text-anchor="middle">源端状态</text>
+    <rect x="325" y="84" width="132" height="39" rx="5" class="stored"/><text x="391.0" y="108.5" class="label" text-anchor="middle">块 2、4</text>
+    <text x="236" y="220" class="number" text-anchor="middle">D 可以生成下一 token</text>
+  </g>
+</svg>

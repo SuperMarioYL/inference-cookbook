@@ -3,7 +3,7 @@ title: "分布式系统基础"
 weight: 2
 ---
 
-> 本文介绍分布式系统的核心概念，包括 CAP 定理、服务发现、心跳机制以及 Actor 模型。
+一个 worker 刚加入集群时，先要让其他进程找到它。worker 停止发送心跳后，发现服务还需要一段时间才会把这个实例移出候选集合。
 
 ---
 
@@ -43,15 +43,9 @@ graph LR
     end
 ```
 
-### 1.3 Dynamo 的选择
+### 发现、事件和请求的要求
 
-| 平面 | 系统 | 类型 | 原因 |
-|------|------|------|------|
-| **控制平面** | etcd | CP | 服务注册需要强一致性 |
-| **事件平面** | NATS | AP | 事件传递优先可用性 |
-| **数据平面** | NIXL | - | 点对点传输，不涉及分布式一致性 |
-
----
+注册记录要反映当前成员，KV 事件用于近似追踪缓存状态，推理 RPC 则需要得到本次调用的响应。CAP 讨论适合分析副本在网络分区时提供的一致性保证；不能给所有流量或任意发布订阅系统简单贴上 CP/AP 标签。Dynamo 1.6.2 的三个运行时平面分别是发现、请求、事件，后端的 KV 大块复制另有传输契约。
 
 ## 2. 服务发现模式
 
@@ -119,7 +113,7 @@ sequenceDiagram
 ### 2.3 Dynamo 的选择
 
 **Dynamo 使用客户端发现模式**：
-- 通过 etcd 存储服务注册信息
+- 在选定的发现后端维护注册信息（裸机可用 etcd，本机也可显式选 file）
 - 客户端直接查询并选择服务实例
 - 支持复杂的路由策略（如 KV-Aware 路由）
 
@@ -138,25 +132,31 @@ sequenceDiagram
 
 etcd 使用 Lease 机制管理服务健康：
 
-```mermaid
-sequenceDiagram
-    participant Service as 服务实例
-    participant etcd as etcd
-
-    Service->>etcd: 创建 Lease (TTL=10s)
-    etcd-->>Service: Lease ID
-
-    Service->>etcd: 注册服务 (绑定 Lease)
-
-    loop 每 3 秒
-        Service->>etcd: Keep-Alive
-        etcd-->>Service: OK
-    end
-
-    Note over Service: 服务崩溃
-
-    Note over etcd: 10 秒后 Lease 过期<br/>自动删除注册信息
-```
+{{< trace >}}
+title: 租约停止续期后发生什么
+actors: ["Worker", "etcd", "订阅者"]
+steps:
+  - from: 0
+    to: 1
+    label: "申请租约"
+    detail: "假设 TTL 为 10 秒，worker 取得一份租约并把端点记录绑定到它。"
+  - from: 0
+    to: 1
+    label: "正常续租"
+    detail: "进程存活期间续约，etcd 延长该租约的有效期。"
+  - from: 0
+    to: 0
+    label: "进程失联"
+    detail: "续约中断；此时订阅者可能仍持有这个端点。"
+  - from: 1
+    to: 1
+    label: "租约到期"
+    detail: "etcd 移除随租约过期的成员记录。"
+  - from: 1
+    to: 2
+    label: "观察到删除"
+    detail: "watch 事件到达后，订阅者更新本地候选集合。"
+{{< /trace >}}
 
 ### 3.3 Lease 的优势
 
@@ -251,19 +251,6 @@ graph TB
 | 服务注册 | 强一致性 | etcd Raft 共识 |
 | KV 索引 | 最终一致性 | NATS 事件传播 |
 | 指标聚合 | 最终一致性 | 定期同步 |
-
----
-
-## 小结
-
-本文介绍了分布式系统的核心概念：
-
-1. **CAP 定理**：一致性、可用性、分区容错性不可兼得
-2. **服务发现**：客户端发现 vs 服务端发现
-3. **心跳机制**：Lease 租约实现健康检查
-4. **Actor 模型**：消息驱动的并发模型
-
-这些概念是理解 Dynamo 分布式运行时设计的基础。
 
 ---
 

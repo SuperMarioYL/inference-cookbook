@@ -221,44 +221,29 @@ def backward(ctx, dout, *args):
 
 ### 3.3 前向与反向的内存占用对比
 
-```mermaid
-graph LR
-    subgraph fwd["前向传播"]
-        Q1["Q (B,S,H,D)"]
-        K1["K (B,S,Hk,D)"]
-        V1["V (B,S,Hk,D)"]
-        O1["O (B,S,H,D)"]
-        LSE1["LSE (B,H,S)"]
-        RNG1["rng_state (2,)"]
-    end
+{{< trace >}}
+title: "前向保存什么，反向何时再读"
+actors: ["调用者", "FA2 前向", "Autograd", "反向内核"]
+steps:
+  - from: 0
+    to: 1
+    label: "传入 Q、K、V"
+    detail: "这个例子开启梯度记录，且至少一个输入需要梯度。"
+  - from: 1
+    to: 2
+    label: "保存中间量"
+    detail: "普通稠密路径保存 Q、K、V、O、行 LSE 与 RNG 状态。"
+  - from: 2
+    to: 3
+    label: "收到上游 dO"
+    detail: "反向调用从上下文取出数据，按块重建概率并计算输入梯度。"
+  - from: 3
+    to: 0
+    label: "交付梯度"
+    detail: "dQ、dK、dV 对应需要它们的输入；整张 N×N 概率矩阵无需保存在显存中。"
+{{< /trace >}}
 
-    subgraph saved["ctx.saved_tensors"]
-        S1["Q (padded)"]
-        S2["K (padded)"]
-        S3["V (padded)"]
-        S4["O (padded)"]
-        S5["LSE"]
-        S6["rng_state"]
-    end
-
-    subgraph bwd["反向传播"]
-        DQ["dQ (B,S,H,D)"]
-        DK["dK (B,S,Hk,D)"]
-        DV["dV (B,S,Hk,D)"]
-    end
-
-    Q1 --> S1
-    K1 --> S2
-    V1 --> S3
-    O1 --> S4
-    LSE1 --> S5
-    RNG1 --> S6
-    S1 --> DQ
-    S2 --> DK
-    S3 --> DV
-```
-
-> **内存分析**：Flash Attention 不保存 $O(N^2)$ 的 attention 矩阵 P，仅保存输入 Q/K/V（共 $O(N \cdot d)$）、输出 O（$O(N \cdot d)$）和 LSE（$O(N)$）。反向时通过重计算 P 来获取梯度。详见 [反向传播算法](../02-core-algorithm/04-backward-pass.md)。
+> **内存分析**：Flash Attention 不保存 $O(N^2)$ 的 attention 矩阵 P，仅保存输入 Q/K/V（共 $O(N \cdot d)$）、输出 O（$O(N \cdot d)$）和 LSE（$O(N)$）。反向时通过重计算 P 来获取梯度。详见 [反向传播算法](/flashattention/02-core-algorithm/04-backward-pass/)。
 
 ---
 
@@ -552,7 +537,7 @@ ctx.deterministic = deterministic
 
 确定性模式会稍慢但保证结果可复现。在非确定性模式下，dQ 的累加使用原子操作（atomic add），不同 thread block 的执行顺序可能导致浮点累加结果的微小差异。确定性模式通过 TMA 存储避免原子操作，消除了这种不确定性。
 
-> 详见 [反向内核实现 - dQ 存储策略](../03-cuda-kernel/04-backward-kernel-impl.md)。
+> 详见 [反向内核实现 - dQ 存储策略](/flashattention/03-cuda-kernel/04-backward-kernel-impl/)。
 
 ---
 
@@ -670,6 +655,6 @@ return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, N
 
 ## 导航
 
-- 上一篇：[Python API 参考](01-api-reference.md)
-- 下一篇：[模块与层](03-modules-and-layers.md)
-- [返回目录](../README.md)
+- 上一篇：[Python API 参考](/flashattention/04-python-api/01-api-reference/)
+- 下一篇：[模块与层](/flashattention/04-python-api/03-modules-and-layers/)
+- [返回目录](/flashattention/00-overview/overview/)

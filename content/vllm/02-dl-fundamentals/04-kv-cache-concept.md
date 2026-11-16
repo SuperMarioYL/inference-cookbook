@@ -3,16 +3,7 @@ title: "KV Cache 概念"
 weight: 4
 ---
 
-
-> 本章将详细介绍 KV Cache 的概念、作用和实现原理，这是理解 vLLM 核心优化的关键。
-
----
-
-## 引言
-
-KV Cache 是 LLM 推理中最重要的优化技术之一。它通过缓存历史计算结果，避免重复计算，显著提升推理速度。理解 KV Cache 对于理解 vLLM 的 PagedAttention 至关重要。
-
----
+输入已有 100 个 token 时，第 101 个位置会读取前 100 个位置的 K 和 V。对固定模型的因果自注意力，后续追加的 token 不会改变前面的位置表示，已有的 K 和 V 可以直接留下来供下一轮读取。
 
 ## 1. 为什么需要 KV Cache
 
@@ -94,7 +85,7 @@ flowchart TD
 | ... | ... | ... |
 | N | N | 1 + 2 + ... + N = N(N+1)/2 |
 
-**时间复杂度**：$O(N^2)$
+**K/V 投影的 token 次数**为 $N(N+1)/2$。
 
 ---
 
@@ -106,34 +97,23 @@ flowchart TD
 
 **解决方案**：计算一次后缓存起来，后续直接使用。
 
-```mermaid
-flowchart TD
-    subgraph use_kv_cache["使用 KV Cache"]
-        subgraph cache_step1["Step 1"]
-            S1A[Hello] --> S1K["计算 K₁"]
-            S1A --> S1V["计算 V₁"]
-            S1K --> Cache1[("缓存 K₁")]
-            S1V --> Cache1
-        end
-
-        subgraph cache_step2["Step 2"]
-            Cache1 --> Use1["使用缓存的 K₁, V₁"]
-            S2A[World] --> S2K["计算 K₂"]
-            S2A --> S2V["计算 V₂"]
-            S2K --> Cache2[("缓存 K₁, K₂")]
-            S2V --> Cache2
-        end
-
-        subgraph cache_step3["Step 3"]
-            Cache2 --> Use2["使用缓存的 K₁, K₂, V₁, V₂"]
-            S3A[!] --> S3K["计算 K₃"]
-            S3A --> S3V["计算 V₃"]
-        end
-    end
-
-    style Use1 fill:#c8e6c9
-    style Use2 fill:#c8e6c9
-```
+{{< stateboard >}}
+title: 第二轮能省下哪些 K 和 V
+rows: ["位置 0", "位置 1", "位置 2"]
+steps:
+  - title: "两词提示"
+    detail: "第一轮处理 a、b，两处都需要计算本层的 K 和 V。"
+    cells: [["a 待算"], ["b 待算"], ["·"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "保存前缀"
+    detail: "a、b 的 KV 已写入缓存，模型选出输出 x。"
+    cells: [["KV(a)"], ["KV(b)"], ["x 待输入"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "再做一步"
+    detail: "x 在位置 2 进入模型，复用前两处的 KV，只补上当前位置。"
+    cells: [["KV(a)"], ["KV(b)"], ["KV(x)"]]
+    focus: [[2, 0]]
+{{< /stateboard >}}
 
 ### 2.2 计算量对比
 
@@ -147,9 +127,9 @@ flowchart TD
 | ... | ... | ... |
 | N | 1 | N |
 
-**时间复杂度**：$O(N)$
+**K/V 投影的 token 次数**降到 $N$。
 
-**加速比**：从 $O(N^2)$ 到 $O(N)$，生成 1000 个 token 时加速约 500 倍！
+取 N = 1,000，两种做法分别要投影 500,500 和 1,000 个位置。用上缓存后，新查询仍要读取可见历史，对整段生成的注意力运算和用时要另外计算。
 
 ### 2.3 图解对比
 
@@ -213,48 +193,26 @@ kv_cache = torch.zeros(num_layers, 2, batch_size, num_heads, max_seq_len, head_d
 | max_seq_len | 最大序列长度 | 4096 |
 | head_dim | 每个头的维度 | 128 |
 
-### 3.3 代码示例
+### 3.3 给同一位置写入两层缓存
+
+下面的 CPU 示例给两个注意力层各留 16 个位置。调用方指定位置，两层都写在第 4 个位置上。同一个 token 穿过两层后，序列长度仍然是 4。
 
 ```python
-class KVCache:
-    def __init__(self, num_layers, num_heads, head_dim, max_seq_len, dtype=torch.float16):
-        self.num_layers = num_layers
-        self.max_seq_len = max_seq_len
+import torch
 
-        # 预分配 K 和 V 缓存
-        # 形状: [num_layers, 2, max_batch, num_heads, max_seq_len, head_dim]
-        self.cache = None
-        self.current_len = 0
+# 层、K/V、KV 头、序列位置、头维度
+cache = torch.zeros(2, 2, 1, 16, 4)
+position = 3
+for layer in range(2):
+    new_k = torch.full((1, 4), float(layer + 1))
+    new_v = new_k + 10
+    cache[layer, 0, :, position] = new_k
+    cache[layer, 1, :, position] = new_v
 
-    def allocate(self, batch_size):
-        self.cache = torch.zeros(
-            self.num_layers, 2, batch_size, self.num_heads,
-            self.max_seq_len, self.head_dim,
-            dtype=self.dtype, device='cuda'
-        )
-        self.current_len = 0
-
-    def update(self, layer_idx, new_k, new_v):
-        """添加新的 K, V 到缓存"""
-        # new_k, new_v: [batch, num_heads, new_len, head_dim]
-        new_len = new_k.shape[2]
-        start_pos = self.current_len
-        end_pos = start_pos + new_len
-
-        self.cache[layer_idx, 0, :, :, start_pos:end_pos, :] = new_k
-        self.cache[layer_idx, 1, :, :, start_pos:end_pos, :] = new_v
-
-        if layer_idx == self.num_layers - 1:
-            self.current_len = end_pos
-
-    def get(self, layer_idx):
-        """获取当前层的完整 K, V"""
-        k = self.cache[layer_idx, 0, :, :, :self.current_len, :]
-        v = self.cache[layer_idx, 1, :, :, :self.current_len, :]
-        return k, v
+assert cache[1, 0, 0, :position + 1, 0].tolist() == [0, 0, 0, 2]
 ```
 
----
+在真实模型里，`new_k` 与 `new_v` 来自各层自己的投影权重。这里用常量便于看出每层写入了哪里。
 
 ## 4. 显存占用详细计算
 
@@ -264,7 +222,7 @@ class KVCache:
 KV Cache 显存 = 2 × num_layers × num_kv_heads × head_dim × seq_len × batch_size × bytes_per_element
 ```
 
-简化版（使用 hidden_dim）：
+当 `num_kv_heads × head_dim = hidden_dim` 时，可以写成：
 
 ```
 KV Cache 显存 = 2 × num_layers × hidden_dim × seq_len × batch_size × bytes_per_element
@@ -285,11 +243,11 @@ KV Cache 显存 = 2 × num_layers × hidden_dim × seq_len × batch_size × byte
 
 | 序列长度 | 计算 | 大小 |
 |---------|------|------|
-| 512 | 2 × 32 × 4096 × 512 × 2 | 256 MB |
-| 1024 | 2 × 32 × 4096 × 1024 × 2 | 512 MB |
-| 2048 | 2 × 32 × 4096 × 2048 × 2 | 1 GB |
-| 4096 | 2 × 32 × 4096 × 4096 × 2 | 2 GB |
-| 8192 | 2 × 32 × 4096 × 8192 × 2 | 4 GB |
+| 512 | 2 × 32 × 4096 × 512 × 2 | 256 MiB |
+| 1024 | 2 × 32 × 4096 × 1024 × 2 | 512 MiB |
+| 2048 | 2 × 32 × 4096 × 2048 × 2 | 1 GiB |
+| 4096 | 2 × 32 × 4096 × 4096 × 2 | 2 GiB |
+
 
 ### 4.3 LLaMA-2-70B 示例（使用 GQA）
 
@@ -311,7 +269,7 @@ KV Cache = 2 × 80 × 8 × 128 × 4096 × 2 = 1.34 GB
 KV Cache = 2 × 80 × 64 × 128 × 4096 × 2 = 10.7 GB
 ```
 
-**GQA 节省了 8 倍显存！**
+在这个例子中，8 个 KV 头的缓存占用是 64 个 KV 头的 1/8。
 
 ### 4.4 显存占用可视化
 
@@ -390,7 +348,7 @@ graph TB
 浪费: 7.62GB (95%!)
 ```
 
-### 5.4 这就是 PagedAttention 要解决的问题！
+### 5.4 把分配单位缩小到块
 
 传统方案的问题：
 1. **预分配浪费**：每个请求预留最大空间
@@ -473,51 +431,15 @@ flowchart TD
 | 块表 | `vllm/v1/worker/block_table.py` |
 | KV Cache 接口 | `vllm/v1/kv_cache_interface.py` |
 
-### 7.2 数据结构预览
+### 7.2 跟踪一个块的两个属性
 
-```python
-# vllm/v1/core/block_pool.py 中的块定义
-@dataclass
-class KVCacheBlock:
-    block_id: int          # 块 ID
-    ref_cnt: int           # 引用计数
-    block_hash: Optional[BlockHash]  # 用于前缀缓存
+在 `KVCacheBlock` 看 `block_id` 和 `ref_cnt`。两个请求复用同一个前缀时，物理编号相同，引用计数随请求进入和退出而变化。[分步观察共享块](../03-core-modules/03-block-pool.md) · [0.33.0 块定义](https://github.com/vllm-project/vllm/blob/v0.33.0/vllm/v1/core/kv_cache_utils.py)
 
-class BlockTable:
-    """管理逻辑块到物理块的映射"""
-    def __init__(self, ...):
-        self.block_table: torch.Tensor  # 形状: [max_blocks]
-```
-
----
-
-## 8. 本章小结
-
-### 核心概念
-
-1. **KV Cache 的作用**：缓存历史 token 的 K、V，避免重复计算
-2. **加速效果**：从 $O(N^2)$ 降到 $O(N)$，约 500 倍加速（N=1000）
-3. **显存占用**：随序列长度线性增长，可能成为主要显存消耗
-
-### 关键公式
+## KV 占用量的计算式
 
 ```
 KV Cache = 2 × num_layers × num_kv_heads × head_dim × seq_len × bytes
 ```
-
-### 管理挑战
-
-- **动态增长**：序列长度在生成过程中不断增加
-- **预分配浪费**：传统方案浪费 60-80% 显存
-- **碎片化**：多请求并发时问题更严重
-
-### 与 vLLM 的关联
-
-- **PagedAttention**：解决 KV Cache 的显存浪费问题
-- **分块管理**：将 KV Cache 分成固定大小的块
-- **按需分配**：用多少分配多少，不预留
-
----
 
 ## 思考题
 
@@ -527,8 +449,4 @@ KV Cache = 2 × num_layers × num_kv_heads × head_dim × seq_len × bytes
 
 ---
 
-## 下一步
-
-了解了 KV Cache 后，让我们来看看 LLM 完整的生成过程：
-
-👉 [下一章：LLM 生成过程](05-llm-generation-process.md)
+[从 prefill 跟到下一个输出 token](05-llm-generation-process.md)

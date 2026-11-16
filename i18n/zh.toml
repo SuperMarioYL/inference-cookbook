@@ -1,0 +1,28 @@
+[404_title]
+other = "找不到这一页"
+[404_text]
+other = "可以从首页选择栏目，也可以搜索文章标题。"
+[browse]
+other = "浏览"
+[chapter_next]
+other = "下一篇"
+[chapter_previous]
+other = "上一篇"
+[edit_page]
+other = "编辑此页"
+[home]
+other = "首页"
+[last_updated]
+other = "最近提交于"
+[on_this_page]
+other = "本文目录"
+[search_loading]
+other = "正在加载索引…"
+[search_no_recent]
+other = "输入项目、算子或章节名"
+[search_no_results]
+other = "没有找到匹配的文章"
+[search_placeholder]
+other = "搜索手册"
+[search_title]
+other = "搜索"

@@ -3,7 +3,7 @@ title: "状态机"
 weight: 3
 ---
 
-本文档详细介绍 CacheBlend 中的状态机设计，包括 `temp_status` 状态定义、状态转换逻辑以及各状态下的处理行为。
+`LlamaModel` 用 `temp_status` 告诉每层该执行完整 prefill、检查偏差还是只更新入选位置。普通 decode 另走状态 −1。
 
 ## temp_status 状态定义
 
@@ -16,35 +16,32 @@ CacheBlend 使用 `temp_status` 变量控制每层的处理模式：
 | 1 | Check | 检查层，执行 HKVD 选择 + 计算差异 |
 | 2 | After Check | 检查后层，使用选定的 HKVD token 更新 KV |
 
-```mermaid
-stateDiagram-v2
-    [*] --> FullPrefill: Prefill 阶段
-    [*] --> Decode: Decode 阶段
-
-    FullPrefill --> Check: check=True && i in check_layers
-    FullPrefill --> AfterCheck: check=True && i > check_layers[0]
-    Check --> AfterCheck: 进入下一层
-    AfterCheck --> AfterCheck: 继续后续层
-
-    state FullPrefill {
-        [*] --> 计算所有Token
-    }
-
-    state Check {
-        [*] --> 计算KV差异
-        计算KV差异 --> 选择TopK
-        选择TopK --> 记录imp_indices
-    }
-
-    state AfterCheck {
-        [*] --> 仅对HKVD重计算
-        仅对HKVD重计算 --> 更新旧KV
-    }
-
-    state Decode {
-        [*] --> 使用缓存
-    }
-```
+{{< stateboard >}}
+title: "一次融合前向的层状态"
+rows: ["步骤", "状态", "处理位置"]
+steps:
+  - title: "完整前向"
+    detail: "进入融合前向时，较早层仍按整段序列处理。"
+    cells:
+      - ["早期层", "检查层", "后续层"]
+      - ["0", "·", "·"]
+      - ["全部", "·", "·"]
+    focus: [[1, 0]]
+  - title: "检查层"
+    detail: "到达 check_layers 中的层，后端比较新旧 V 并选出位置。"
+    cells:
+      - ["早期层", "检查层", "后续层"]
+      - ["0", "1", "·"]
+      - ["全部", "筛选", "·"]
+    focus: [[1, 1], [2, 1]]
+  - title: "后续层"
+    detail: "状态切换为 2，后端只更新入选位置，其他位置沿用旧 KV。"
+    cells:
+      - ["早期层", "检查层", "后续层"]
+      - ["0", "1", "2"]
+      - ["全部", "筛选", "更新"]
+    focus: [[1, 2], [2, 2]]
+{{< /stateboard >}}
 
 ## 状态转换逻辑
 
@@ -89,39 +86,7 @@ def forward(self, input_ids, positions, kv_caches, attn_metadata, ...):
 
 ## 状态转换流程图
 
-```mermaid
-graph TB
-    Start[开始] --> P{Prefill?}
-
-    P -->|是| S0["temp_status = 0<br>(Full Prefill)"]
-    P -->|否| SM1["temp_status = -1<br>(Decode)"]
-
-    S0 --> C{check=True?}
-    C -->|否| L0["遍历所有层<br>status=0"]
-    C -->|是| Init["初始化元数据"]
-
-    Init --> Loop["for i in layers"]
-    Loop --> InCheck{i in check_layers?}
-
-    InCheck -->|是| S1["temp_status = 1<br>(Check)"]
-    InCheck -->|否| AfterCheck{i > check_layers[0]?}
-
-    AfterCheck -->|是| S2["temp_status = 2<br>(After Check)"]
-    AfterCheck -->|否| S0_2["temp_status = 0"]
-
-    S1 --> ExecLayer["执行层 i"]
-    S2 --> ExecLayer
-    S0_2 --> ExecLayer
-
-    ExecLayer --> UpdatePos{status==1?}
-    UpdatePos -->|是| Filter["positions = positions[imp_indices]"]
-    UpdatePos -->|否| Next
-    Filter --> Next["下一层"]
-    Next --> Loop
-
-    style S1 fill:#ff9999
-    style S2 fill:#ffcc99
-```
+普通 decode 使用 `-1`。融合 prefill 从 `0` 进入检查层的 `1`，随后用 `2` 处理较少的位置；未启用检查的完整 prefill 则沿 `0` 继续。
 
 ---
 

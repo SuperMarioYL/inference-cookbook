@@ -3,9 +3,9 @@ title: "推理引擎原理"
 weight: 1
 ---
 
-> 本文介绍 LLM 推理引擎的核心功能，包括模型加载、批处理策略和内存管理。
+## 先区分部署调度与引擎调度
 
----
+Dynamo 为请求选 worker，推理引擎再在 worker 内给 token 分配一轮运行机会。要解释一个长请求的等待时间，先从前端记录分配时间，再比较后端是否有可用 KV 槽与 token 预算。 [路由与引擎的边界](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/docs/fern/pages/developer-guide/knowledge-base/concepts/system-architecture/kv-aware-routing.md)
 
 ## 1. 推理引擎核心功能
 
@@ -88,24 +88,23 @@ graph TB
 
 ### 3.2 动态批处理 (Continuous Batching)
 
-```mermaid
-sequenceDiagram
-    participant Queue as 请求队列
-    participant Engine as 推理引擎
-    participant GPU as GPU
-
-    Queue->>Engine: Req1 到达
-    Engine->>GPU: 开始处理 Req1
-
-    Queue->>Engine: Req2 到达
-    Engine->>GPU: Req2 加入当前 batch
-
-    Note over GPU: Req1 完成
-    Engine->>Queue: Req1 输出
-
-    Queue->>Engine: Req3 到达
-    Engine->>GPU: Req3 加入（替换 Req1 位置）
-```
+{{< stateboard >}}
+title: 同一 worker 怎样补入下一条请求
+rows: ["执行槽位", "等待请求"]
+steps:
+  - title: "首轮"
+    detail: "一个聚合 worker 本轮执行 A、B，C 等待。"
+    cells: [["A", "B"], ["C", "·"]]
+    focus: [[0, 0], [0, 1], [1, 0]]
+  - title: "A 提前结束"
+    detail: "A 完成退出，引擎下一次选批时获得一个可用执行位置。"
+    cells: [["·", "B"], ["C", "·"]]
+    focus: [[0, 0]]
+  - title: "C 进入"
+    detail: "把 C 纳入本地执行，B 保留之前的上下文并继续解码。"
+    cells: [["C", "B"], ["·", "·"]]
+    focus: [[0, 0], [0, 1]]
+{{< /stateboard >}}
 
 **优势**：
 - 请求完成即释放，新请求可立即加入
@@ -209,18 +208,6 @@ graph LR
     TOPP --> SAMPLE["采样"]
     SAMPLE --> TOKEN["输出 Token"]
 ```
-
----
-
-## 小结
-
-本文介绍了 LLM 推理引擎的核心功能：
-
-1. **模型加载**：权重加载、分片、量化
-2. **批处理策略**：静态 vs 动态批处理
-3. **内存管理**：权重、激活、KV Cache
-4. **计算优化**：算子融合、FlashAttention
-5. **采样策略**：Temperature、Top-P、Top-K
 
 ---
 

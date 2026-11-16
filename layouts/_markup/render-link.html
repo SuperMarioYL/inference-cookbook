@@ -1,0 +1,14 @@
+{{- if strings.HasPrefix .Destination "mailto:" -}}
+  {{- partial "main/email" (dict "emailAddress" .Destination "emailTitle" .Text) -}}
+{{- else -}}
+  {{- $href := .Destination -}}
+  {{- $url := urls.Parse .Destination -}}
+  {{- if and (not $url.Scheme) (not $url.Host) (strings.HasSuffix $url.Path ".md") -}}
+    {{- with .Page.GetPage $url.Path -}}
+      {{- $href = .RelPermalink -}}
+      {{- with $url.RawQuery }}{{ $href = printf "%s?%s" $href . }}{{ end -}}
+      {{- with $url.EscapedFragment }}{{ $href = printf "%s#%s" $href . }}{{ end -}}
+    {{- end -}}
+  {{- end -}}
+  <a href="{{ $href | safeURL }}"{{ with .Title }} title="{{ . }}"{{ end }}>{{ .Text }}</a>
+{{- end -}}

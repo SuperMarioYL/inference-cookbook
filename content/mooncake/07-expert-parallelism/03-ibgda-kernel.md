@@ -3,8 +3,6 @@ title: "Module 07 - IBGDA CUDA Kernel 深度解析"
 weight: 3
 ---
 
-# Module 07 - IBGDA CUDA Kernel 深度解析
-
 ## 1. IBGDA 技术原理
 
 ### 1.1 什么是 IBGDA
@@ -683,50 +681,27 @@ static __device__ void device_mutex_unlock_system(uint32_t *mutex) {
 
 ## 7. 低延迟 Dispatch/Combine 完整流程
 
-```mermaid
-sequenceDiagram
-    participant Host as Host CPU
-    participant GPU_A as GPU Rank A
-    participant NIC_A as NIC Rank A
-    participant NIC_B as NIC Rank B
-    participant GPU_B as GPU Rank B
-
-    Note over Host,GPU_B: === Dispatch 阶段 ===
-
-    Host->>GPU_A: 启动 dispatch kernel
-    GPU_A->>GPU_A: FP8 量化 + 打包消息
-
-    alt 跨节点 (IBGDA)
-        GPU_A->>NIC_A: 构建 WQE + Doorbell
-        NIC_A->>NIC_B: RDMA Write 数据
-        NIC_B->>GPU_B: DMA 到 recv buffer
-        GPU_A->>NIC_A: 构建 Atomic Add WQE
-        NIC_A->>NIC_B: RDMA Atomic Add 信号
-    else 同节点 (NVLink)
-        GPU_A->>GPU_B: NVLink IPC 直接写入
-        GPU_A->>GPU_B: NVLink store 信号
-    end
-
-    GPU_B->>GPU_B: 检测信号,拷贝到 packed tensor
-
-    Note over Host,GPU_B: === Expert 计算 ===
-    GPU_B->>GPU_B: 本地专家前向推理
-
-    Note over Host,GPU_B: === Combine 阶段 ===
-
-    GPU_B->>GPU_B: 读取专家输出
-    alt 跨节点 (IBGDA)
-        GPU_B->>NIC_B: 构建 WQE + Doorbell
-        NIC_B->>NIC_A: RDMA Write 结果
-        NIC_A->>GPU_A: DMA 到 recv buffer
-        GPU_B->>NIC_B: Atomic Add 完成信号
-    else 同节点 (NVLink)
-        GPU_B->>GPU_A: NVLink IPC 直接写入
-    end
-
-    GPU_A->>GPU_A: Grid Sync
-    GPU_A->>GPU_A: 加权合并 Top-K 结果
-```
+{{< trace >}}
+title: "MoE token 发送出去又如何回来"
+actors: ["发起 rank", "网络通路", "专家 rank", "合并端"]
+steps:
+  - from: 0
+    to: 1
+    label: "Dispatch"
+    detail: "发起端依据路由结果组织 token 和对应的专家信息。"
+  - from: 1
+    to: 2
+    label: "到达专家"
+    detail: "目标 rank 收到分给本地专家的输入并执行计算。"
+  - from: 2
+    to: 1
+    label: "返回结果"
+    detail: "计算结果按发送时记录的映射发回。"
+  - from: 1
+    to: 3
+    label: "Combine"
+    detail: "归并端恢复原 token 顺序；一个 token 的多路专家结果按路由权重合并。"
+{{< /trace >}}
 
 ## 8. 性能优化技术
 
@@ -801,11 +776,7 @@ Kernel 使用 Cooperative Launch 支持 grid 级别的同步:
 | EP Buffer | `mooncake-ep/src/mooncake_ep_buffer.cpp` | 缓冲区管理、IBGDA 初始化、NVLink IPC |
 | EP Buffer 头文件 | `mooncake-ep/include/mooncake_ep_buffer.h` | BufferPair、BufferLayout、MooncakeEpBuffer |
 | Kernel API | `mooncake-ep/include/mooncake_ep_api.cuh` | dispatch/combine host 函数声明 |
-| MLX5 GDA 接口 | `mooncake-ep/include/mooncake_ibgda/mlx5gda.h` | QP 结构体、WQE 定义、QP 操作函数 |
+| MLX5 GDA 接口 | `mooncake-transfer-engine/include/transport/device/ibgda/mlx5gda.h` | QP 结构体、WQE 定义、QP 操作函数 |
 | 配置常量 | `mooncake-ep/include/mooncake_ep_configs.cuh` | 缓冲区大小、超时时间、phase 定义 |
 | PTX 工具函数 | `mooncake-ep/include/mooncake_ep_utils.cuh` | 内存屏障、原子操作、向量化拷贝宏 |
 | Launch 配置 | `mooncake-ep/include/mooncake_ep_launch.cuh` | Cooperative Launch、SWITCH_HIDDEN 宏 |
-
----
-
-> **上一篇**: [02-mooncake-backend.md](02-mooncake-backend.md) - MooncakeBackend 深度解析

@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 472 265" role="img" aria-labelledby="fa-unpad-pack-title">
+  <title id="fa-unpad-pack-title">变长批次的 token 如何紧密打包</title>
+  <desc>三条输入长度分别为 3、1、2。</desc>
+<defs><marker id="fa-unpad-pack-end" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+<text x="14" y="28" class="diagram-title" text-anchor="start">变长批次的 token 如何紧密打包</text>
+
+  <g data-frame="0">
+    <title>补齐的表示</title>
+    <desc>按最长长度堆叠得到 3×3 个槽，点表示 padding。</desc>
+    <text x="17" y="66" class="label" text-anchor="start">原批次</text>
+    <text x="99" y="92" class="label" text-anchor="middle">A</text>
+    <rect x="126" y="73" width="49" height="24" rx="4" class="idle"/><text x="150.5" y="90" class="label" text-anchor="middle">A0</text>
+    <rect x="180" y="73" width="49" height="24" rx="4" class="idle"/><text x="204.5" y="90" class="label" text-anchor="middle">A1</text>
+    <rect x="234" y="73" width="49" height="24" rx="4" class="idle"/><text x="258.5" y="90" class="label" text-anchor="middle">A2</text>
+    <text x="99" y="120" class="label" text-anchor="middle">B</text>
+    <rect x="126" y="101" width="49" height="24" rx="4" class="idle"/><text x="150.5" y="118" class="label" text-anchor="middle">B0</text>
+    <rect x="180" y="101" width="49" height="24" rx="4" class="idle"/><text x="204.5" y="118" class="label" text-anchor="middle">·</text>
+    <rect x="234" y="101" width="49" height="24" rx="4" class="idle"/><text x="258.5" y="118" class="label" text-anchor="middle">·</text>
+    <text x="99" y="148" class="label" text-anchor="middle">C</text>
+    <rect x="126" y="129" width="49" height="24" rx="4" class="idle"/><text x="150.5" y="146" class="label" text-anchor="middle">C0</text>
+    <rect x="180" y="129" width="49" height="24" rx="4" class="idle"/><text x="204.5" y="146" class="label" text-anchor="middle">C1</text>
+    <rect x="234" y="129" width="49" height="24" rx="4" class="idle"/><text x="258.5" y="146" class="label" text-anchor="middle">·</text>
+    <text x="17" y="188" class="label" text-anchor="start">连续存储</text>
+    <rect x="125" y="165" width="49" height="33" rx="4" class="idle"/><text x="149.5" y="186.5" class="label" text-anchor="middle">·</text>
+    <rect x="179" y="165" width="49" height="33" rx="4" class="idle"/><text x="203.5" y="186.5" class="label" text-anchor="middle">·</text>
+    <rect x="233" y="165" width="49" height="33" rx="4" class="idle"/><text x="257.5" y="186.5" class="label" text-anchor="middle">·</text>
+    <rect x="287" y="165" width="49" height="33" rx="4" class="idle"/><text x="311.5" y="186.5" class="label" text-anchor="middle">·</text>
+    <rect x="341" y="165" width="49" height="33" rx="4" class="idle"/><text x="365.5" y="186.5" class="label" text-anchor="middle">·</text>
+    <rect x="395" y="165" width="49" height="33" rx="4" class="idle"/><text x="419.5" y="186.5" class="label" text-anchor="middle">·</text>
+    <text x="17" y="234" class="label" text-anchor="start">cu_seqlens</text>
+    <text x="126" y="234" class="number" text-anchor="start">·</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>收紧真实 token</title>
+    <desc>将三条序列原有的 token 顺序拼接，连续数据只有 6 行。</desc>
+    <text x="17" y="66" class="label" text-anchor="start">原批次</text>
+    <text x="99" y="92" class="label" text-anchor="middle">A</text>
+    <rect x="126" y="73" width="49" height="24" rx="4" class="fresh"/><text x="150.5" y="90" class="label" text-anchor="middle">A0</text>
+    <rect x="180" y="73" width="49" height="24" rx="4" class="fresh"/><text x="204.5" y="90" class="label" text-anchor="middle">A1</text>
+    <rect x="234" y="73" width="49" height="24" rx="4" class="fresh"/><text x="258.5" y="90" class="label" text-anchor="middle">A2</text>
+    <text x="99" y="120" class="label" text-anchor="middle">B</text>
+    <rect x="126" y="101" width="49" height="24" rx="4" class="fresh"/><text x="150.5" y="118" class="label" text-anchor="middle">B0</text>
+    <rect x="180" y="101" width="49" height="24" rx="4" class="idle"/><text x="204.5" y="118" class="label" text-anchor="middle">·</text>
+    <rect x="234" y="101" width="49" height="24" rx="4" class="idle"/><text x="258.5" y="118" class="label" text-anchor="middle">·</text>
+    <text x="99" y="148" class="label" text-anchor="middle">C</text>
+    <rect x="126" y="129" width="49" height="24" rx="4" class="fresh"/><text x="150.5" y="146" class="label" text-anchor="middle">C0</text>
+    <rect x="180" y="129" width="49" height="24" rx="4" class="fresh"/><text x="204.5" y="146" class="label" text-anchor="middle">C1</text>
+    <rect x="234" y="129" width="49" height="24" rx="4" class="idle"/><text x="258.5" y="146" class="label" text-anchor="middle">·</text>
+    <text x="17" y="188" class="label" text-anchor="start">连续存储</text>
+    <rect x="125" y="165" width="49" height="33" rx="4" class="stored"/><text x="149.5" y="186.5" class="label" text-anchor="middle">A0</text>
+    <rect x="179" y="165" width="49" height="33" rx="4" class="stored"/><text x="203.5" y="186.5" class="label" text-anchor="middle">A1</text>
+    <rect x="233" y="165" width="49" height="33" rx="4" class="stored"/><text x="257.5" y="186.5" class="label" text-anchor="middle">A2</text>
+    <rect x="287" y="165" width="49" height="33" rx="4" class="stored"/><text x="311.5" y="186.5" class="label" text-anchor="middle">B0</text>
+    <rect x="341" y="165" width="49" height="33" rx="4" class="stored"/><text x="365.5" y="186.5" class="label" text-anchor="middle">C0</text>
+    <rect x="395" y="165" width="49" height="33" rx="4" class="stored"/><text x="419.5" y="186.5" class="label" text-anchor="middle">C1</text>
+    <text x="17" y="234" class="label" text-anchor="start">cu_seqlens</text>
+    <text x="126" y="234" class="number" text-anchor="start">[0, 3, 4, 6]</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>恢复 B 的边界</title>
+    <desc>B 对应 cu_seqlens[1:3] 给出的区间 [3,4)，只访问 B0。</desc>
+    <text x="17" y="66" class="label" text-anchor="start">原批次</text>
+    <text x="99" y="92" class="label" text-anchor="middle">A</text>
+    <rect x="126" y="73" width="49" height="24" rx="4" class="idle"/><text x="150.5" y="90" class="label" text-anchor="middle">A0</text>
+    <rect x="180" y="73" width="49" height="24" rx="4" class="idle"/><text x="204.5" y="90" class="label" text-anchor="middle">A1</text>
+    <rect x="234" y="73" width="49" height="24" rx="4" class="idle"/><text x="258.5" y="90" class="label" text-anchor="middle">A2</text>
+    <text x="99" y="120" class="label" text-anchor="middle">B</text>
+    <rect x="126" y="101" width="49" height="24" rx="4" class="idle"/><text x="150.5" y="118" class="label" text-anchor="middle">B0</text>
+    <rect x="180" y="101" width="49" height="24" rx="4" class="idle"/><text x="204.5" y="118" class="label" text-anchor="middle">·</text>
+    <rect x="234" y="101" width="49" height="24" rx="4" class="idle"/><text x="258.5" y="118" class="label" text-anchor="middle">·</text>
+    <text x="99" y="148" class="label" text-anchor="middle">C</text>
+    <rect x="126" y="129" width="49" height="24" rx="4" class="idle"/><text x="150.5" y="146" class="label" text-anchor="middle">C0</text>
+    <rect x="180" y="129" width="49" height="24" rx="4" class="idle"/><text x="204.5" y="146" class="label" text-anchor="middle">C1</text>
+    <rect x="234" y="129" width="49" height="24" rx="4" class="idle"/><text x="258.5" y="146" class="label" text-anchor="middle">·</text>
+    <text x="17" y="188" class="label" text-anchor="start">连续存储</text>
+    <rect x="125" y="165" width="49" height="33" rx="4" class="idle"/><text x="149.5" y="186.5" class="label" text-anchor="middle">A0</text>
+    <rect x="179" y="165" width="49" height="33" rx="4" class="idle"/><text x="203.5" y="186.5" class="label" text-anchor="middle">A1</text>
+    <rect x="233" y="165" width="49" height="33" rx="4" class="idle"/><text x="257.5" y="186.5" class="label" text-anchor="middle">A2</text>
+    <rect x="287" y="165" width="49" height="33" rx="4" class="stored"/><text x="311.5" y="186.5" class="label" text-anchor="middle">B0</text>
+    <rect x="341" y="165" width="49" height="33" rx="4" class="idle"/><text x="365.5" y="186.5" class="label" text-anchor="middle">C0</text>
+    <rect x="395" y="165" width="49" height="33" rx="4" class="idle"/><text x="419.5" y="186.5" class="label" text-anchor="middle">C1</text>
+    <text x="17" y="234" class="label" text-anchor="start">cu_seqlens</text>
+    <text x="126" y="234" class="number" text-anchor="start">[0, 3, 4, 6]</text>
+    <circle cx="312" cy="203" r="4" class="packet" data-dx="-95" data-dy="-78"/>
+  </g>
+</svg>

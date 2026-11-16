@@ -3,20 +3,9 @@ title: "调试指南"
 weight: 1
 ---
 
-## 概述
+## 先确定请求在哪一层停止推进
 
-### 本章学习目标
-- 掌握 SGLang 调试技巧
-- 了解关键断点位置
-- 学习日志分析方法
-- 熟悉常用调试工具
-
-### 前置知识要求
-- 熟悉 Python 调试
-- 了解多进程调试
-- 掌握日志分析基础
-
----
+按 HTTP 接收、输入处理、进入调度队列、模型执行、返回响应记录一个请求，跨进程时带同一请求标识。然后选择指标去验证具体一段，避免将端到端耗时直接归因给 GPU 内核。 [0.5.23 运行观测](https://github.com/sgl-project/sglang/blob/v0.5.23/docs/docs/advanced_features/observability.mdx)
 
 ## 日志系统
 
@@ -39,7 +28,7 @@ logging.basicConfig(level=logging.DEBUG)
 ```bash
 # 启动时启用调试日志
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --log-level debug
 ```
 
@@ -581,34 +570,4 @@ def analyze_logs(log_file):
 ```
 
 ---
-
-## 小结
-
-### 要点回顾
-
-1. **日志系统**：使用日志级别，分析关键模式
-2. **断点调试**：在关键位置设置断点
-3. **多进程**：使用 debugpy 远程调试
-4. **工具使用**：pdb、ipdb、VSCode
-
-### 调试流程
-
-```mermaid
-graph LR
-    PROBLEM["发现问题"]
-    LOGS["检查日志"]
-    REPRODUCE["复现问题"]
-    BREAKPOINT["设置断点"]
-    ANALYZE["分析原因"]
-    FIX["修复问题"]
-
-    PROBLEM --> LOGS --> REPRODUCE --> BREAKPOINT --> ANALYZE --> FIX
-```
-
-### 下一章预告
-
-在下一章《性能分析》中，我们将：
-- 使用 py-spy 分析 CPU 性能
-- 使用 torch profiler 分析 GPU
-- 定位性能瓶颈
 

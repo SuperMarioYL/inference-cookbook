@@ -1,70 +1,16 @@
 ---
-title: "RoPE 恢复算法"
+title: "旧 K 在新位置怎样应用 RoPE"
 weight: 1
 ---
 
-本文档详细介绍 CacheBlend 中 RoPE（Rotary Position Embedding）位置恢复算法的原理与实现。该算法是多 Chunk KV Cache 拼接的基础，确保预计算的 KV Cache 在新上下文中保持正确的位置编码。
+手册 M 单独出现时从位置 0 开始，放到长度为 32 个 token 的材料后面时，手册第一个 token 的目标位置变成 32。要使用它的旧 K，首先要知道旧 K 保存在哪个阶段：是已经旋转到旧位置，还是投影之后、尚未加入 RoPE。
 
----
+## 原型保存的是旋转前的 K
 
-## 5.1.1 问题背景
+在 `LlamaAttention.forward` 中，`qkv_proj` 后拆出 Q、K、V；`collect` 打开时将 `k.clone()` 和 `v.clone()` 存入 `hack_kv`。随后才对当前 Q/K 调用 `rotary_emb(positions, q, k)`。所以此处保存的原始 K 可以在重用时直接按组合后的 `org_pos` 旋转。原型对旧 K 调用相同的双输入 API，提供 `fake_q`，只保留 K 的输出。[作者源码](https://github.com/YaoJiayi/CacheBlend/blob/55ad02675939f783a38d579393527d218a7fd581/vllm_blend/vllm/model_executor/models/llama.py)
 
-预计算的 KV Cache 中的 K 向量是用原始位置（从 0 开始）旋转的。当多个 chunk 拼接时，需要将 K 向量重新旋转到正确的全局位置。
+{{< mechanism "cacheblend-rope-angle" >}}
 
-## 5.1.2 数学原理
+若一个实现保存的是已旋转 K，标准固定频率 RoPE 可写成 `R(new) × R(old)⁻¹ × K_old`，即施加相对位移；直接对已经旋转过的 K 再施加完整新位置旋转会重复计入旧位置。LMCache 多进程服务按缓存布局处理旋转信息，有独立的登记和回填逻辑。[LMCache 固定版本 RoPE 实现](https://github.com/LMCache/LMCache/blob/v0.5.7.post1/lmcache/v1/multiprocess/modules/blend/rope.py)
 
-根据论文附录 A，RoPE 的关键性质是注意力分数只依赖相对位置：
-
-$$q_{m+l}k_m = \sum_{i=0}^{d/2-1}(q_{[2i]}k_{[2i]} + q_{[2i+1]}k_{[2i+1]})\cos l\theta_i$$
-
-其中 $l = (m+l) - m$ 是相对距离。
-
-因此，只需要确保 K 向量的位置编码与实际拼接后的位置一致即可。
-
-## 5.1.3 代码实现
-
-```python
-# 文件: vllm_blend/vllm/model_executor/models/llama.py
-# 位置: LlamaAttention.forward() 第 174-179 行
-
-if status in [1, 2]:
-    # 创建虚拟 Query（只需要形状匹配）
-    if cache_fuse_metadata["fake_q"] is None:
-        cache_fuse_metadata['fake_q'] = torch.rand_like(q)
-
-    # 使用原始位置重新旋转旧 K
-    _, old_kv[0] = self.rotary_emb(
-        cache_fuse_metadata['org_pos'],  # 原始位置 [0, 1, 2, ..., seq_len-1]
-        cache_fuse_metadata['fake_q'],   # 虚拟 Q（不使用其输出）
-        old_kv[0]                        # 旧 K
-    )
-```
-
-## 5.1.4 算法流程
-
-```mermaid
-graph TB
-    subgraph rope["RoPE 位置恢复"]
-        OldK["旧 K (原始位置编码)"] --> Check{status in [1,2]?}
-        Check -->|是| CreateFakeQ["创建 fake_q"]
-        CreateFakeQ --> RotaryEmb["rotary_emb(org_pos, fake_q, old_K)"]
-        RotaryEmb --> NewOldK["旧 K (正确位置编码)"]
-        Check -->|否| Skip["跳过"]
-    end
-```
-
-## 5.1.5 正确性证明
-
-由于 RoPE 只依赖相对位置，旋转操作是可逆的：
-
-1. **原始旋转**：$K_{orig} = R_{\Theta, pos_{orig}} \cdot K$
-2. **反向旋转**：$K = R_{\Theta, -pos_{orig}} \cdot K_{orig}$
-3. **正确旋转**：$K_{correct} = R_{\Theta, pos_{correct}} \cdot K$
-
-由于 `rotary_emb` 函数直接应用给定位置的旋转，调用它会直接得到正确位置的 K。
-
----
-
-## 下一步
-
-- [HKVD Token 选择算法](./02-hkvd-selection.md) - 了解如何选择需要重计算的关键 Token
+位置对齐只解决“词出现在什么位置”。手册前面多了一份材料时，“这个词看到了什么”也变了，这部分由[高偏差 token 的选择与重算](./02-hkvd-selection.md)处理。

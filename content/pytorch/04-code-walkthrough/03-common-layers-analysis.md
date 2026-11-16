@@ -7,7 +7,7 @@ weight: 3
 
 PyTorch 在 `torch/nn/modules/` 目录下提供了丰富的预定义网络层。这些层都继承自 `nn.Module`，在内部维护可学习参数（Parameter）和状态（Buffer），并在 `forward()` 方法中委托给 `torch.nn.functional` 中的无状态函数完成实际计算。
 
-本文将深入分析四个最常用的层：**Linear**（全连接层）、**Conv2d**（二维卷积层）、**BatchNorm2d**（批归一化层）和 **MultiheadAttention**（多头注意力层）。
+Linear、Conv2d、BatchNorm2d 和 MultiheadAttention 都通过 Module 调用。对照各自的 forward，可以看到参数、运行统计量和输入在不同层里怎样参与计算。
 
 源码文件定位：
 - `torch/nn/modules/linear.py`
@@ -353,33 +353,23 @@ class _BatchNorm(_NormBase):
 
 ### 4.5 训练模式 vs 推理模式
 
-```mermaid
-stateDiagram-v2
-    [*] --> Training : model.train()
-    [*] --> Eval : model.eval()
-    Training --> Eval : model.eval()
-    Eval --> Training : model.train()
-
-    state Training {
-        direction LR
-        T1 : 计算 batch 均值/方差
-        T2 : 使用 batch 统计量归一化
-        T3 : 更新 running_mean/running_var
-        T4 : 应用 gamma/beta 仿射变换
-        T1 --> T2
-        T2 --> T3
-        T3 --> T4
-    }
-
-    state Eval {
-        direction LR
-        E1 : 使用 running_mean/running_var
-        E2 : 归一化（固定统计量）
-        E3 : 应用 gamma/beta 仿射变换
-        E1 --> E2
-        E2 --> E3
-    }
-```
+{{< stateboard >}}
+title: "BatchNorm 的均值从哪来"
+rows: ["模式", "归一化均值", "运行均值"]
+steps:
+  - title: "初始缓冲"
+    detail: "取一个通道，track_running_stats=True，running_mean 初值为 0。"
+    cells: [["训练"], ["·"], ["0"]]
+    focus: [[2, 0]]
+  - title: "训练输入 [2, 4]"
+    detail: "本批均值为 3。momentum=0.1 时，更新后的运行均值为 0.9×0+0.1×3=0.3。"
+    cells: [["训练"], ["3"], ["0.3"]]
+    focus: [[1, 0], [2, 0]]
+  - title: "切换到 eval"
+    detail: "对后续输入使用保存的均值 0.3 和运行方差；eval 前向不会用这一批重新更新统计量。"
+    cells: [["推理"], ["0.3"], ["0.3"]]
+    focus: [[0, 0], [1, 0]]
+{{< /stateboard >}}
 
 **训练模式**行为：
 1. 计算当前 batch 的均值和方差

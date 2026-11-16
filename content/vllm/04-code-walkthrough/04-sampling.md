@@ -3,8 +3,11 @@ title: "采样过程"
 weight: 4
 ---
 
+## 从 logits 到这一条请求的 token
 
-在模型前向传播得到 logits 后，需要通过采样来生成下一个 token。采样过程不仅仅是简单地选择概率最高的 token，还涉及温度调节、top-k/top-p 过滤、惩罚机制等多种策略。本章将深入分析 vLLM 的采样实现。
+固定 logits，先分清 greedy 与随机采样，再比较 top-k/top-p 和温度如何改变候选分布。生成 token 随请求的采样参数与随机状态而变。投机验证批另有接受和拒绝采样路径。 [0.33.0 采样器](https://github.com/vllm-project/vllm/blob/v0.33.0/vllm/v1/sample/sampler.py)
+
+模型为词表中的候选 token 返回 logits。贪心解码选取得分最高的候选，随机采样则根据温度和过滤后的概率分布抽取下一个 token。
 
 ---
 
@@ -142,38 +145,23 @@ class Sampler(nn.Module):
 
 ### 3.2 采样流程图
 
-```mermaid
-flowchart TD
-    A[logits] --> B{需要 logprobs?}
-    B -->|是| C[compute_logprobs]
-    B -->|否| D[转换为 float32]
-    C --> D
-
-    D --> E[apply_logits_processors]
-
-    subgraph logits_processing["Logits 处理"]
-        E --> E1[Allowed Token IDs]
-        E1 --> E2[Bad Words]
-        E2 --> E3[Min Tokens]
-        E3 --> E4[Logit Bias]
-        E4 --> E5[Penalties]
-    end
-
-    E5 --> F[sample]
-
-    subgraph sampling["采样"]
-        F --> F1{all_greedy?}
-        F1 -->|是| F2[argmax]
-        F1 -->|否| F3[apply_temperature]
-        F3 --> F4[min_p processor]
-        F4 --> F5[top_k / top_p]
-        F5 --> F6[multinomial]
-    end
-
-    F2 --> G[gather_logprobs]
-    F6 --> G
-    G --> H[SamplerOutput]
-```
+{{< stateboard >}}
+title: 同一组概率经过 top-k 和 top-p
+rows: ["候选", "概率", "允许采样"]
+steps:
+  - title: "概率已归一化"
+    detail: "词表只含 A、B、C、D，本轮对应概率之和为 1。"
+    cells: [["A", "B", "C", "D"], ["0.5", "0.3", "0.15", "0.05"], ["是", "是", "是", "是"]]
+    focus: [[1, 0], [1, 1], [1, 2], [1, 3]]
+  - title: "若用 top-k=2"
+    detail: "固定保留概率最高的两项，重新归一化后从 A、B 中抽样。"
+    cells: [["A", "B", "C", "D"], ["0.5", "0.3", "0.15", "0.05"], ["是", "是", "·", "·"]]
+    focus: [[2, 0], [2, 1]]
+  - title: "改用 top-p=0.9"
+    detail: "按概率从高到低累加，A+B 为 0.8，还需 C 才达到阈值。"
+    cells: [["A", "B", "C", "D"], ["0.5", "0.3", "0.15", "0.05"], ["是", "是", "是", "·"]]
+    focus: [[2, 0], [2, 1], [2, 2]]
+{{< /stateboard >}}
 
 ---
 
@@ -478,29 +466,27 @@ class SamplingMetadata:
 
 ### 7.2 批量处理流程
 
-```mermaid
-sequenceDiagram
-    participant S as Scheduler
-    participant R as ModelRunner
-    participant Sampler as Sampler
-
-    S->>R: SchedulerOutput (多个请求)
-    R->>R: 构建 SamplingMetadata
-    Note over R: 将各请求的采样参数<br/>批量化为张量
-
-    R->>Sampler: forward(logits, metadata)
-
-    alt all_greedy
-        Sampler->>Sampler: argmax (快速路径)
-    else mixed
-        Sampler->>Sampler: 批量应用温度
-        Sampler->>Sampler: 批量 top-k/top-p
-        Sampler->>Sampler: multinomial 采样
-        Sampler->>Sampler: 合并贪婪和随机结果
-    end
-
-    Sampler-->>R: SamplerOutput
-```
+{{< stateboard >}}
+title: 同一批里两个请求各自采样
+rows: ["请求 A", "请求 B"]
+steps:
+  - title: "交回 logits"
+    detail: "两行分别对应请求 A 和 B，三列是候选 token。"
+    cells: [["1", "4", "2"], ["3", "1", "2"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "A 取最大值"
+    detail: "A 使用 greedy，logit 为 4 的第二列胜出。"
+    cells: [["·", "选中", "·"], ["3", "1", "2"]]
+    focus: [[0, 1]]
+  - title: "B 保留两个候选"
+    detail: "B 使用 top-k=2；第一和第三列进入随后的随机采样。"
+    cells: [["·", "选中", "·"], ["候选", "·", "候选"]]
+    focus: [[1, 0], [1, 2]]
+  - title: "各自得到输出"
+    detail: "假设 B 本次抽到第三列，执行结果根据请求 ID 返回。"
+    cells: [["·", "选中", "·"], ["·", "·", "选中"]]
+    focus: [[0, 1], [1, 2]]
+{{< /stateboard >}}
 
 ---
 
@@ -539,30 +525,8 @@ sequenceDiagram
 
 ---
 
-## 10. 小结
-
-本章我们深入了解了 vLLM 的采样过程：
-
-1. **采样参数**：temperature、top_k、top_p、min_p 等
-2. **采样策略**：
-   - 贪婪采样：确定性，选择最高概率
-   - 温度采样：控制随机性
-   - Top-k：只考虑前 k 个 token
-   - Top-p：累积概率阈值过滤
-   - Min-p：相对于最高概率的阈值
-3. **惩罚机制**：
-   - 重复惩罚：惩罚已出现 token
-   - 频率惩罚：基于出现次数
-   - 存在惩罚：基于是否出现
-4. **Logprobs**：返回 token 的对数概率
-5. **批量优化**：通过 SamplingMetadata 批量处理
-
-在下一章中，我们将分析输出处理过程，了解采样结果如何转换为用户可见的输出。
-
----
-
 ## 导航
 
 - 上一篇：[模型前向传播](03-model-forward.md)
 - 下一篇：[输出处理流程](05-output-processing.md)
-- [返回目录](../README.md)
+- [返回目录](/vllm/00-overview/overview/)

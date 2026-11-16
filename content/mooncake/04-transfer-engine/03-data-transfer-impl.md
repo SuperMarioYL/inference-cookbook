@@ -3,10 +3,6 @@ title: "数据传输实现"
 weight: 3
 ---
 
-[上一篇](02-rdma-transport.md) | [目录](../README.md) | [下一篇](04-transport-protocols.md)
-
-# 数据传输实现
-
 #### 10.1 传输提交流程
 
 ```cpp
@@ -132,31 +128,7 @@ TransferPath RdmaTransport::selectOptimalPath(
 
 路径选择示意图：
 
-```mermaid
-graph TD
-    subgraph "Node A"
-        CPU_A[CPU NUMA 0]
-        GPU_A[GPU 0]
-        NIC_A1[mlx5_0]
-        NIC_A2[mlx5_1]
-    end
-
-    subgraph "Node B"
-        CPU_B[CPU NUMA 0]
-        GPU_B[GPU 0]
-        NIC_B1[mlx5_0]
-        NIC_B2[mlx5_1]
-    end
-
-    GPU_A -.->|PCIe| NIC_A1
-    GPU_A -.->|跨 NUMA| NIC_A2
-    NIC_A1 <-->|InfiniBand| NIC_B1
-    NIC_A2 <-->|InfiniBand| NIC_B2
-
-    style GPU_A fill:#90EE90
-    style NIC_A1 fill:#90EE90
-    style NIC_B1 fill:#90EE90
-```
+{{< mechanism "mooncake-numa-rails" >}}
 
 #### 10.4 RDMA 操作提交
 
@@ -265,25 +237,29 @@ void RdmaContext::pollCompletionQueue() {
 
 CQ 轮询流程：
 
-```mermaid
-flowchart TD
-    A[Poll CQ] --> B{有完成事件?}
-    B -->|是| C[获取 Slice from wr_id]
-    C --> D{状态?}
-    D -->|SUCCESS| E[slice->markSuccess]
-    D -->|ERROR| F{可重试?}
-    F -->|是| G[重新提交]
-    F -->|否| H[slice->markFailed]
-    E --> B
-    G --> B
-    H --> B
-    B -->|否| I[yield]
-    I --> A
-```
+{{< trace >}}
+title: "完成队列如何推进一个批次"
+actors: ["RNIC", "CQ worker", "Slice", "批次"]
+steps:
+  - from: 0
+    to: 1
+    label: "返回 CQE"
+    detail: "完成事件带着工作请求标识和操作状态。"
+  - from: 1
+    to: 2
+    label: "找回 slice"
+    detail: "worker 通过该标识定位这次传输的一部分。"
+  - from: 2
+    to: 3
+    label: "更新计数"
+    detail: "成功完成的 slice 计入任务，其他未完成部分仍在运行。"
+  - from: 3
+    to: 3
+    label: "报告结果"
+    detail: "批次所有必需部分满足完成条件后，对外报告成功；错误按相应失败路径处理。"
+{{< /trace >}}
 
 #### 10.6 本章小结
-
-本章深入分析了 Transfer Engine 的传输实现：
 
 1. **层次模型**：Batch -> Task -> Slice 三层结构
 2. **Slice 缓存**：线程本地缓存减少分配开销

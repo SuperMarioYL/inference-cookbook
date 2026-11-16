@@ -15,6 +15,8 @@ weight: 1
 
 ---
 
+本页表列的函数属于 FA2 `v2.8.3.post2`。FA3 的同名函数额外支持 Hopper 路径的参数；FA4 beta39 的 `flash_attn_func` 是 `flash_attn.cute` 下的独立接口，返回 `(out, lse)`。将示例粘贴进模型前，先对上导入名、参数与返回值。[FA2 源码](https://github.com/Dao-AILab/flash-attention/blob/v2.8.3.post2/flash_attn/flash_attn_interface.py) · [三代入口](/flashattention/00-overview/02-architecture-overview/)
+
 ## 1. 核心函数概览
 
 Flash Attention 提供 7 个公开 API 函数：
@@ -55,7 +57,7 @@ from flash_attn import (
 ### 2.1 函数签名
 
 ```python
-# flash_attn/flash_attn_interface.py:1145-1219
+# flash_attn/flash_attn_interface.py
 def flash_attn_func(
     q,                          # (batch_size, seqlen, nheads, headdim)
     k,                          # (batch_size, seqlen, nheads_k, headdim)
@@ -150,7 +152,7 @@ out = flash_attn_func(q, k, v, dropout_p=0.1, causal=True)
 ### 3.1 flash_attn_qkvpacked_func
 
 ```python
-# flash_attn/flash_attn_interface.py:1008-1064
+# flash_attn/flash_attn_interface.py
 def flash_attn_qkvpacked_func(
     qkv,                        # (batch_size, seqlen, 3, nheads, headdim)
     dropout_p=0.0,
@@ -178,7 +180,7 @@ out = flash_attn_qkvpacked_func(qkv, causal=True)
 ### 3.2 flash_attn_kvpacked_func
 
 ```python
-# flash_attn/flash_attn_interface.py:1067-1142
+# flash_attn/flash_attn_interface.py
 def flash_attn_kvpacked_func(
     q,                          # (batch_size, seqlen_q, nheads, headdim)
     kv,                         # (batch_size, seqlen_k, 2, nheads_k, headdim)
@@ -217,7 +219,7 @@ Varlen 格式 (无 padding):
 ### 4.2 flash_attn_varlen_func
 
 ```python
-# flash_attn/flash_attn_interface.py:1380-1471
+# flash_attn/flash_attn_interface.py
 def flash_attn_varlen_func(
     q,                          # (total_q, nheads, headdim)
     k,                          # (total_k, nheads_k, headdim)
@@ -268,7 +270,7 @@ out = flash_attn_varlen_func(q, k, v, cu_seqlens, cu_seqlens, 256, 256, causal=T
 ### 5.1 函数签名
 
 ```python
-# flash_attn/flash_attn_interface.py:1474-1616
+# flash_attn/flash_attn_interface.py
 def flash_attn_with_kvcache(
     q,                          # (batch_size, seqlen, nheads, headdim)
     k_cache,                    # (batch_size_cache, seqlen_cache, nheads_k, headdim)
@@ -360,10 +362,10 @@ out = flash_attn_with_kvcache(
 ### 6.1 CUDA vs Triton
 
 ```python
-# flash_attn/flash_attn_interface.py:11-15
+# flash_attn/flash_attn_interface.py
 USE_TRITON_ROCM = os.getenv("FLASH_ATTENTION_TRITON_AMD_ENABLE", "FALSE") == "TRUE"
 if USE_TRITON_ROCM:
-    from .flash_attn_triton_amd import flash_attn_2 as flash_attn_gpu
+    from .flash_attn_triton_amd import interface_fa as flash_attn_gpu
 else:
     import flash_attn_2_cuda as flash_attn_gpu
 ```
@@ -373,10 +375,10 @@ else:
 
 ### 6.2 SM80 vs SM90 选择
 
-架构选择在 C++ 层面通过 `params.arch` 完成：
+下方是 FA2 的辅助函数。设备 capability 和 dtype 等条件影响实现内部的块大小；换 GPU 不会把已导入的 FA2 函数变成 FA3 的 Hopper API。
 
 ```python
-# flash_attn/flash_attn_interface.py:23-46
+# flash_attn/flash_attn_interface.py
 def _get_block_size_n(device, head_dim, is_dropout, is_causal):
     major, minor = torch.cuda.get_device_capability(device)
     is_sm80 = major == 8 and minor == 0   # A100
@@ -390,7 +392,7 @@ def _get_block_size_n(device, head_dim, is_dropout, is_causal):
 Flash Attention 通过 `torch.library.custom_op` 注册自定义算子，支持 `torch.compile`：
 
 ```python
-# flash_attn/flash_attn_interface.py:53-73
+# flash_attn/flash_attn_interface.py
 # PyTorch >= 2.4.0
 @torch.library.custom_op("flash_attn::_flash_attn_forward", mutates_args=())
 def _flash_attn_forward(q, k, v, ...):
@@ -440,7 +442,7 @@ def _flash_attn_forward_fake(q, k, v, ...):
 所有 API 要求 `headdim` 为 8 的倍数。不满足时自动 padding：
 
 ```python
-# flash_attn/flash_attn_interface.py:470-473
+# flash_attn/flash_attn_interface.py
 head_size_og = q.size(3)
 if head_size_og % 8 != 0:
     q = torch.nn.functional.pad(q, [0, 8 - head_size_og % 8])
@@ -453,6 +455,6 @@ if head_size_og % 8 != 0:
 
 ## 导航
 
-- 上一篇：[SM80 内核实现对比](../03-cuda-kernel/05-kernel-sm80.md)
-- 下一篇：[Autograd 集成](02-autograd-integration.md)
-- [返回目录](../README.md)
+- 上一篇：[SM80 内核实现对比](/flashattention/03-cuda-kernel/05-kernel-sm80/)
+- 下一篇：[Autograd 集成](/flashattention/04-python-api/02-autograd-integration/)
+- [返回目录](/flashattention/00-overview/overview/)

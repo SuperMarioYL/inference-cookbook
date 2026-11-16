@@ -3,7 +3,7 @@ title: "LLaMA 模型实现"
 weight: 4
 ---
 
-本文档详细介绍 CacheBlend 中 `LlamaModel` 类的实现，包括类结构、forward 方法的详细逻辑以及层间数据传递机制。
+`LlamaModel.forward` 在层循环里切换检查状态。到达检查层后，后续层需要的隐藏状态、残差和位置索引都要与同一批入选 token 对齐。
 
 ## 类结构
 
@@ -117,32 +117,27 @@ def forward(
 
 ## 层间数据传递图
 
-```mermaid
-sequenceDiagram
-    participant Model as LlamaModel
-    participant Layer0 as Layer 0
-    participant Layer1 as Layer 1 (Check)
-    participant Layer2 as Layer 2+
-
-    Note over Model: temp_status = 0
-    Model->>Layer0: hidden[all], positions[all], old_kv[0]
-    Layer0->>Layer0: 完整计算
-    Layer0-->>Model: hidden[all], residual[all]
-
-    Note over Model: temp_status = 1 (Check)
-    Model->>Layer1: hidden[all], positions[all], old_kv[1]
-    Layer1->>Layer1: 计算 KV 差异
-    Layer1->>Layer1: 选择 HKVD (imp_indices)
-    Layer1->>Layer1: residual = residual[imp_indices]
-    Layer1-->>Model: hidden[HKVD], residual[HKVD]
-
-    Note over Model: positions = positions[imp_indices]
-    Note over Model: temp_status = 2 (After Check)
-    Model->>Layer2: hidden[HKVD], positions[HKVD], old_kv[2]
-    Layer2->>Layer2: 仅对 HKVD 计算
-    Layer2->>Layer2: 更新 old_kv
-    Layer2-->>Model: hidden[HKVD], residual[HKVD]
-```
+{{< trace >}}
+title: "检查层之后三组张量一起缩短"
+actors: ["LlamaModel", "检查层", "位置索引", "后续层"]
+steps:
+  - from: 0
+    to: 1
+    label: "传入完整序列"
+    detail: "模型传入本层的 hidden、residual 与 positions。"
+  - from: 1
+    to: 2
+    label: "选出相同行号"
+    detail: "注意力后端把入选位置记录到 imp_indices。"
+  - from: 2
+    to: 0
+    label: "回到模型循环"
+    detail: "模型据此筛选后续层使用的位置；三组数据的行号必须对应同一 token。"
+  - from: 0
+    to: 3
+    label: "进入下一层"
+    detail: "后续层收到较短的工作集，同时保留访问完整旧 KV 的映射。"
+{{< /trace >}}
 
 ---
 

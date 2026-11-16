@@ -5,7 +5,7 @@ weight: 7
 
 > Dispatcher 是 PyTorch 所有张量操作的中央路由引擎。每一次 `torch.add`、`torch.mm` 等算子调用，
 > 都要经过 Dispatcher 的分发链路——从提取 DispatchKey、查找内核函数到最终执行。
-> 本文深入剖析 Dispatcher 的单例架构、算子注册表、分发调用链以及 redispatch 机制。
+调用同一个 `aten::add`，CPU 张量和 CUDA 张量可以进入不同内核。注册表把算子与各个分发键的实现对应起来。
 
 ---
 
@@ -562,29 +562,31 @@ inline Return Dispatcher::redispatch(
 
 以 `torch.mm` 为例，当 `requires_grad=True` 时的完整分发链路：
 
-```mermaid
-sequenceDiagram
-    participant Py as "Python: torch.mm(a, b)"
-    participant D1 as "Dispatcher::call()"
-    participant AG as "AutogradCPU kernel"
-    participant D2 as "Dispatcher::redispatch()"
-    participant CPU as "CPU kernel"
-
-    Py->>D1: call(mm_op, a, b)
-    Note over D1: DispatchKeySet =<br/>{AutogradCPU, CPU, ADInplaceOrView, ...}<br/>最高优先级 = AutogradCPU
-    D1->>AG: kernel.call(op, ks, a, b)
-
-    Note over AG: 1. 记录 grad_fn = MmBackward<br/>2. 保存输入张量到 saved_tensors<br/>3. 从 ks 中移除 autograd 相关键
-
-    AG->>D2: redispatch(op, ks_without_autograd, a, b)
-    Note over D2: DispatchKeySet =<br/>{CPU, ADInplaceOrView, ...}<br/>最高优先级 = CPU
-    D2->>CPU: kernel.call(op, ks, a, b)
-    Note over CPU: 调用 mm 的 CPU 实现<br/>（BLAS/MKL/etc）
-
-    CPU-->>AG: 返回结果 Tensor
-    Note over AG: 将 grad_fn 附加到输出 Tensor
-    AG-->>Py: 返回带梯度追踪的 Tensor
-```
+{{< trace >}}
+title: "一次 CPU mm 的重新分发"
+actors: ["调用方", "Dispatcher", "AutogradCPU", "CPU 内核"]
+steps:
+  - from: 0
+    to: 1
+    label: "提交 a 与 b"
+    detail: "两个 CPU 张量参与矩阵乘，开启梯度记录。"
+  - from: 1
+    to: 2
+    label: "选中求导包装"
+    detail: "调度的有效键集合让该算子的 Autograd 处理器先取得控制。"
+  - from: 2
+    to: 1
+    label: "向低优先级分发"
+    detail: "包装器对已处理的求导层执行 redispatch，避免再次进入自己。"
+  - from: 1
+    to: 3
+    label: "运行矩阵乘"
+    detail: "CPU 实现消费输入，产生矩阵乘的前向结果。"
+  - from: 2
+    to: 0
+    label: "返回带历史的输出"
+    detail: "求导包装把结果与反向节点关联，之后的 backward 可以找到该算子的依赖。"
+{{< /trace >}}
 
 Autograd 内核的伪代码结构如下：
 
@@ -771,8 +773,8 @@ c = a + b
 
 ## 延伸阅读
 
-- [Module 5 - 01 DispatchKey 体系](./01-dispatch-key-system.md) - DispatchKey 的分层设计与 DispatchKeySet 的位运算
-- [Module 5 - 03 算子注册机制](./03-operator-registration.md) - `registerDef()`、`registerImpl()`、`TORCH_LIBRARY` 宏的工作原理
-- [Module 2 - 02 Engine 执行](../module-02-autograd/02-engine-execution.md) - Autograd 内核 redispatch 后的反向传播引擎
-- [Module 2 - 04 grad_mode 与推理模式](../module-02-autograd/04-grad-mode-and-inference.md) - TLS 如何影响 DispatchKeySet 的计算
+- [Module 5 - 01 DispatchKey 体系](/pytorch/03-core-modules/06-dispatch-key-system/) - DispatchKey 的分层设计与 DispatchKeySet 的位运算
+- [Module 5 - 03 算子注册机制](/pytorch/03-core-modules/08-operator-registration/) - `registerDef()`、`registerImpl()`、`TORCH_LIBRARY` 宏的工作原理
+- [Module 2 - 02 Engine 执行](/pytorch/02-fundamentals/06-engine-execution/) - Autograd 内核 redispatch 后的反向传播引擎
+- [Module 2 - 04 grad_mode 与推理模式](/pytorch/04-code-walkthrough/07-grad-mode-and-inference/) - TLS 如何影响 DispatchKeySet 的计算
 - [PyTorch RFC: Dispatcher 设计](https://github.com/pytorch/rfcs/blob/main/RFC-0008-dispatcher.md) - 官方 RFC 文档

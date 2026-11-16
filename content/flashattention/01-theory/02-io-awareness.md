@@ -3,7 +3,7 @@ title: "IO 感知与 GPU 内存层次结构"
 weight: 2
 ---
 
-> Flash Attention 的核心洞察并非算法层面的创新，而是对 GPU 内存层次结构的深刻理解和针对性优化。本文将从硬件架构出发，系统分析标准 Attention 的 IO 瓶颈，并阐明 Flash Attention 如何通过 IO 感知的算法设计实现数量级的性能提升。
+普通的三步实现把分数和概率矩阵写回显存；FlashAttention 分块计算并在片上消费它们。本章分别估算额外存储、内存传输量与两次矩阵乘的 FLOPs，说明三者如何随序列长度变化。
 
 ---
 
@@ -61,19 +61,9 @@ graph TD
 - **延迟**: 200+ 个时钟周期
 - **特点**: GPU 的主存，容量最大但相对最慢。所有模型参数、输入数据、中间结果默认存储在 HBM 中
 
-### 1.2 关键洞察 - 速度差距
+### 1.2 分块工作集
 
-SRAM 与 HBM 之间存在巨大的性能鸿沟：
-
-| 指标 | SRAM | HBM | 差距 |
-|------|------|-----|------|
-| 带宽 | ~19 TB/s | ~2 TB/s | **~10x** |
-| 延迟 | ~5 cycles | ~200+ cycles | **~40x** |
-| 容量 | ~192KB/SM | ~80GB | **~400,000x** |
-
-> **核心矛盾**: SRAM 比 HBM 快 10-100 倍，但容量小了约 40 万倍。Flash Attention 的设计哲学就是最大化利用 SRAM 的速度优势，同时通过精巧的分块策略克服容量限制。
-
----
+一个线程块能使用的共享内存受所在 SM 和启动配置约束。整卡显存容量则由所有 SM 共享。选择 tile 时需要给 Q/K/V、部分结果和流水缓冲留出空间；真正被省掉的带宽来自同一 tile 在片上被消费，而不是把整卡的显存容量与单个 SM 的容量相除。
 
 ## 2. 计算强度与 Roofline 模型
 
@@ -96,8 +86,8 @@ graph LR
     subgraph roofline["Roofline 模型"]
         direction TB
         A["算术强度<br/>FLOPs / Bytes"] --> B{"与 ops-byte 比值比较"}
-        B -->|"强度 < ops:byte ratio"| C["内存受限 Memory-bound<br/>性能受限于内存带宽<br/>实际吞吐 = 强度 x 带宽"]
-        B -->|"强度 > ops:byte ratio"| D["计算受限 Compute-bound<br/>性能受限于计算单元<br/>实际吞吐 = 峰值算力"]
+        B -->|"强度 < ops:byte ratio"| C["内存受限 Memory-bound<br/>性能受限于内存带宽<br/>吞吐上界 = 强度 x 带宽"]
+        B -->|"强度 > ops:byte ratio"| D["计算受限 Compute-bound<br/>性能受限于计算单元<br/>吞吐上界 = 峰值算力"]
         E["A100 GPU 参数"] --> F["FP16 算力 - 312 TFLOPS"]
         E --> G["HBM 带宽 - 2.0 TB/s"]
         F --> H["ops:byte ratio = 312T / 2T = 156"]
@@ -109,15 +99,15 @@ graph LR
     style H fill:#64b5f6,stroke:#1565c0,color:#fff
 ```
 
-对于 NVIDIA A100 GPU：
+以下 Roofline 估算采用 A100 80 GB SXM 的近似带宽和 FP16 稠密 Tensor Core 峰值。[A100 规格](https://www.nvidia.com/en-us/data-center/a100/)
 
 - **FP16 峰值算力**: 312 TFLOPS
 - **HBM 带宽**: 2.0 TB/s
 - **ops:byte ratio**: $\frac{312 \times 10^{12}}{2 \times 10^{12}} \approx 156$ FLOPs/Byte
 
 这意味着：
-- 当一个操作的算术强度 **< 156** 时，该操作是 **内存受限** (memory-bound) 的
-- 当一个操作的算术强度 **> 156** 时，该操作是 **计算受限** (compute-bound) 的
+- 当一个操作的算术强度 **< 156** 时，该模型给出的上界由 HBM 带宽决定
+- 当一个操作的算术强度 **> 156** 时，该模型给出的上界由峰值算力决定
 
 ### 2.3 标准 Attention 各操作的算术强度分析
 
@@ -153,7 +143,7 @@ graph LR
 | $P = \text{softmax}(S)$ | $O(N^2)$ | $O(N^2)$ | $\approx 1$ | **极度内存受限** |
 | $O = PV$ | $O(N^2 d)$ | $O(N^2 + Nd)$ | $\approx d$ (~128) | 接近内存受限 |
 
-> 关键发现: 标准 Attention 的所有操作都位于 Roofline 模型的内存受限区域。即使 GPU 拥有强大的 312 TFLOPS 计算能力，大部分时间都浪费在等待 HBM 数据传输上。
+> 关键发现: 在这个逐算子实现中，softmax 要单独读写分数矩阵。两次矩阵乘是否受带宽限制，还取决于实际的头维度、尺寸和设备的算力带宽比。
 
 ---
 
@@ -163,37 +153,35 @@ graph LR
 
 标准 Attention 的计算按照三个独立的 kernel 依次执行，每个 kernel 都需要从 HBM 读取输入并将结果写回 HBM。
 
-```mermaid
-graph TB
-    subgraph std["标准 Attention 的 HBM 访问模式"]
-        direction TB
-
-        subgraph step1["Step 1 - S = QK^T"]
-            H1["HBM"] -->|"读取 Q (N x d)<br/>读取 K (N x d)"| C1["GPU 计算单元"]
-            C1 -->|"写回 S (N x N)"| H1
-        end
-
-        subgraph step2["Step 2 - P = softmax(S)"]
-            H2["HBM"] -->|"读取 S (N x N)"| C2["GPU 计算单元"]
-            C2 -->|"写回 P (N x N)"| H2
-        end
-
-        subgraph step3["Step 3 - O = PV"]
-            H3["HBM"] -->|"读取 P (N x N)<br/>读取 V (N x d)"| C3["GPU 计算单元"]
-            C3 -->|"写回 O (N x d)"| H3
-        end
-
-        step1 --> step2
-        step2 --> step3
-    end
-
-    style H1 fill:#66bb6a,stroke:#2e7d32,color:#fff
-    style H2 fill:#66bb6a,stroke:#2e7d32,color:#fff
-    style H3 fill:#66bb6a,stroke:#2e7d32,color:#fff
-    style C1 fill:#ff6b6b,stroke:#c62828,color:#fff
-    style C2 fill:#ff6b6b,stroke:#c62828,color:#fff
-    style C3 fill:#ff6b6b,stroke:#c62828,color:#fff
-```
+{{< trace >}}
+title: "三次操作怎样读写中间矩阵"
+actors: ["HBM", "QK 乘法", "softmax", "PV 乘法"]
+steps:
+  - from: 0
+    to: 1
+    label: "读 Q 和 K"
+    detail: "显式实现先计算一张 N×N 的完整分数矩阵 S。"
+  - from: 1
+    to: 0
+    label: "写回 S"
+    detail: "分数需要留给下一次独立调用读取。"
+  - from: 0
+    to: 2
+    label: "读取 S"
+    detail: "softmax 按行求归一化概率。"
+  - from: 2
+    to: 0
+    label: "写回 P"
+    detail: "概率矩阵 P 再占一次全矩阵写入。"
+  - from: 0
+    to: 3
+    label: "读取 P 和 V"
+    detail: "最后一个矩阵乘使用 P 和 V，输出大小为 N×d。"
+  - from: 3
+    to: 0
+    label: "写回 O"
+    detail: "整条路径上 S、P 分别写一次、读一次。"
+{{< /trace >}}
 
 ### 3.2 详细 IO 统计
 
@@ -223,42 +211,37 @@ graph TB
 | 读取 | $P$ | $N \times N$ | $2N^2$ |
 | 读取 | $V$ | $N \times d$ | $2Nd$ |
 | 写回 | $O$ | $N \times d$ | $2Nd$ |
-| **合计** | | | $4N^2 + 4Nd$ |
+| **合计** | | | $2N^2 + 4Nd$ |
 
 **总 HBM 访问量**:
 
 $$
-\text{Total IO} = (4Nd + 2N^2) + 4N^2 + (4N^2 + 4Nd) = 8Nd + 10N^2 \text{ bytes}
+\text{Total IO} = (4Nd + 2N^2) + 4N^2 + (2N^2 + 4Nd) = 8Nd + 8N^2 \text{ bytes}
 $$
 
 当 $N \gg d$ 时，$N^2$ 项占主导地位：
 
 $$
-\text{Total IO} \approx 10N^2 \text{ bytes}
+\text{Total IO} \approx 8N^2 \text{ bytes}
 $$
 
 ### 3.3 数值实例
 
-以 $N = 4096$，$d = 128$（典型的 GPT 级别参数）为例：
+取单头、单条序列 `N=4096`、`d=128`，所有输入、输出与 S/P 均按 FP16 计算。此处按三步算子各自读写一次必要数组计数，未模拟 cache 或 kernel 的实际访存事务。
 
-| 项目 | 大小 |
-|------|------|
-| $Q, K, V$ 各自大小 | $4096 \times 128 \times 2 = 1$ MB |
-| $S$ 矩阵大小 | $4096 \times 4096 \times 2 = 32$ MB |
-| $P$ 矩阵大小 | $4096 \times 4096 \times 2 = 32$ MB |
-| 输出 $O$ 大小 | $4096 \times 128 \times 2 = 1$ MB |
-| **总 HBM 传输量** | **~160 MB** (per head) |
-| A100 HBM 带宽下的传输时间 | $\frac{160 \text{ MB}}{2 \text{ TB/s}} \approx 0.08$ ms |
-| 实际计算 FLOPs | $\approx 2 \times 4096^2 \times 128 \times 2 \approx 8.6$ GFLOPs |
-| A100 计算时间 | $\frac{8.6 \text{ GFLOPs}}{312 \text{ TFLOPS}} \approx 0.028$ ms |
+| 数据 | 单个数组 | 逻辑读写量 |
+|---|---:|---:|
+| Q、K、V、O | 每个 1 MiB | 三次读入，一次写回，共 4 MiB |
+| S、P | 每个 32 MiB | 每个数组各一次写入、一次读回，共 128 MiB |
+| 合计 | | 132 MiB，即 138,412,032 字节 |
 
-> 即使在理想条件下，内存传输时间（0.08 ms）也是计算时间（0.028 ms）的约 3 倍。实际情况中，由于 kernel launch overhead、内存对齐、bank conflict 等因素，差距更大。
+若把这些字节全部按十进制 2 TB/s 从 HBM 传输，需要约 0.069 ms；两次矩阵乘约为 8.59 GFLOPs，按 312 TFLOPs/s 计算约 0.028 ms。这两个商是在给定假设下估算的时间尺度。实际延迟还取决于缓存命中、启动开销、并行度与各步能达到的吞吐。
 
 ### 3.4 中间矩阵 - 问题的根源
 
 标准 Attention 的核心问题在于 $N \times N$ 的中间矩阵 $S$ 和 $P$：
 
-1. **内存占用**: 当 $N = 8192$ 时，单个注意力头的 $S$ 矩阵就需要 $8192^2 \times 2 = 128$ MB。多头注意力下（如 32 个头），仅中间矩阵就需要 4 GB
+1. **内存占用**: 当 $N = 8192$ 时，单个注意力头的 $S$ 矩阵就需要 $8192^2 \times 2 = 128$ MiB。多头注意力下（如 32 个头），仅这一类中间矩阵就需要 4 GiB
 2. **HBM 往返**: $S$ 和 $P$ 各自需要一次写入和一次读取，贡献了总 IO 的大部分
 3. **二次增长**: 随着序列长度增长，IO 量以 $O(N^2)$ 的速度增加，而有效计算（最终输出 $O$）仅需 $O(Nd)$ 的存储
 
@@ -281,103 +264,41 @@ Flash Attention 的核心思想可以用一句话概括：
 - $Q$ 分成 $T_r = \lceil N / B_r \rceil$ 个块，每块大小 $B_r \times d$
 - $K, V$ 分成 $T_c = \lceil N / B_c \rceil$ 个块，每块大小 $B_c \times d$
 
-其中 $B_r$ 和 $B_c$ 的选择满足：
-
-$$
-B_r \times d + B_c \times d + B_r \times B_c \leq M
-$$
-
-$M$ 为 SRAM 大小（如 A100 上约 192KB / 2 bytes = 96K 元素）。
+分块时，Q、K、V、局部分数和输出累加器所需的空间共同决定可用块大小。论文用可存储的标量个数表示片上容量 $M$；实际内核还需按对应 dtype 的字节数、流水级数与线程布局计算。
 
 ### 4.3 IO 复杂度对比
 
-```mermaid
-graph LR
-    subgraph comparison["Flash Attention vs Standard Attention IO 对比"]
-        direction TB
+{{< trace >}}
+title: "固定一个 Q 行块时，谁读写 HBM"
+actors: ["HBM", "共享内存", "计算组", "输出"]
+steps:
+  - from: 0
+    to: 1
+    label: "装入 Q 与 KV0"
+    detail: "示意 Q-outer 稠密前向，当前 Q 行块在这一任务中反复使用。"
+  - from: 1
+    to: 2
+    label: "消费第一块"
+    detail: "局部分数与指数权重在片上转换为行统计和输出累加量。"
+  - from: 0
+    to: 1
+    label: "读取 KV1"
+    detail: "下一对 K/V 块占用可用 stage，先前的分数块已经消费。"
+  - from: 2
+    to: 3
+    label: "写回最终行块"
+    detail: "所有可见块处理完，写回归一化后的 O。完整 S、P 不写回 HBM。"
+{{< /trace >}}
 
-        subgraph standard["Standard Attention"]
-            direction TB
-            SA1["Step 1: 加载 Q, K"] --> SA2["计算 S = QK^T"]
-            SA2 --> SA3["写回 S 到 HBM (N x N)"]
-            SA3 --> SA4["Step 2: 加载 S"]
-            SA4 --> SA5["计算 P = softmax(S)"]
-            SA5 --> SA6["写回 P 到 HBM (N x N)"]
-            SA6 --> SA7["Step 3: 加载 P, V"]
-            SA7 --> SA8["计算 O = PV"]
-            SA8 --> SA9["写回 O 到 HBM"]
-        end
+### 4.4 论文中的访问次数
 
-        subgraph flash["Flash Attention"]
-            direction TB
-            FA1["加载 Q 块, K 块, V 块<br/>到 SRAM"] --> FA2["在 SRAM 中计算<br/>局部 S, P (不写回 HBM)"]
-            FA2 --> FA3["在 SRAM 中累积<br/>局部 O 和 softmax 统计量"]
-            FA3 --> FA4{"所有 K, V 块<br/>处理完毕?"}
-            FA4 -->|"否"| FA1
-            FA4 -->|"是"| FA5["写回最终 O 到 HBM"]
-        end
-    end
+在 FA1 论文的两级存储模型中，以元素数为单位，序列长度为 $N$，head dimension 为 $d$，片上容量满足 $d \le M \le Nd$。显式三步前向需要 $\Theta(Nd+N^2)$ 次 HBM 元素访问。论文算法选择 $B_c=\Theta(M/d)$，依次处理 K/V 块；每个 K/V 块只载入一次，但每一轮都要扫描 Q 和部分输出，因此总访问量为 $\Theta(Nd+Nd\lceil N/B_c\rceil)=\Theta(N^2 d^2/M)$。[FA1 论文定理 2 及其证明](https://arxiv.org/abs/2205.14135)
 
-    style SA3 fill:#e57373,stroke:#c62828,color:#fff
-    style SA6 fill:#e57373,stroke:#c62828,color:#fff
-    style FA2 fill:#81c784,stroke:#2e7d32,color:#fff
-    style FA3 fill:#81c784,stroke:#2e7d32,color:#fff
-```
-
-**Standard Attention HBM 访问量**:
-
-$$
-\Theta(Nd + N^2) \text{ 字节}
-$$
-
-**Flash Attention HBM 访问量**:
-
-$$
-\Theta\left(\frac{N^2 d^2}{M}\right) \text{ 字节}
-$$
-
-其中 $M$ 为 SRAM 大小。推导过程如下：
-
-- 外层循环遍历 $K, V$ 的 $T_c = N / B_c$ 个块
-- 内层循环遍历 $Q$ 的 $T_r = N / B_r$ 个块
-- 每次内层迭代加载: $B_r \times d + B_c \times d$ 元素
-- 总加载量: $T_c \times T_r \times (B_r + B_c) \times d = \frac{N}{B_c} \times \frac{N}{B_r} \times (B_r + B_c) \times d$
-- 化简（取 $B_r \approx B_c \approx \sqrt{M/d}$ 时最优）: $\Theta\left(\frac{N^2 d^2}{M}\right)$
-
-### 4.4 渐近改进
-
-当 SRAM 大小 $M = \Omega(Nd)$（即 SRAM 能容纳一整行 Q 和一整行 K/V）时：
-
-$$
-\frac{N^2 d^2}{M} = \frac{N^2 d^2}{Nd} = Nd
-$$
-
-此时 Flash Attention 的 HBM 访问量为 $O(Nd)$，相比标准 Attention 的 $O(N^2)$：
-
-$$
-\text{IO 加速比} = \frac{N^2}{Nd} = \frac{N}{d}
-$$
-
-以 $N = 4096$，$d = 128$ 为例：
-
-$$
-\text{IO 加速比} = \frac{4096}{128} = 32\times
-$$
-
-这意味着 Flash Attention 将 HBM 访问量减少了约 **32 倍**！
-
-### 4.5 数值对比
-
-| 指标 | Standard Attention | Flash Attention | 改进 |
-|------|-------------------|-----------------|------|
-| HBM 访问量 ($N=4096, d=128$) | ~160 MB | ~5 MB | **32x** |
-| IO 复杂度 | $O(N^2)$ | $O(Nd)$ | $N/d$ 倍 |
-| 额外 HBM 存储 | $O(N^2)$ (S, P 矩阵) | $O(N)$ (softmax 统计量) | $N$ 倍 |
-| Kernel 数量 | 3 个独立 kernel | 1 个融合 kernel | 消除 launch overhead |
+完整 S/P 矩阵消失，使额外驻留显存随行数线性增长；经 HBM 搬运的累计数据还包含反复扫描的块。只有当 $M$ 与整个 $N \times d$ 矩阵同阶时，上式才退化到 $\Theta(Nd)$。仅给出 $N=4096,d=128$ 无法推出实测流量和加速倍数。比较实际内核用 profiler 的 DRAM 读写字节与端到端时间，分别记录两项。
 
 ### 4.6 为什么 IO 减少不影响计算正确性
 
-Flash Attention 的数学输出与标准 Attention **完全一致**（bit-exact，排除浮点重结合误差）。它减少的仅仅是不必要的 HBM 往返：
+Flash Attention 的数学输出与标准 Attention 在实数算术中一致（bit-exact，排除浮点重结合误差）。它减少的仅仅是不必要的 HBM 往返：
 
 1. 中间矩阵 $S$ 和 $P$ 从未完整写入 HBM，而是在 SRAM 中即时计算、即时使用
 2. 通过在线 softmax 算法（详见下一篇），每个分块的局部 softmax 统计量可以正确地合并为全局结果
@@ -435,23 +356,13 @@ $$
 \text{H100 上的 IO 优化收益} > \text{A100 上的 IO 优化收益}
 $$
 
-> Flash Attention 的设计理念随着 GPU 代际演进而愈发重要 -- 算力增长速度远快于内存带宽增长速度，IO 感知的算法设计将成为高性能 GPU 编程的核心范式。
+比较指定 SKU、dtype 与峰值口径时，Roofline 拐点可用于判断值得测量的资源。跨硬件的实际结果还需要相同 shape 的 kernel 计数器和延迟。
 
 ---
 
-## 6. 总结
+## 回到一次前向
 
-本文系统分析了 Flash Attention 背后的 IO 感知设计理念：
-
-1. **GPU 内存层次结构** 中，SRAM 比 HBM 快 10-100 倍，但容量小 40 万倍
-2. **Roofline 模型** 表明标准 Attention 的所有操作都是内存受限的，尤其 softmax 的算术强度仅为 1
-3. **标准 Attention 的 IO 瓶颈** 源于 $N \times N$ 中间矩阵在 HBM 上的反复读写，总 IO 为 $O(N^2)$
-4. **Flash Attention** 通过分块 + 融合 kernel 的策略将 IO 降至 $O(Nd)$，实现了 $N/d$ 倍的 IO 加速
-5. **硬件演进** 使 IO 优化愈发重要，H100 的更高 ops:byte ratio 意味着更多操作受限于内存带宽
-
-下一篇将深入讨论 Flash Attention 实现这一 IO 优化的关键算法组件 -- **在线 Softmax** (Online Softmax)，这是使分块 Attention 在数学上正确的核心技术。
-
----
+把额外存储、IO 复杂度和实测时间分开看：分块不需要将完整 S/P 存入 HBM；tile 能留在片上的时间决定了还要重复搬运哪些输入；kernel 的持续时间同时受内存、计算和同步限制。用[两块在线 softmax](/flashattention/02-core-algorithm/01-online-softmax/)可单独验证数学结果。
 
 ## 参考文献
 
@@ -465,6 +376,6 @@ $$
 
 ## 导航
 
-- 上一篇：[Standard Attention 数学推导](01-standard-attention.md)
-- 下一篇：[Flash Attention 理论推导](03-flash-attention-theory.md)
-- [返回目录](../README.md)
+- 上一篇：[Standard Attention 数学推导](/flashattention/01-theory/01-standard-attention/)
+- 下一篇：[Flash Attention 理论推导](/flashattention/01-theory/03-flash-attention-theory/)
+- [返回目录](/flashattention/00-overview/overview/)

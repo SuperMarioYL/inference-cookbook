@@ -124,25 +124,23 @@ static constexpr int mainloop_smem_padding_ =
 static constexpr int mainloop_smem_padding = mainloop_smem_padding_ < 0 ? 0 : mainloop_smem_padding_;
 ```
 
-```mermaid
-graph TB
-    subgraph smem["共享内存布局"]
-        subgraph mainloop_phase["Mainloop 阶段"]
-            PAD["padding_（对齐填充）"]
-            SMEM_K["smem_k: kBlockN × d × Stages"]
-            SMEM_V["smem_v: kBlockN × dv × Stages"]
-            SMEM_Q["smem_q: kBlockM × d"]
-            PAD --- SMEM_K --- SMEM_V --- SMEM_Q
-        end
-
-        subgraph epilogue_phase["Epilogue 阶段（union 重叠）"]
-            SMEM_O["smem_o: kBlockM × dv"]
-            note1["smem_o 与 smem_v 起始地址对齐"]
-        end
-
-        SMEM_V -.->|"union 重叠"| SMEM_O
-    end
-```
+{{< stateboard >}}
+title: "同一片共享内存在两个阶段改作何用"
+rows: ["工作阶段", "共享区域", "占用者"]
+steps:
+  - title: "主循环载入 V"
+    detail: "图中只跟踪可复用的那段地址。主循环仍需用 V tile 完成 PV。"
+    cells: [["主循环"], ["V tile"], ["PV"]]
+    focus: [[1, 0], [2, 0]]
+  - title: "最后一块消费完毕"
+    detail: "相关线程完成对 V 的读取并按内核同步后，原来的 V 数据不再需要。"
+    cells: [["交接"], ["可复用"], ["同步"]]
+    focus: [[1, 0], [2, 0]]
+  - title: "进入 epilogue"
+    detail: "采用共享内存写回的变体把转换后的 O 放进重叠区域，再写出。"
+    cells: [["epilogue"], ["O tile"], ["写回"]]
+    focus: [[1, 0], [2, 0]]
+{{< /stateboard >}}
 
 **为什么 smem_o 要与 smem_v 对齐？**
 
@@ -304,32 +302,23 @@ if constexpr (Use_TMA_KV) {
 
 ### 4.3 Pipeline 操作流程
 
-```mermaid
-sequenceDiagram
-    participant P as Producer
-    participant PL as Pipeline Stage
-    participant C as Consumer
-
-    Note over P,C: Stage 0
-
-    P->>PL: producer_acquire(stage=0)
-    Note over P: 等待 Consumer 释放此 stage
-    P->>PL: TMA Load K → smem_k[0]
-    P->>PL: producer_commit(stage=0)
-    Note over P: 通知 Consumer 数据就绪
-
-    C->>PL: consumer_wait(stage=0)
-    Note over C: 等待 Producer 写入完成
-    C->>C: GMMA: S = Q @ K[0]^T
-    C->>PL: consumer_release(stage=0)
-    Note over C: 通知 Producer 可以复用此 stage
-
-    Note over P,C: Stage 1（与 Stage 0 重叠）
-
-    P->>PL: producer_acquire(stage=1)
-    P->>PL: TMA Load K → smem_k[1]
-    P->>PL: producer_commit(stage=1)
-```
+{{< stateboard >}}
+title: "双缓冲 stage 怎样交替复用"
+rows: ["stage 0", "stage 1", "计算组"]
+steps:
+  - title: "第一块到达"
+    detail: "给两个共享缓冲槽编号。此刻 K0 已就绪，K1 的槽仍空。"
+    cells: [["K0 就绪"], ["空闲"], ["待开始"]]
+    focus: [[0, 0]]
+  - title: "读 K0，搬 K1"
+    detail: "计算组消费 stage 0；搬运组向 stage 1 发起 K1 的拷贝。"
+    cells: [["K0 读取"], ["K1 搬入"], ["处理 K0"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "交换角色"
+    detail: "在 K1 数据到齐、K0 读完后，消费者读取 stage 1，生产者可以把 K2 写入 stage 0。"
+    cells: [["K2 搬入"], ["K1 读取"], ["处理 K1"]]
+    focus: [[0, 0], [1, 0]]
+{{< /stateboard >}}
 
 ### 4.4 Barrier vs Pipeline
 
@@ -584,34 +573,27 @@ void operator()(Params const& params, char* smem_buf) {
 
 ### 8.2 Producer-Consumer 分支
 
-```mermaid
-graph TB
-    subgraph entry["operator() 入口"]
-        INIT["初始化: TMA 预取, Pipeline 配置, 同步"]
-    end
-
-    INIT --> BRANCH{"warp_group_idx?"}
-
-    subgraph producer["Producer (WG0)"]
-        P1["warpgroup_reg_dealloc<24>"]
-        P2{"warp_idx_in_warpgroup?"}
-        P2 -->|"Warp 0"| P3["load() 循环: TMA 加载 Q/K/V"]
-        P2 -->|"Warp 1~3"| P4["前向: 空闲或辅助加载\n反向: store_dq()"]
-        P3 --> P5["load_tail(): 通知加载结束"]
-    end
-
-    subgraph consumer["Consumer (WG1+)"]
-        C1["warpgroup_reg_alloc<240>"]
-        C2["mma_init()"]
-        C3["scheduler.init_consumer()"]
-        C4["循环: get_work → mma() → epilogue.store()"]
-        C5["epilogue.store_tail()"]
-        C1 --> C2 --> C3 --> C4 --> C5
-    end
-
-    BRANCH -->|"0"| producer
-    BRANCH -->|"1+"| consumer
-```
+{{< trace >}}
+title: "一个 Hopper tile 在内核中遇到哪些角色"
+actors: ["调度器", "搬运组", "计算组", "输出"]
+steps:
+  - from: 0
+    to: 1
+    label: "取下一个工作项"
+    detail: "工作项指定 Q 块、head 和 batch；mask、边界决定本次要访问多少 K/V 块。"
+  - from: 1
+    to: 2
+    label: "交付共享缓冲"
+    detail: "数据到齐后，消费者取该 stage 的 K/V，继续执行矩阵乘。"
+  - from: 2
+    to: 1
+    label: "结束读取"
+    detail: "缓冲交还生产者，后续工作项可以复用共享内存。"
+  - from: 2
+    to: 3
+    label: "整理输出"
+    detail: "最后一个可见 K/V 块处理完，写回对应行的 O。"
+{{< /trace >}}
 
 ### 8.3 Consumer 主循环细节
 
@@ -681,6 +663,6 @@ Flash Attention SM90 内核的架构设计体现了以下工程原则：
 
 ## 导航
 
-- 上一篇：[GPU 编程基础](01-gpu-programming-basics.md)
-- 下一篇：[前向内核实现解析](03-forward-kernel-impl.md)
-- [返回目录](../README.md)
+- 上一篇：[GPU 编程基础](/flashattention/03-cuda-kernel/01-gpu-programming-basics/)
+- 下一篇：[前向内核实现解析](/flashattention/03-cuda-kernel/03-forward-kernel-impl/)
+- [返回目录](/flashattention/00-overview/overview/)

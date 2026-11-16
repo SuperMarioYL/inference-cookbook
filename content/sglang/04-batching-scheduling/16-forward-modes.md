@@ -3,20 +3,9 @@ title: "前向模式"
 weight: 4
 ---
 
-## 概述
+## 从批次字段判断实际前向模式
 
-### 本章学习目标
-- 理解 SGLang 中的各种 ForwardMode
-- 掌握不同模式的特点和适用场景
-- 了解模式切换逻辑
-- 学习各模式的优化策略
-
-### 前置知识要求
-- 了解 Prefill/Decode 阶段
-- 熟悉批处理概念
-- 理解 CUDA Graph
-
----
+extend 处理新加入的提示位置，decode 推进正在生成的序列，投机验证则一次检查多个候选。对照 `ForwardMode`、请求数和本轮位置数，就能解释一次 forward 的输入形状。 [0.5.23 的 ForwardMode 与 ForwardBatch](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/model_executor/forward_batch_info.py)
 
 ## ForwardMode 定义
 
@@ -259,19 +248,23 @@ def forward_idle(self, forward_batch: ForwardBatch):
 
 验证 Draft 模型预测的 tokens：
 
-```mermaid
-graph TB
-    subgraph verify["TARGET_VERIFY"]
-        DRAFT["Draft tokens<br/>[d1, d2, d3, d4]"]
-        TARGET["Target 模型验证"]
-        ACCEPT["接受 [d1, d2]"]
-        REJECT["拒绝 [d3, d4]"]
-
-        DRAFT --> TARGET
-        TARGET --> ACCEPT
-        TARGET --> REJECT
-    end
-```
+{{< stateboard >}}
+title: 验证批一次检查三个草稿位置
+rows: ["草稿 token", "目标模型", "已提交"]
+steps:
+  - title: "准备候选"
+    detail: "草稿给出 A、B、C，目标模型将一次为多个位置给出验证结果。"
+    cells: [["A", "B", "C"], ["·", "·", "·"], ["·", "·", "·"]]
+    focus: [[0, 0], [0, 1], [0, 2]]
+  - title: "前两个通过"
+    detail: "A 和 B 被接受，本轮结果可以提交这两个位置。"
+    cells: [["A", "B", "C"], ["接受", "接受", "待判"], ["A", "B", "·"]]
+    focus: [[1, 0], [1, 1], [2, 0], [2, 1]]
+  - title: "第三个拒绝"
+    detail: "该位置按验证算法得到替代 token X；下一轮的上下文用 A、B、X。"
+    cells: [["A", "B", "C"], ["接受", "接受", "替代"], ["A", "B", "X"]]
+    focus: [[1, 2], [2, 2]]
+{{< /stateboard >}}
 
 ```python
 def forward_target_verify(self, forward_batch: ForwardBatch):
@@ -481,16 +474,7 @@ logger.info(
 
 ---
 
-## 小结
-
-### 要点回顾
-
-1. **EXTEND**：Prefill 阶段，计算密集型
-2. **DECODE**：解码阶段，内存带宽密集型
-3. **MIXED**：混合模式，平衡延迟和吞吐
-4. **IDLE**：数据并行空闲占位
-
-### 模式选择
+## 按批次工作选择 ForwardMode
 
 | 场景 | 主要模式 | 优化重点 |
 |------|----------|----------|
@@ -498,10 +482,3 @@ logger.info(
 | 长 prompt | EXTEND 为主 | Chunked Prefill |
 | 高并发 | MIXED | 批量化 |
 | 数据并行 | 可能 IDLE | 负载均衡 |
-
-### 下一章预告
-
-在模块五《性能优化篇》中，我们将：
-- 深入 CUDA Graph 原理
-- 学习 torch.compile 优化
-- 掌握量化和推测解码

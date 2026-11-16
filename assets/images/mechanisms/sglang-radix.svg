@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 452 250" role="img" aria-labelledby="sglang-radix-title">
+  <title id="sglang-radix-title">Radix 树在第一个不同的 token 处分叉</title>
+  <desc>每个 token 占一个缓存页；按 token ID 匹配。</desc>
+  <defs><marker id="sglang-radix-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" class="arrowhead"/></marker></defs>
+  <text x="15" y="28" class="diagram-title" text-anchor="start">Radix 树在第一个不同的 token 处分叉</text>
+  <rect x="14" y="122" width="52" height="36" rx="5" class="idle"/>
+  <text x="40.0" y="145.0" class="label" text-anchor="middle">根</text>
+  <g data-frame="0">
+    <title>A 插入一条路径</title>
+    <desc>A 的 token 是 11、12、13、14。缓存把这段连续序列放在一条边上。</desc>
+    <path d="M 70 140 L 99 140" class="edge" marker-end="url(#sglang-radix-arrow)"/>
+    <rect x="103" y="118" width="235" height="44" rx="5" class="stored"/>
+    <text x="220.5" y="145.0" class="label" text-anchor="middle">11   12   13   14</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>B 匹配到 12</title>
+    <desc>B 的 token 是 11、12、21、22。前两个 token 相同，接下来的 21 和 13 不同。</desc>
+    <path d="M 70 140 L 99 140" class="edge" marker-end="url(#sglang-radix-arrow)"/>
+    <rect x="103" y="119" width="98" height="42" rx="5" class="stored"/>
+    <text x="152.0" y="145.0" class="label" text-anchor="middle">11   12</text>
+    <rect x="207" y="119" width="98" height="42" rx="5" class="idle"/>
+    <text x="256.0" y="145.0" class="label" text-anchor="middle">13   14</text>
+    <text x="105" y="193" class="label" text-anchor="start">B 输入</text>
+    <text x="177" y="193" class="number" text-anchor="start">11   12   21   22</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>树从公共前缀分出两支</title>
+    <desc>插入 B 后，两条路径共享 11、12。A 和 B 各自持有后面两个 token 对应的缓存。</desc>
+    <path d="M 70 140 L 99 140" class="edge" marker-end="url(#sglang-radix-arrow)"/>
+    <rect x="103" y="119" width="98" height="42" rx="5" class="stored"/>
+    <text x="152.0" y="145.0" class="label" text-anchor="middle">11   12</text>
+    <path d="M 201 140 H 229 V 91 H 254 M 229 140 V 186 H 254" class="edge"/>
+    <rect x="254" y="71" width="110" height="40" rx="5" class="idle"/>
+    <text x="309.0" y="96.0" class="label" text-anchor="middle">13   14</text>
+    <rect x="254" y="166" width="110" height="40" rx="5" class="fresh"/>
+    <text x="309.0" y="191.0" class="label" text-anchor="middle">21   22</text>
+    <text x="375" y="97" class="label" text-anchor="start">A</text>
+    <text x="375" y="193" class="label" text-anchor="start">B</text>
+  </g>
+</svg>

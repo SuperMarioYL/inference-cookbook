@@ -3,21 +3,10 @@ title: "LLM 推理流程"
 weight: 3
 ---
 
-> 深入理解大语言模型的推理过程，包括 Prefill 和 Decode 两个阶段，以及它们与 KV Cache 的关系。
+一条提示先做 prefill，得到第一个输出 token；后续 decode 每步读取已有 KV 并追加一个位置。
 
 ---
 
-## 目录
-
-- [1. LLM 推理概述](#1-llm-推理概述)
-- [2. Tokenization](#2-tokenization)
-- [3. Prefill 阶段](#3-prefill-阶段)
-- [4. Decode 阶段](#4-decode-阶段)
-- [5. Memory-Bound vs Compute-Bound](#5-memory-bound-vs-compute-bound)
-- [6. Continuous Batching](#6-continuous-batching)
-- [7. vLLM 与 PagedAttention](#7-vllm-与-pagedattention)
-
----
 
 ## 1. LLM 推理概述
 
@@ -188,22 +177,27 @@ graph LR
 
 Decode（解码）是自回归生成 token 的阶段，每次只生成**一个** token。
 
-```mermaid
-sequenceDiagram
-    participant KV as KV Cache
-    participant Model as Transformer
-    participant Output as 输出
-
-    Note over KV,Output: Decode 循环
-
-    loop 每个生成的 token
-        Model->>KV: 读取之前的 KV
-        Model->>Model: 计算当前 token 的 attention
-        Model->>KV: 追加当前 token 的 KV
-        Model->>Output: 输出 token 概率
-        Output->>Model: 采样下一个 token
-    end
-```
+{{< trace >}}
+title: "一轮 decode 读取什么、留下什么"
+actors: ["当前 token", "模型层", "KV 缓存", "输出"]
+steps:
+  - from: 0
+    to: 1
+    label: "输入 t3"
+    detail: "模型为当前位置 t3 计算 Q、K、V。"
+  - from: 2
+    to: 1
+    label: "读取历史"
+    detail: "该层把 t3 的 Q 与先前位置的 K 以及本位置的 K 一起做注意力。"
+  - from: 1
+    to: 2
+    label: "追加 t3"
+    detail: "本层留下 t3 的 K、V，供下一步使用。"
+  - from: 1
+    to: 3
+    label: "采样下一个词"
+    detail: "所有层完成后输出分布，选出的 t4 成为下一步输入。"
+{{< /trace >}}
 
 ### 4.2 Decode 的特点
 
@@ -318,27 +312,29 @@ graph TB
 
 ### 6.2 Continuous Batching
 
-```mermaid
-sequenceDiagram
-    participant Slot1 as Slot 1
-    participant Slot2 as Slot 2
-    participant Slot3 as Slot 3
-
-    Note over Slot1,Slot3: Iteration 1
-    Slot1->>Slot1: Req A (generating)
-    Slot2->>Slot2: Req B (generating)
-    Slot3->>Slot3: Req C (generating)
-
-    Note over Slot1,Slot3: Iteration 2
-    Slot1->>Slot1: Req A (done!)
-    Slot2->>Slot2: Req B (generating)
-    Slot3->>Slot3: Req C (generating)
-
-    Note over Slot1,Slot3: Iteration 3
-    Slot1->>Slot1: Req D (new!)
-    Slot2->>Slot2: Req B (generating)
-    Slot3->>Slot3: Req C (generating)
-```
+{{< stateboard >}}
+title: "每一步结束后，空槽可以接新请求"
+rows: ["槽 0", "槽 1"]
+steps:
+  - title: "第一次解码"
+    detail: "A 和 B 同时占用两个槽，B 在本步结束。"
+    cells:
+      - ["A"]
+      - ["B"]
+    focus: [[0, 0], [1, 0]]
+  - title: "换入请求 C"
+    detail: "调度器保留 A，把释放的槽分给正在等待的 C。"
+    cells:
+      - ["A"]
+      - ["C"]
+    focus: [[1, 0]]
+  - title: "下一轮"
+    detail: "A 和 C 各继续一步，B 的结束时间不会推迟 C 入批。"
+    cells:
+      - ["A→"]
+      - ["C→"]
+    focus: [[0, 0], [1, 0]]
+{{< /stateboard >}}
 
 优势：
 - 请求完成后立即返回
@@ -429,8 +425,6 @@ graph TB
 ---
 
 ## 总结
-
-本文介绍了 LLM 推理的核心流程：
 
 1. **Tokenization**: 文本到数字的转换
 2. **Prefill**: 并行处理 prompt，生成 KV Cache

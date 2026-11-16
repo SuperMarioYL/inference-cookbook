@@ -13,7 +13,7 @@ PyTorch 内建了大量运算的自动微分支持，但在实际开发中，你
 
 `torch.autograd.Function` 提供了标准的扩展接口，允许用户自定义前向计算和反向梯度逻辑，并将其无缝集成到 Autograd 计算图中。
 
-本文将从源码角度解析自定义 Function 的完整协议，包括 `FunctionCtx`、`FunctionMeta` 元类、`BackwardCFunction` 桥接类，以及新旧两种编写风格的区别。
+自定义算子用 `forward` 生成输出，用保存到上下文的张量在 `backward` 计算梯度。能否复用输入、返回多少个梯度，都取决于这个接口约定。
 
 ## 2. 核心类体系
 

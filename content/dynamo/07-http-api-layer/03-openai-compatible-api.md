@@ -3,9 +3,9 @@ title: "OpenAI 兼容 API"
 weight: 3
 ---
 
-> 本文档详解 Dynamo 的 OpenAI 兼容 API 实现，包括 Chat Completions、Completions 和 Models 端点，以及 NVIDIA 扩展（NvExt）。
+## 一个请求能够复用哪些客户端行为
 
----
+先从当前 HTTP 服务的 OpenAPI 路由与模型列表核对所需操作，再使用客户端发请求。消息模板、多模态输入、工具调用和返回字段的实际支持还要结合所选后端。 [OpenAI 兼容服务实现](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/llm/src/http/service/openai.rs)
 
 ## 1. API 端点概览
 
@@ -127,38 +127,31 @@ async fn chat_completions(
 
 ### 2.2 处理流程
 
-```mermaid
-sequenceDiagram
-    participant Client as HTTP 客户端
-    participant Handler as chat_completions
-    participant State as DeploymentState
-    participant Engine as LLM Engine
-    participant Metrics as Metrics
-
-    Client->>Handler: POST /v1/chat/completions
-    Handler->>State: check_ready()
-    Handler->>Handler: 生成 request_id
-    Handler->>State: get_chat_completions_engine(model)
-    State-->>Handler: Engine
-
-    Handler->>Metrics: create_inflight_guard()
-    Handler->>Engine: generate(request)
-    Engine-->>Handler: ResponseStream
-
-    alt stream=true
-        Handler->>Client: SSE Stream
-        loop 每个 Token
-            Engine-->>Handler: Token
-            Handler-->>Client: data: {token}
-        end
-        Handler-->>Client: data: [DONE]
-    else stream=false
-        Handler->>Handler: 聚合所有 Token
-        Handler-->>Client: JSON Response
-    end
-
-    Note over Metrics: 更新指标
-```
+{{< trace >}}
+title: 一个 chat completion 的必要字段
+actors: ["客户端", "Frontend", "模型实例"]
+steps:
+  - from: 0
+    to: 1
+    label: "发送消息列表"
+    detail: "请求包含已注册模型的名字和一条用户消息。"
+  - from: 1
+    to: 1
+    label: "构造输入"
+    detail: "前端检查请求并按选定后端准备聊天输入和采样设置。"
+  - from: 1
+    to: 2
+    label: "执行生成"
+    detail: "可用的模型实例执行此次推理。"
+  - from: 2
+    to: 1
+    label: "带回结果"
+    detail: "前端取得输出内容、结束原因及可用的用量信息。"
+  - from: 1
+    to: 0
+    label: "返回 choices"
+    detail: "非流式客户端从 choices[0].message 读取回复。"
+{{< /trace >}}
 
 ### 2.3 请求结构
 
@@ -277,7 +270,7 @@ struct ModelListing {
 Dynamo 在 OpenAI API 基础上提供 NVIDIA 特有的扩展参数：
 
 ```rust
-// lib/llm/src/protocols/openai/nvext.rs
+// lib/llm/src/protocols/openai/chat_completions.rs
 
 /// NVIDIA LLM 扩展
 #[derive(Serialize, Deserialize, Builder, Validate, Debug, Clone)]
@@ -566,23 +559,8 @@ impl NvCreateChatCompletionResponse {
 
 ---
 
-## 总结
-
-Dynamo OpenAI 兼容 API 的核心特性：
-
-| 特性 | 实现 |
-|------|------|
-| 完全兼容 | 支持 OpenAI SDK 直接使用 |
-| NVIDIA 扩展 | NvExt 提供额外控制参数 |
-| 流式/非流式 | 统一内部流式处理 |
-| 动态模型 | 通过 etcd Watch 发现 |
-
-这套 API 设计让用户可以无缝迁移到 Dynamo 平台。
-
----
-
 ## 参考文件
 
-- [lib/llm/src/http/service/openai.rs](../../../lib/llm/src/http/service/openai.rs) - OpenAI API 处理器
-- [lib/llm/src/protocols/openai/nvext.rs](../../../lib/llm/src/protocols/openai/nvext.rs) - NvExt 扩展
-- [lib/llm/src/protocols/openai/chat_completions.rs](../../../lib/llm/src/protocols/openai/chat_completions.rs) - Chat Completions 协议
+- [lib/llm/src/http/service/openai.rs](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/llm/src/http/service/openai.rs) - OpenAI API 处理器
+- [OpenAI 协议与扩展](https://github.com/ai-dynamo/dynamo/tree/v1.6.2/lib/llm/src/protocols/openai) - NvExt 扩展
+- [lib/llm/src/protocols/openai/chat_completions.rs](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/llm/src/protocols/openai/chat_completions.rs) - Chat Completions 协议

@@ -3,7 +3,7 @@ title: "Rust 异步编程基础"
 weight: 1
 ---
 
-> 本文介绍 Rust 异步编程模型的核心概念，包括 Future、Poll 机制、async/await 语法以及 Tokio 运行时架构。
+一次服务调用可能等待成员发现、网络或下一项流式输出。Rust Future 在等待期间通过 waker 请求唤醒，使 Tokio 可以推进其他就绪任务。以下将这些基础机制与 [Dynamo 1.6.2 的运行时](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/runtime/src/runtime.rs) 对照。
 
 ---
 
@@ -26,8 +26,8 @@ sequenceDiagram
 
 **问题**：
 - 每个并发任务需要一个线程
-- 线程切换开销大（~1-10μs）
-- 内存占用高（每个线程 ~1MB 栈空间）
+- 频繁线程切换会占用 CPU 时间，开销随系统与负载变化
+- 线程需要独立栈与调度状态，实际占用依赖线程栈配置与使用情况
 
 ### 1.2 异步 I/O 的优势
 
@@ -71,15 +71,31 @@ pub enum Poll<T> {
 
 ### 2.2 Poll 状态机
 
-```mermaid
-stateDiagram-v2
-    [*] --> Created: async fn 创建
-    Created --> Polling: executor 调用 poll()
-    Polling --> Ready: 返回 Poll::Ready(result)
-    Polling --> Pending: 返回 Poll::Pending
-    Pending --> Polling: Waker 通知后再次 poll
-    Ready --> [*]: 获取结果
-```
+{{< trace >}}
+title: 一个等待 I/O 的 Future 如何再被 poll
+actors: ["执行器", "Future", "I/O"]
+steps:
+  - from: 0
+    to: 1
+    label: "首次 poll"
+    detail: "执行器把当前任务的 waker 交给 Future。"
+  - from: 1
+    to: 2
+    label: "预约唤醒"
+    detail: "此时数据还没到，Future 登记等待条件。"
+  - from: 1
+    to: 0
+    label: "返回 Pending"
+    detail: "执行器可以转去推进其他已就绪的任务。"
+  - from: 2
+    to: 0
+    label: "数据就绪"
+    detail: "I/O 完成使任务重新就绪，执行器安排下一次 poll。"
+  - from: 1
+    to: 0
+    label: "返回 Ready"
+    detail: "第二次 poll 能取得结果，等待这项数据的调用继续。"
+{{< /trace >}}
 
 ### 2.3 关键概念
 
@@ -87,7 +103,7 @@ stateDiagram-v2
 |------|------|
 | **惰性（Lazy）** | Future 创建后不会立即执行，必须被 poll 才会推进 |
 | **协作式（Cooperative）** | Future 主动让出控制权，而非被抢占 |
-| **零成本抽象** | 编译时转换为状态机，无运行时开销 |
+| **零成本抽象** | 编译器将 async 函数转换为状态机，调度、唤醒与 I/O 轮询仍有成本 |
 
 ---
 
@@ -269,17 +285,6 @@ graph TB
 1. **防止阻塞**：后台任务不会抢占业务任务的 CPU
 2. **资源控制**：可以独立配置两个运行时的线程数
 3. **故障隔离**：后台任务的问题不会直接影响主业务
-
----
-
-## 小结
-
-本文介绍了 Rust 异步编程的核心概念：
-
-1. **Future 与 Poll**：惰性求值、协作式调度
-2. **async/await**：编译器将异步代码转换为状态机
-3. **Tokio 运行时**：Work-Stealing 调度、Blocking 线程池
-4. **Dynamo 应用**：双运行时设计，隔离业务和后台任务
 
 ---
 

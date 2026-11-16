@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 452 250" role="img" aria-labelledby="dynamo-route-title">
+  <title id="dynamo-route-title">相同负载下，前缀命中如何影响路由</title>
+  <desc>示例使用 KV 感知路由，两个预填充 worker 的其余调度条件相同。</desc>
+  <defs><marker id="dynamo-route-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" class="arrowhead"/></marker></defs>
+  <text x="15" y="28" class="diagram-title" text-anchor="start">相同负载下，前缀命中如何影响路由</text>
+
+  <g data-frame="0">
+    <title>比较可用的预填充 worker</title>
+    <desc>路由器根据缓存事件得到前缀块的位置。本例中两个 worker 负载相同。</desc>
+    <rect x="14" y="108" width="98" height="42" rx="5" class="fresh"/>
+    <text x="63.0" y="134.0" class="label" text-anchor="middle">Router</text>
+    <path d="M 114 130 H 136 V 79 H 157 M 136 130 V 180 H 157" class="edge"/>
+    <rect x="159" y="56" width="125" height="46" rx="5" class="idle"/>
+    <text x="221.5" y="84.0" class="label" text-anchor="middle">P1 · 命中 2 块</text>
+    <rect x="159" y="157" width="125" height="46" rx="5" class="idle"/>
+    <text x="221.5" y="185.0" class="label" text-anchor="middle">P2 · 命中 0 块</text>
+    <rect x="334" y="108" width="101" height="42" rx="5" class="idle"/>
+    <text x="384.5" y="134.0" class="label" text-anchor="middle">Decode</text>
+
+    <text x="16" y="229" class="note" text-anchor="start">候选 worker 的负载相同</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>选择 P1</title>
+    <desc>这里 P1 已有两个匹配的块。P1 接到请求后继续计算尚未命中的输入。</desc>
+    <rect x="14" y="108" width="98" height="42" rx="5" class="idle"/>
+    <text x="63.0" y="134.0" class="label" text-anchor="middle">Router</text>
+    <path d="M 114 130 H 136 V 79 H 157 M 136 130 V 180 H 157" class="edge"/>
+    <rect x="159" y="56" width="125" height="46" rx="5" class="stored"/>
+    <text x="221.5" y="84.0" class="label" text-anchor="middle">P1 · 命中 2 块</text>
+    <rect x="159" y="157" width="125" height="46" rx="5" class="idle"/>
+    <text x="221.5" y="185.0" class="label" text-anchor="middle">P2 · 命中 0 块</text>
+    <rect x="334" y="108" width="101" height="42" rx="5" class="idle"/>
+    <text x="384.5" y="134.0" class="label" text-anchor="middle">Decode</text>
+
+    <text x="16" y="229" class="note" text-anchor="start">P1 复用前缀，计算剩余输入</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>将请求交给解码端</title>
+    <desc>按照所选后端的交接协议传递 KV。图中的箭头表示数据交接，路由器只负责选路。</desc>
+    <rect x="14" y="108" width="98" height="42" rx="5" class="idle"/>
+    <text x="63.0" y="134.0" class="label" text-anchor="middle">Router</text>
+    <path d="M 114 130 H 136 V 79 H 157 M 136 130 V 180 H 157" class="edge"/>
+    <rect x="159" y="56" width="125" height="46" rx="5" class="stored"/>
+    <text x="221.5" y="84.0" class="label" text-anchor="middle">P1 · 命中 2 块</text>
+    <rect x="159" y="157" width="125" height="46" rx="5" class="idle"/>
+    <text x="221.5" y="185.0" class="label" text-anchor="middle">P2 · 命中 0 块</text>
+    <rect x="334" y="108" width="101" height="42" rx="5" class="fresh"/>
+    <text x="384.5" y="134.0" class="label" text-anchor="middle">Decode</text>
+    <path d="M 285 80 L 332 120" class="edge" marker-end="url(#dynamo-route-arrow)"/>
+    <text x="16" y="229" class="note" text-anchor="start">KV 可用后，D 可以继续解码</text>
+    <rect x="322" y="112" width="10" height="10" rx="2" class="packet" data-dx="-42" data-dy="-36"/>
+  </g>
+</svg>

@@ -222,22 +222,29 @@ if constexpr (Is_local && SeparateMaskingIterations) {
 
 ### 4.1 五次 GEMM 的执行顺序
 
-每个 `bwd_step` 执行以下计算：
+下图按数据依赖展开五项矩阵乘。实现可以让相互独立的计算部分重叠，代码中的发射次序见下一节。
 
-```mermaid
-graph TB
-    subgraph gemm_seq["bwd_step 的 GEMM 序列"]
-        G1["GEMM 1: S = Q_m @ K_n^T"]
-        G2["GEMM 2: dP = dO_m @ V_n^T"]
-        G3["元素运算: P = exp2(S - LSE), dS = P * (dP - dPsum)"]
-        G4["GEMM 3: dV += P^T @ dO_m"]
-        G5["GEMM 4: dQ = dS @ K_n"]
-        G6["GEMM 5: dK += dS^T @ Q_m"]
-        G7["Store dQ → smem/atomicAdd"]
-
-        G1 --> G2 --> G3 --> G4 --> G5 --> G6 --> G7
-    end
-```
+{{< trace >}}
+title: "五次矩阵乘分别产生哪种梯度"
+actors: ["Q、K", "概率块", "dO、V", "梯度"]
+steps:
+  - from: 0
+    to: 1
+    label: "重算 QK"
+    detail: "第一项矩阵乘重建分数，用保存的行 LSE 重建当前概率块。"
+  - from: 1
+    to: 3
+    label: "贡献 dV"
+    detail: "第二项矩阵乘用 PᵀdO，累加到当前 KV 块的 dV。"
+  - from: 2
+    to: 1
+    label: "得到 dP"
+    detail: "第三项矩阵乘计算 dO Vᵀ，然后扣去 softmax 的逐行修正，生成 dS。"
+  - from: 1
+    to: 3
+    label: "贡献 dQ 和 dK"
+    detail: "最后两项矩阵乘分别为 dS K 与 dSᵀ Q，并计入前向打分使用的缩放。"
+{{< /trace >}}
 
 ### 4.2 GEMM 1 & 2: S 和 dP 的异步重叠
 
@@ -630,6 +637,6 @@ static constexpr bool dKV_swapAB = CollectiveMainloop::dKV_swapAB;
 
 ## 导航
 
-- 上一篇：[前向内核实现解析](03-forward-kernel-impl.md)
-- 下一篇：[SM80 内核实现对比](05-kernel-sm80.md)
-- [返回目录](../README.md)
+- 上一篇：[前向内核实现解析](/flashattention/03-cuda-kernel/03-forward-kernel-impl/)
+- 下一篇：[SM80 内核实现对比](/flashattention/03-cuda-kernel/05-kernel-sm80/)
+- [返回目录](/flashattention/00-overview/overview/)

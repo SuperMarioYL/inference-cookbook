@@ -16,56 +16,13 @@ weight: 3
 
 ## 安装与环境
 
-### Q1: 安装时编译失败，报内存不足
+### 如何判断安装问题发生在哪一层？
 
-**问题**：`pip install flash-attn` 时编译器因内存不足被 OOM Kill。
+先运行 `python -m pip show flash-attn flash-attn-3 flash-attn-4`。包名、导入路径和设备能力是三个不同的问题。FA2 的编译进程被系统终止时，调低 `MAX_JOBS` 并检查机器剩余内存。导入成功后用[已知输入的最小例子](/flashattention/00-overview/03-quick-start/)执行 GPU 内核并比较数值。
 
-**解决方案**：
-```bash
-# 限制并行编译任务数
-MAX_JOBS=2 pip install flash-attn --no-build-isolation
+### H100 上应该导入哪个包？
 
-# 或者使用预编译 wheel（推荐）
-pip install flash-attn --no-build-isolation
-```
-
-Flash Attention 的编译需要大量内存（每个编译进程约 8-16GB），推荐至少 64GB RAM。如果机器内存有限，设置 `MAX_JOBS=1` 或 `MAX_JOBS=2`。
-
-### Q2: 如何确认 Flash Attention 已正确安装？
-
-```python
-import flash_attn
-print(flash_attn.__version__)
-
-# 验证 CUDA 内核
-import torch
-from flash_attn import flash_attn_func
-q = torch.randn(1, 64, 4, 64, device='cuda', dtype=torch.float16)
-k = torch.randn(1, 64, 4, 64, device='cuda', dtype=torch.float16)
-v = torch.randn(1, 64, 4, 64, device='cuda', dtype=torch.float16)
-out = flash_attn_func(q, k, v)
-print(f"成功! 输出形状: {out.shape}")
-```
-
-### Q3: Flash Attention 2 和 Flash Attention 3 有什么区别？
-
-| 特性 | FA2 (flash-attn) | FA3 (hopper/) |
-|------|-----------------|---------------|
-| 架构支持 | SM80+ (Ampere/Ada/Hopper) | SM90 (Hopper only) |
-| 安装方式 | `pip install flash-attn` | `cd hopper && python setup.py install` |
-| 性能 | 基准 | 前向 1.5-2× 提升 |
-| FP8 | 不支持 | 支持 |
-| 特有优化 | - | Warp Specialization, TMA, GMMA |
-
-FA3 是 FA2 在 Hopper 架构上的深度优化版本。非 Hopper GPU 只能使用 FA2。
-
-### Q4: 支持哪些 GPU？
-
-- **完全支持**：NVIDIA Ampere (A100, A6000)、Ada (RTX 4090, L40S)、Hopper (H100, H200)
-- **AMD ROCm**：MI200x, MI250x, MI300x（通过 Triton 后端）
-- **不支持**：Turing (T4)、Volta (V100) 及更早架构
-
----
+FA2 稳定包、FA3 Hopper 实现和 FA4 CuTeDSL 预览包都提供稠密 attention 路径，但函数签名、返回值和支持的 dtype 有差异。对已有模型，先追踪它实际导入的函数；自行选择时，按需要的输入形状、特性和工具链筛选，然后在同一硬件比较结果和延迟。[分代架构](/flashattention/00-overview/02-architecture-overview/)
 
 ## API 使用
 
@@ -82,7 +39,7 @@ x = x.view(batch, seqlen, num_heads, head_dim)  # → Flash Attention 格式
 
 ### Q6: 因果遮蔽在 seqlen_q != seqlen_k 时如何对齐？
 
-Flash Attention 的因果遮蔽对齐到注意力矩阵的**右下角**，而非左上角。这意味着：
+FA2 的因果遮蔽向注意力矩阵的右下角对齐。Q、K 长度不同时，偏移可直接从两者的长度差算出。
 
 - 当 `seqlen_q < seqlen_k` 时，前缀部分的 K 对所有 Q 可见（适用于 prefix-filling）
 - 当 `seqlen_q > seqlen_k` 时，前面的 Q 位置没有可注意的 K
@@ -130,7 +87,7 @@ out_padded = pad_input(out_unpad, indices, batch_size, max_seqlen_padded)
 
 ### Q9: `return_attn_probs=True` 是否影响性能？
 
-是的，会显著影响。此选项会分配一个完整的 `(batch, heads, seqlen_q, seqlen_k)` 注意力矩阵，占用 $O(N^2)$ 内存，完全抵消了 Flash Attention 的内存优势。**仅用于调试和测试**，生产环境中不应使用。
+FA2 打开这个测试接口后会额外返回 log-sum-exp。启用 dropout 时，内核还会写出 `S_dmask`，其空间随查询长度和键长度的乘积增长。测量日常推理的耗时与显存时，使用推理配置 `dropout_p=0` 和默认的 `return_attn_probs=False`。[查看测试输出示例](../07-usage-tutorial/01-basic-usage.md)
 
 ---
 
@@ -138,7 +95,7 @@ out_padded = pad_input(out_unpad, indices, batch_size, max_seqlen_padded)
 
 ### Q10: Flash Attention 的结果与标准注意力完全一致吗？
 
-不完全一致，但数值差异在浮点精度范围内。Flash Attention 是 **exact attention** 的近似实现（不是算法层面的近似，而是浮点运算顺序的差异）。
+两者计算同一个注意力公式。FlashAttention 按块归约，浮点加法的顺序发生变化，最后几位可能不同。可以用相同的 Q、K、V 和 mask 做一次 FP32 参考计算，再比较输出误差。
 
 参考容差：
 | 数据类型 | 绝对误差 (atol) | 相对误差 (rtol) |
@@ -156,7 +113,7 @@ out_padded = pad_input(out_unpad, indices, batch_size, max_seqlen_padded)
 out = flash_attn_func(q, k, v, deterministic=True)
 ```
 
-确定性模式通过避免原子操作来保证结果一致，但性能会下降约 10-20%。
+FA2 的 `deterministic=True` 选择确定性反向路径，所需工作区和延迟按当前 GPU、输入形状与精度测量。
 
 ### Q12: 训练中出现 NaN/Inf 怎么办？
 
@@ -180,11 +137,7 @@ out = flash_attn_func(q, k, v, deterministic=True)
 4. **GPU 利用率不足**：batch × heads 太小
 5. **首次调用开销**：CUDA 内核编译/加载，后续调用会快很多
 
-验证 Flash Attention 确实被使用：
-```python
-import os
-os.environ['FLASH_ATTN_DEBUG'] = '1'  # 启用调试输出
-```
+要确认实际运行的路径，先记录 Python 导入的包名和版本，再在 GPU profiler 中检查对应的 kernel。对于 PyTorch SDPA，用 `torch.nn.attention.sdpa_kernel` 临时限制候选后端，可得到不满足输入条件的原因。
 
 ### Q14: 如何选择最优的 num_splits？
 
@@ -199,6 +152,7 @@ os.environ['FLASH_ATTN_DEBUG'] = '1'  # 启用调试输出
 当 `seqlen_q` 足够长且 `num_heads_q` 已经接近 `kBlockM` 的倍数时，PackGQA 可能比非打包模式略慢（额外的 divmod 和 `__shfl_sync` 开销）。此时可以手动禁用：
 
 ```python
+from flash_attn_3.flash_attn_interface import flash_attn_func
 out = flash_attn_func(q, k, v, pack_gqa=False)
 ```
 
@@ -216,7 +170,7 @@ total_flops = batch * nheads * 2 * seqlen_q * (seqlen_k / 2) * (headdim * 2)  # 
 tflops = total_flops / (time_ms * 1e-3 * 1e12)
 ```
 
-> 详见 [性能测试](../07-usage-tutorial/04-benchmarking.md)
+> 详见 [性能测试](/flashattention/07-usage-tutorial/04-benchmarking/)
 
 ---
 
@@ -234,7 +188,7 @@ cache_seqlens += k_new.shape[1]  # 手动更新
 
 ### Q18: Paged KV Cache 的 page_size 如何选择？
 
-Flash Attention 内部的 `page_block_size` 为 256 token。用户侧的 `page_size` 应该是 `kBlockN` 的倍数以获得最佳性能（通常 64 或 128 的倍数）。与 vLLM 集成时需要匹配 vLLM 的 block_size。
+FA2 稳定包的 CUDA `flash_attn_with_kvcache` 在入口检查页大小能否被 256 整除。页表用物理块编号，页内的 token 数、张量布局与 dtype 都必须与调用者持有的缓存一致。[写入示例](/flashattention/07-usage-tutorial/03-inference-optimization/)
 
 ### Q19: 可以使用 CUDA Graph 加速推理吗？
 
@@ -259,7 +213,7 @@ g.replay()
 
 ### Q20: FP8 推理的输出为什么是 BF16？
 
-这是设计选择。FP8 的精度不足以作为最终输出，因此 Flash Attention 内部使用 FP8 计算但以 BF16 输出。这在 softmax 归一化和 V 的 descale 应用后已经需要更高精度的中间结果。
+本例指 FA3 的 Hopper FP8 前向。该 API 以 BF16 写出结果。这在 softmax 归一化和 V 的 descale 应用后已经需要更高精度的中间结果。
 
 ---
 
@@ -286,27 +240,22 @@ out = flash_attn_func(q, k, v, causal=True, softcap=50.0)
 # 计算顺序: QK^T → softcap(tanh) → causal mask → softmax → PV
 ```
 
-### Q23: 如何在不支持 Flash Attention 的环境中回退？
+### Q23: 用 PyTorch 核对 FA2 的结果时，怎样处理不等长因果遮蔽？
+
+对 `Sq != Sk`，FA2 的因果 mask 向右下角对齐。用 SDPA 作参考时显式构造相同的布尔 mask。下面覆盖解码常见的 `Sq <= Sk` 情形，且 Q/K/V 头数相同。
 
 ```python
-try:
-    from flash_attn import flash_attn_func
-    USE_FLASH = True
-except ImportError:
-    USE_FLASH = False
+import torch
+from torch.nn.functional import scaled_dot_product_attention
 
-def attention(q, k, v, causal=False):
-    if USE_FLASH:
-        return flash_attn_func(q, k, v, causal=causal)
-    else:
-        # PyTorch 原生 SDPA
-        q = q.transpose(1, 2)  # (b, h, s, d)
-        k = k.transpose(1, 2)
-        v = v.transpose(1, 2)
-        out = torch.nn.functional.scaled_dot_product_attention(
-            q, k, v, is_causal=causal
-        )
-        return out.transpose(1, 2)  # 回到 (b, s, h, d)
+def causal_reference(q, k, v):
+    sq, sk = q.size(1), k.size(1)
+    assert 0 < sq <= sk
+    row = torch.arange(sq, device=q.device)[:, None]
+    col = torch.arange(sk, device=q.device)[None, :]
+    allowed = col <= row + sk - sq
+    qh, kh, vh = (x.transpose(1, 2) for x in (q, k, v))
+    return scaled_dot_product_attention(qh, kh, vh, attn_mask=allowed).transpose(1, 2)
 ```
 
 ### Q24: torch.compile 与 Flash Attention 兼容吗？
@@ -325,5 +274,5 @@ out = compiled(x)  # 正常工作
 
 ## 导航
 
-- 上一篇：[论文阅读指南](02-paper-reading-guide.md)
-- [返回目录](../README.md)
+- 上一篇：[论文阅读指南](/flashattention/08-appendix/02-paper-reading-guide/)
+- [返回目录](/flashattention/00-overview/overview/)

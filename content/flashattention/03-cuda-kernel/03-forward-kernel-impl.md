@@ -501,29 +501,23 @@ if constexpr (Is_local) {
 
 ### 5.1 Epilogue 的两阶段流程
 
-```mermaid
-graph LR
-    subgraph stage1["阶段 1: R2S（寄存器 → 共享内存）"]
-        REG["tOrO 寄存器 (FP32)"]
-        CONV["类型转换 FP32 → FP16/BF16"]
-        SMEM["smem_o（与 smem_v 重叠）"]
-        REG --> CONV --> SMEM
-    end
-
-    subgraph stage2["阶段 2: S2G（共享内存 → HBM）"]
-        TMA_PATH["TMA Store（标准模式）"]
-        DIRECT_PATH["Direct Store（Varlen/PackGQA 模式）"]
-        HBM["gO (HBM)"]
-        SMEM --> TMA_PATH --> HBM
-        SMEM --> DIRECT_PATH --> HBM
-    end
-
-    subgraph lse["LSE 写入"]
-        LSE_REG["softmax.row_sum (FP32)"]
-        LSE_HBM["gLSE (HBM)"]
-        LSE_REG --> LSE_HBM
-    end
-```
+{{< trace >}}
+title: "一个 O tile 的写回路径"
+actors: ["累加寄存器", "共享内存", "全局内存"]
+steps:
+  - from: 0
+    to: 0
+    label: "归一化并转换"
+    detail: "这一行的 KV 块已处理完，FP32 输出累加器按行归一化，再转换为目标 dtype。"
+  - from: 0
+    to: 1
+    label: "重排输出"
+    detail: "使用共享内存写回的路径把线程各自持有的片段排成设备写出所需布局。"
+  - from: 1
+    to: 2
+    label: "提交写回"
+    detail: "满足共享内存同步和写出约束后，该 tile 填入全局输出张量的对应范围。"
+{{< /trace >}}
 
 ### 5.2 R2S — 寄存器到共享内存
 
@@ -702,7 +696,7 @@ FP8 模式下 Softmax 使用 `Max_offset = 8`：
 flash::Softmax<..., /*Max_offset=*/!Is_FP8 ? 0 : 8> softmax(softmax_scale_log2);
 ```
 
-这将 $\exp_2$ 的输入从 $[0, 1]$ 扩展到 $[0, 256]$ 范围，使得 FP8 的有限动态范围下也能保持数值精度。详见 [Online Softmax 算法详解](../02-core-algorithm/01-online-softmax.md) 中的分析。
+这把提供给 FP8 转换的未归一化指数权重整体乘以 256，减少小权重下溢的机会。最终归一化时缩放因子抵消。[Online Softmax](/flashattention/02-core-algorithm/01-online-softmax/)
 
 ---
 
@@ -796,12 +790,12 @@ graph TB
 | **smem_o/smem_v 重叠** | union 内存复用 | 节省 SRAM |
 | **TMA Store** | Epilogue 与下一 tile 加载重叠 | 隐藏输出延迟 |
 
-> 更详细的反向内核实现解析见 [反向内核实现解析](./04-backward-kernel-impl.md)。
+> 更详细的反向内核实现解析见 [反向内核实现解析](/flashattention/03-cuda-kernel/04-backward-kernel-impl/)。
 
 ---
 
 ## 导航
 
-- 上一篇：[SM90 内核架构解析](02-kernel-architecture-sm90.md)
-- 下一篇：[反向内核实现解析](04-backward-kernel-impl.md)
-- [返回目录](../README.md)
+- 上一篇：[SM90 内核架构解析](/flashattention/03-cuda-kernel/02-kernel-architecture-sm90/)
+- 下一篇：[反向内核实现解析](/flashattention/03-cuda-kernel/04-backward-kernel-impl/)
+- [返回目录](/flashattention/00-overview/overview/)

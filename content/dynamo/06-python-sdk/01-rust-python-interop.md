@@ -3,9 +3,9 @@ title: "Rust-Python 互操作"
 weight: 1
 ---
 
-> 本文档介绍 Rust 与 Python 之间的互操作技术，为理解 Dynamo Python SDK 的实现奠定基础。
+## Python 等待 Rust 调用时的执行边界
 
----
+用 echo 服务观察一次跨语言调用：Python handler 产生字符串，Rust 运行时负责传输，消费端的 `async for` 逐项取回。类型转换、等待与取消都出现在这条路径上。 [Python 绑定入口](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/bindings/python/rust/lib.rs)
 
 ## 1. 为什么需要跨语言互操作
 
@@ -29,7 +29,7 @@ graph TB
     end
 
     subgraph sdk["Dynamo SDK"]
-        S["@service"]
+        S["dynamo_worker 与 endpoint"]
         E["@dynamo_endpoint"]
         D["depends()"]
     end
@@ -535,21 +535,8 @@ impl Config {
 
 ---
 
-## 总结
-
-Rust-Python 互操作的关键要点：
-
-1. **PyO3 框架**：提供声明式宏，简化绑定编写
-2. **GIL 管理**：正确处理 GIL 以保证线程安全和性能
-3. **异步支持**：pyo3-async-runtimes 桥接 Rust/Python 异步
-4. **Maturin 构建**：简化打包和发布流程
-
-这套技术栈让 Dynamo 能够同时享受 Rust 的性能和 Python 的易用性。
-
----
-
 ## 参考资料
 
 - [PyO3 官方文档](https://pyo3.rs)
 - [Maturin 文档](https://www.maturin.rs)
-- [pyo3-async-runtimes](https://github.com/awestlake87/pyo3-asyncio)
+- [pyo3-async-runtimes](https://github.com/PyO3/pyo3-async-runtimes)

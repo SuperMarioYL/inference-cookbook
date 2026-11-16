@@ -3,19 +3,13 @@ title: "TENT 传输后端"
 weight: 3
 ---
 
-# TENT 传输后端
-
-[上一篇](02-runtime-internals.md) | [目录](../README.md) | [下一篇](../06-p2p-store/01-overview-and-api.md)
-
----
-
 TENT 支持 8 种可插拔的传输后端，每个后端专注于特定互连技术的数据移动。本文详细分析每个传输后端的设计、核心类结构和工作机制，以及 TENT 的插件系统架构。
 
 ---
 
 ## 1. Transport 抽象接口
 
-所有传输后端继承自 `Transport` 基类，位于 `tent/runtime/transport.h`。该基类定义了统一的传输接口和能力声明机制。
+所有传输后端继承自 `Transport` 基类，位于 `mooncake-transfer-engine/tent/include/tent/runtime/transport.h`。该基类定义了统一的传输接口和能力声明机制。
 
 ### 1.1 基类设计
 
@@ -297,7 +291,7 @@ predicted_time = active_bytes * beta1 / bandwidth + beta0
 
 ## 4. 共享内存传输 (SHM)
 
-`ShmTransport` 实现节点内进程间的零拷贝数据传输，位于 `tent/transport/shm/shm_transport.h`。
+`ShmTransport` 实现节点内进程间的零拷贝数据传输，位于 `mooncake-transfer-engine/tent/include/tent/transport/shm/shm_transport.h`。
 
 ### 4.1 工作原理
 
@@ -350,7 +344,7 @@ predicted_time = active_bytes * beta1 / bandwidth + beta0
 
 ## 6. GDS 传输
 
-`GdsTransport` 实现 GPUDirect Storage，允许 GPU 直接与 NVMe 存储交换数据，绕过 CPU 和系统内存。位于 `tent/transport/gds/gds_transport.h`。
+`GdsTransport` 实现 GPUDirect Storage，允许 GPU 直接与 NVMe 存储交换数据，绕过 CPU 和系统内存。位于 `mooncake-transfer-engine/tent/include/tent/transport/gds/gds_transport.h`。
 
 ### 6.1 工作原理
 
@@ -374,7 +368,7 @@ predicted_time = active_bytes * beta1 / bandwidth + beta0
 
 ## 7. io_uring 传输
 
-`IOUringTransport` 利用 Linux 内核的 `io_uring` 异步 I/O 接口实现高效的文件传输。位于 `tent/transport/io_uring/io_uring_transport.h`。
+`IOUringTransport` 利用 Linux 内核的 `io_uring` 异步 I/O 接口实现高效的文件传输。位于 `mooncake-transfer-engine/tent/include/tent/transport/io_uring/io_uring_transport.h`。
 
 ### 7.1 设计特点
 
@@ -510,7 +504,3 @@ TENT 的传输后端体系通过统一的 `Transport` 抽象接口和可插拔�
 - **设备无关** -- 通过插件系统支持 NVIDIA GPU、华为 Ascend 等多种加速器
 
 在所有后端中，RDMA 传输是最复杂的实现，包含完整的切片调度、自适应 NIC 选择、连接池化和轨道监控机制。其他后端在设计上更为精简，专注于特定互连场景的高效实现。
-
----
-
-[上一篇](02-runtime-internals.md) | [目录](../README.md) | [下一篇](../06-p2p-store/01-overview-and-api.md)

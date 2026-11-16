@@ -1,0 +1,46 @@
+{{- $chart := transform.Unmarshal (trim .Inner " \n\t\r") -}}
+{{- $steps := $chart.steps -}}
+{{- $rows := $chart.rows -}}
+{{- if or (not $chart.title) (not $rows) (lt (len $steps) 2) }}{{ errorf "Stateboard needs a title, rows and at least two steps at %s" .Position }}{{ end -}}
+{{- $columns := len (index (index $steps 0).cells 0) -}}
+{{- $rowWidth := 40 -}}
+{{- range $rows }}{{ $rowWidth = int (math.Max $rowWidth (add 18 (partial "figures/label-width.html" .))) }}{{ end -}}
+{{- $cellWidth := 48 -}}
+{{- range $i, $step := $steps -}}
+  {{ if or (not $step.title) (not $step.detail) (ne (len $step.cells) (len $rows)) }}{{ errorf "Invalid stateboard step %d at %s" (add $i 1) $.Position }}{{ end }}
+  {{ range $step.cells -}}
+    {{ if ne (len .) $columns }}{{ errorf "Mismatched stateboard columns at %s" $.Position }}{{ end }}
+    {{ range . }}{{ $cellWidth = int (math.Max $cellWidth (add 18 (partial "figures/label-width.html" .))) }}{{ end }}
+  {{ end }}
+{{- end -}}
+{{- $width := int (math.Max 360 (add $rowWidth 18 (mul $columns $cellWidth))) -}}
+{{- $cellWidth = div (sub $width $rowWidth 18) $columns -}}
+{{- $height := add 16 (mul 46 (len $rows)) -}}
+{{- $id := printf "board-%d" .Ordinal -}}
+<figure id="fig-{{ $chart.title | anchorize }}" class="mechanism board-figure" data-mechanism>
+  <div class="figure-heading" id="{{ $id }}-title">{{ $chart.title }}</div>
+  <div class="diagram-viewport">
+    <svg role="img" aria-labelledby="{{ $id }}-title" viewBox="0 0 {{ $width }} {{ $height }}" style="min-width: {{ int (mul $width 0.73) }}px; max-width: {{ int (mul $width 1.12) }}px">
+      {{ range $r, $label := $rows -}}
+        <text class="row-label" x="9" y="{{ add 30 (mul $r 46) }}">{{ $label }}</text>
+      {{ end -}}
+      {{ range $i, $step := $steps -}}
+        <g data-frame="{{ $i }}"{{ if $i }} display="none"{{ end }}>
+          {{ range $r, $values := $step.cells -}}
+            {{ range $c, $value := $values -}}
+              {{ $x := add $rowWidth (mul $c $cellWidth) }}{{ $y := add 8 (mul $r 46) }}
+              {{ $focused := false }}
+              {{ range $step.focus }}{{ if and (eq (int (index . 0)) $r) (eq (int (index . 1)) $c) }}{{ $focused = true }}{{ end }}{{ end }}
+              <g class="state-cell">
+                <rect class="{{ if $focused }}fresh{{ else if in (slice "·" "–" "—" "") (string $value) }}idle{{ else }}board-cell{{ end }}" x="{{ $x }}" y="{{ $y }}" width="{{ sub $cellWidth 4 }}" height="36" rx="4"/>
+                <text x="{{ add $x (div (sub $cellWidth 4) 2) }}" y="{{ add $y 24 }}" text-anchor="middle">{{ $value }}</text>
+              </g>
+            {{ end -}}
+          {{ end -}}
+        </g>
+      {{ end -}}
+    </svg>
+  </div>
+  <figcaption>{{ partial "figures/controls.html" $steps }}</figcaption>
+</figure>
+{{- .Page.Store.Set "hasMechanism" true -}}

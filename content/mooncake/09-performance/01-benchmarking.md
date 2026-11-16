@@ -3,10 +3,6 @@ title: "性能基准测试与调优"
 weight: 1
 ---
 
-[上一篇](../08-integration/) | [目录](../README.md) | [下一篇](02-monitoring.md)
-
-# 性能基准测试与调优
-
 ## 11.1 性能测试框架概述
 
 Mooncake 提供了完善的性能测试框架，用于验证系统性能、评估优化效果和进行回归测试。测试框架位于 `mooncake-transfer-engine/benchmark` 目录下。
@@ -109,34 +105,27 @@ DEFINE_bool(check_consistency, false, "Enable data consistency check.");
 
 ### 11.1.3 Benchmark 工作流程
 
-```mermaid
-sequenceDiagram
-    participant Target as Target Process
-    participant Initiator as Initiator Process
-    participant Runner as BenchRunner
-
-    Target->>Target: 分配内存缓冲区
-    Target->>Target: 注册内存到 Transfer Engine
-    Target->>Target: 等待连接...
-
-    Initiator->>Initiator: 分配并注册本地内存
-    Initiator->>Target: 连接到 Target Segment
-
-    loop 每个配置组合
-        Initiator->>Runner: startInitiator(num_threads)
-
-        loop 测试持续时间
-            par 多线程并发
-                Runner->>Runner: 提交传输请求
-                Runner->>Runner: 等待完成
-                Runner->>Runner: 记录延迟
-            end
-        end
-
-        Runner->>Initiator: 汇总统计结果
-        Initiator->>Initiator: 打印性能报告
-    end
-```
+{{< trace >}}
+title: "一次带宽测试在哪两个时刻计时"
+actors: ["发起端", "目标端", "测试循环", "统计"]
+steps:
+  - from: 0
+    to: 1
+    label: "建立连接"
+    detail: "目标端先公布可访问的内存，双方完成所用协议的准备。"
+  - from: 0
+    to: 2
+    label: "运行工作负载"
+    detail: "发起端按本轮消息大小、并发与方向重复提交任务。"
+  - from: 2
+    to: 2
+    label: "等待完成"
+    detail: "只把满足完成条件的传输计入本轮有效负载。"
+  - from: 2
+    to: 3
+    label: "计算带宽"
+    detail: "有效字节数除以测量区间；下一轮改变一个配置再比较。"
+{{< /trace >}}
 
 ### 11.1.4 统计指标计算
 
@@ -320,23 +309,32 @@ static inline int getCudaDeviceNumaID(int cuda_id) {
 
 线程绑定的重要性：
 
-```mermaid
-graph TB
-    subgraph before["优化前 - 跨 NUMA 访问"]
-        T1_bad[Thread 1<br/>NUMA 0] -->|远程访问| M1_bad[Memory<br/>NUMA 1]
-        T2_bad[Thread 2<br/>NUMA 1] -->|远程访问| M2_bad[Memory<br/>NUMA 0]
-    end
-
-    subgraph after["优化后 - 本地 NUMA 访问"]
-        T1_good[Thread 1<br/>NUMA 0] -->|本地访问| M1_good[Memory<br/>NUMA 0]
-        T2_good[Thread 2<br/>NUMA 1] -->|本地访问| M2_good[Memory<br/>NUMA 1]
-    end
-
-    style T1_bad fill:#FFB6C1
-    style T2_bad fill:#FFB6C1
-    style T1_good fill:#90EE90
-    style T2_good fill:#90EE90
-```
+{{< stateboard >}}
+title: "绑定线程如何改变 NUMA 访问位置"
+rows: ["线程所在", "缓冲所在", "访问"]
+steps:
+  - title: "分配前"
+    detail: "线程 0 在 NUMA 0，线程 1 在 NUMA 1。"
+    cells:
+      - ["域0", "域1"]
+      - ["·", "·"]
+      - ["·", "·"]
+    focus: [[0, 0], [0, 1]]
+  - title: "跨域示例"
+    detail: "若两个缓冲分配在相反域，两条访问都跨越 NUMA 边界。"
+    cells:
+      - ["域0", "域1"]
+      - ["域1", "域0"]
+      - ["跨域", "跨域"]
+    focus: [[1, 0], [1, 1]]
+  - title: "本地分配"
+    detail: "将各线程与其缓冲按实际拓扑对齐，可以减少这些跨域访问。"
+    cells:
+      - ["域0", "域1"]
+      - ["域0", "域1"]
+      - ["本地", "本地"]
+    focus: [[2, 0], [2, 1]]
+{{< /stateboard >}}
 
 ### 11.2.3 单次传输执行
 
@@ -473,27 +471,11 @@ public:
 
 ### 11.3.2 性能测试结果分析
 
-基于 NVIDIA A10 的实测结果：
-
-| 配置 | Backend | Output Throughput | Mean TTFT | P99 TTFT | Mean ITL | P99 ITL |
-|------|---------|-------------------|-----------|----------|----------|---------|
-| 2P2D tp=1 | Redis | 12.06 tok/s | 844.28ms | 2270.91ms | 16.88ms | 104.83ms |
-| 2P2D tp=1 | MooncakeStore (TCP) | 12.07 tok/s | 817.43ms | 1969.89ms | 12.49ms | 45.52ms |
-| 2P2D tp=1 | MooncakeStore (RDMA) | 12.08 tok/s | 763.58ms | 2030.34ms | 12.43ms | 43.02ms |
-| 2P2D tp=2 | Redis | 12.13 tok/s | 397.20ms | 782.44ms | 9.00ms | 36.06ms |
-| 2P2D tp=2 | MooncakeStore (RDMA) | 12.15 tok/s | 271.25ms | 532.00ms | 8.34ms | 14.70ms |
-
-```mermaid
-xychart-beta
-    title "TTFT 延迟对比 (2P2D tp=2)"
-    x-axis ["Redis", "MooncakeStore TCP", "MooncakeStore RDMA"]
-    y-axis "Mean TTFT (ms)" 0 --> 500
-    bar [397.20, 327.91, 271.25]
-```
+v0.3.14 的上游 vLLM Store 报告将 Kimi-2.5 NVFP4 部署在 GB200 上，使用 12 张 GPU、1P1D 与 agentic trace，对照包含共享池和基线 P/D 路径的表现。在这类测试里，同一会话是否仍路由到预热实例、重复前缀是否被共享池命中、I/O 是否与计算重叠，都会影响 TTFT 和吞吐。比较时应同时保存到达率、并发、模型、TP 和冷热状态，分别报 P50、P99。[官方 vLLM Store 实验](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/docs/source/performance/vllm/vllm-v1-mooncake-store.md)
 
 ### 11.3.3 P/D 分离性能优势
 
-SGLang 集成测试结果（Traffic Rate = 4.0）：
+上游 SGLang 报告中 Traffic Rate = 4.0 的一组对照，配置、设备与其余负载见[原实验](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/docs/source/performance/sglang/sglang-benchmark-results-v1.md)。
 
 | 配置 | Output Throughput | Mean ITL | P99 ITL |
 |------|-------------------|----------|---------|
@@ -507,22 +489,9 @@ SGLang 集成测试结果（Traffic Rate = 4.0）：
 
 ## 11.4 性能调优指南
 
-### 11.4.1 关键环境变量
+### 11.4.1 经典 Transfer Engine 读取的参数
 
-```bash
-# Slice 粒度控制
-export MC_SLICE_SIZE=65536  # 默认 64KB
-
-# 传输引擎参数
-export MC_NUM_CQ_POLL_THREADS=2
-export MC_MAX_BATCH_SIZE=128
-export MC_ASYNC_TRANSFER_LIMIT=1000
-
-# RDMA 调优
-export MC_RDMA_MAX_WR_DEPTH=128
-export MC_RDMA_MAX_SGE=1
-export MC_RDMA_QP_COUNT=4
-```
+`MC_SLICE_SIZE` 控制切片粒度，`MC_NUM_CQ_PER_CTX`、`MC_NUM_QP_PER_EP`、`MC_MAX_WR`、`MC_MAX_SGE` 分别与 CQ、端点 QP、工作请求和 scatter/gather 上限相关。先用缺省值建立基线，再按实际网卡能力改变一项，记录吞吐、CPU 占用与尾延迟。TENT 的配置入口与经典 TE 不同。[v0.3.14 参数解析](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/mooncake-transfer-engine/src/config.cpp) · [TENT 选路](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/docs/source/design/tent/transport-selector.md)
 
 ### 11.4.2 Slice 大小调优
 
@@ -564,14 +533,7 @@ int optimal_threads = numa_num_configured_nodes() * 3;
 // 总带宽需求 / 单线程能力 = 最小线程数
 ```
 
-线程数与带宽关系（实测）：
-
-| 线程数 | 带宽利用率 | CPU 开销 |
-|--------|------------|----------|
-| 1 | ~20% | 低 |
-| 4 | ~60% | 中 |
-| 8 | ~85% | 中高 |
-| 12 | ~95% | 高 |
+固定同样的消息大小和在途请求数，逐步改变线程数，记录有用负载带宽和 CPU 占用。接近饱和后继续增加线程可能只提高轮询开销。合理线程数由网卡、NUMA、协议和工作集决定。[TE 测试工具](https://github.com/kvcache-ai/Mooncake/blob/v0.3.14/docs/source/performance/mooncake/tebench.md)
 
 ### 11.4.4 批处理大小调优
 
@@ -593,7 +555,3 @@ graph TB
         Decision -->|吞吐优先| Large_B[64-128]
     end
 ```
-
----
-
-[上一篇](../08-integration/) | [目录](../README.md) | [下一篇](02-monitoring.md)

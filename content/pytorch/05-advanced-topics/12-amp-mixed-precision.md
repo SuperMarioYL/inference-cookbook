@@ -63,17 +63,17 @@ flowchart LR
 
 ```python
 import torch
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 
 model = MyModel().cuda()
 optimizer = torch.optim.Adam(model.parameters())
-scaler = GradScaler()
+scaler = GradScaler("cuda")
 
 for data, target in dataloader:
     optimizer.zero_grad()
 
     # 前向传播在 autocast 上下文中
-    with autocast():
+    with autocast(device_type="cuda"):
         output = model(data)
         loss = criterion(output, target)
 
@@ -83,9 +83,21 @@ for data, target in dataloader:
     scaler.update()
 ```
 
+CPU 下可以用 BF16 验证 autocast 的公开入口。这里对矩阵乘启用 autocast，网络参数和原始输入可以保持 FP32。BF16 的指数范围接近 FP32，通常无需做 FP16 训练所用的梯度缩放。[2.15 AMP](https://docs.pytorch.org/docs/2.15/amp.html)
+
+```python
+import torch
+
+x = torch.ones(4, 4)
+with torch.amp.autocast(device_type="cpu", dtype=torch.bfloat16):
+    y = x @ x
+assert y.dtype == torch.bfloat16
+torch.testing.assert_close(y.float(), torch.full((4, 4), 4.0))
+```
+
 ### 2.2 Autocast 类型提升规则
 
-Autocast 根据算子类型自动选择精度：
+下图以 CUDA 默认 autocast dtype FP16 为例。白名单随设备变化，CPU BF16 的算子列表单独定义。
 
 ```mermaid
 graph TD
@@ -95,7 +107,7 @@ graph TD
 
     FP16_OPS["FP16 算子\n(matmul, conv, linear)"]
     FP32_OPS["FP32 算子\n(softmax, layer_norm, loss)"]
-    PROMOTE_OPS["提升算子\n(add, mul, cat)"]
+    PROMOTE_OPS["提升算子\n(addcdiv, dot, grid_sample)"]
 
     CAST_FP16["自动转换输入为 FP16\n执行计算"]
     KEEP_FP32["保持 FP32 精度\n执行计算"]
@@ -126,9 +138,9 @@ graph TD
 |------|----------|----------|-----------|
 | **FP16 算子** | `matmul`、`conv2d`、`linear` | FP16 | 计算密集，FP16 加速明显 |
 | **FP32 算子** | `softmax`、`log_softmax`、`cross_entropy`、`layer_norm` | FP32 | 数值敏感，需要高精度 |
-| **提升算子** | `add`、`mul`、`cat`、`stack` | 取最高精度 | 不做类型转换，保持输入类型 |
+| **提升算子** | `addcdiv`、`dot`、`grid_sample` | 取最高精度 | 不做类型转换，保持输入类型 |
 
-源码位置：`torch/amp/autocast_mode.py:52-150`（autocast 类文档字符串）
+源码位置：`torch/amp/autocast_mode.py`
 
 ### 2.3 Autocast 工作原理
 
@@ -149,11 +161,11 @@ with torch.autocast(device_type='cuda'):
 
 **实现机制**：
 - Autocast 通过**线程局部状态**（TLS）控制是否启用
-- 进入 `with autocast():` 时设置 TLS 标志
+- 进入 `with autocast(device_type="cuda"):` 时设置 TLS 标志
 - 每个算子在分发前检查 TLS，决定是否转换类型
 - 退出上下文后恢复原始状态
 
-源码位置：`torch/_C/_autocast.cpp`（C++ 实现）
+源码位置：`aten/src/ATen/autocast_mode.cpp`（C++ 实现）
 
 ## 3. GradScaler - 梯度缩放器
 
@@ -163,8 +175,8 @@ FP16 的数值范围很小（±65504），容易出现**梯度下溢**（gradien
 
 ```python
 # 小梯度在 FP16 中会变成 0
-grad_fp32 = 1e-5  # FP32 可以表示
-grad_fp16 = torch.tensor(1e-5, dtype=torch.float16)
+grad_fp32 = 1e-8  # FP32 可以表示
+grad_fp16 = torch.tensor(grad_fp32, dtype=torch.float16)
 print(grad_fp16)  # 0.0（下溢！）
 ```
 
@@ -194,9 +206,10 @@ flowchart LR
 ### 3.2 GradScaler API
 
 ```python
-from torch.cuda.amp import GradScaler
+from torch.amp import GradScaler
 
 scaler = GradScaler(
+    "cuda",
     init_scale=2.**16,  # 初始缩放因子
     growth_factor=2.0,  # 增长因子
     backoff_factor=0.5, # 回退因子
@@ -206,7 +219,7 @@ scaler = GradScaler(
 for data, target in dataloader:
     optimizer.zero_grad()
 
-    with autocast():
+    with autocast(device_type="cuda"):
         output = model(data)
         loss = criterion(output, target)
 
@@ -228,34 +241,27 @@ for data, target in dataloader:
 
 ### 3.3 动态缩放因子调整
 
-```mermaid
-stateDiagram-v2
-    [*] --> NormalTraining: scale = 2^16
-
-    NormalTraining --> CheckOverflow: 每次 backward
-
-    CheckOverflow --> NoOverflow: 梯度正常
-    CheckOverflow --> Overflow: 发现 NaN/Inf
-
-    NoOverflow --> IncrementCounter: 成功计数 +1
-    IncrementCounter --> TryGrow: 计数 >= growth_interval
-    IncrementCounter --> NormalTraining: 计数 < growth_interval
-
-    TryGrow --> NormalTraining: scale *= growth_factor\n重置计数
-
-    Overflow --> NormalTraining: scale *= backoff_factor\n跳过此次更新\n重置计数
-
-    note right of TryGrow
-        尝试增大 scale
-        以提高精度
-    end note
-
-    note right of Overflow
-        检测到数值溢出
-        减小 scale
-        防止进一步溢出
-    end note
-```
+{{< stateboard >}}
+title: "GradScaler 如何跳过溢出的更新"
+rows: ["scale", "有限步数", "优化器"]
+steps:
+  - title: "设定示例参数"
+    detail: "为便于观察，初值 8，growth_interval=2，growth_factor=2，backoff_factor=0.5。"
+    cells: [["8"], ["0"], ["待运行"]]
+    focus: [[0, 0]]
+  - title: "第一步梯度有限"
+    detail: "step 更新权重，update 记录一次成功，尚未达到增长间隔。"
+    cells: [["8"], ["1"], ["已更新"]]
+    focus: [[1, 0], [2, 0]]
+  - title: "第二步梯度有限"
+    detail: "再成功一次后 scale 从 8 增到 16，计数清零。"
+    cells: [["16"], ["0"], ["已更新"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "第三步出现 Inf"
+    detail: "该优化器本步跳过参数更新，update 把 scale 从 16 降回 8。"
+    cells: [["8"], ["0"], ["跳过"]]
+    focus: [[0, 0], [2, 0]]
+{{< /stateboard >}}
 
 **关键逻辑**：
 - 每次遇到 overflow → `scale *= 0.5`（减小缩放因子）
@@ -276,7 +282,7 @@ with torch.autocast(device_type='cuda'):
 
 **执行链路**：
 1. `torch.autocast.__enter__()` → 设置 C++ 侧 TLS 状态
-2. `torch._C._set_autocast_enabled(True, 'cuda')`
+2. `torch.set_autocast_enabled("cuda", True)`
 3. 执行 `x @ x.T`：
    - 分发到 `at::mm` 算子
    - 检查 `at::autocast::is_autocast_enabled()` → True
@@ -290,33 +296,9 @@ with torch.autocast(device_type='cuda'):
 - Python: `torch/amp/autocast_mode.py`
 - C++: `aten/src/ATen/autocast_mode.cpp`
 
-### 4.2 GradScaler 梯度检查
+### 4.2 GradScaler 的两次状态更新
 
-```python
-scaler.step(optimizer)
-```
-
-**内部逻辑**：
-```python
-# 简化伪代码
-def step(self, optimizer):
-    # 1. 检查梯度是否有 NaN/Inf
-    if self._has_inf_or_nan():
-        # 跳过此次更新
-        self._scale *= self._backoff_factor
-        return
-
-    # 2. 梯度正常 -> 执行优化器更新
-    optimizer.step()
-
-    # 3. 增加成功计数
-    self._growth_tracker += 1
-
-    # 4. 定期增大 scale
-    if self._growth_tracker >= self._growth_interval:
-        self._scale *= self._growth_factor
-        self._growth_tracker = 0
-```
+`scaler.step(optimizer)` 先确保梯度已 unscale，然后根据本轮检查结果决定是否调用优化器。若需要梯度裁剪，应在 `scaler.unscale_(optimizer)` 之后、`step` 之前进行。`scaler.update()` 在这一步或本轮各优化器完成之后更新缩放因子；这解释了为什么训练循环要依序调用两个方法。混合精度推理没有反向传播，无需调用 GradScaler。[GradScaler 源码](https://github.com/pytorch/pytorch/blob/v2.15.0/torch/amp/grad_scaler.py)
 
 ## 5. BFloat16 vs Float16
 
@@ -354,11 +336,11 @@ with torch.autocast(device_type='cuda', dtype=torch.float16):
 
 ```python
 import torch
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 
 model = MyModel().cuda()
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
-scaler = GradScaler()
+scaler = GradScaler("cuda")
 
 for epoch in range(num_epochs):
     for batch in dataloader:
@@ -368,7 +350,7 @@ for epoch in range(num_epochs):
         optimizer.zero_grad()
 
         # 前向传播 - 自动混合精度
-        with autocast():
+        with autocast(device_type="cuda"):
             output = model(data)
             loss = criterion(output, target)
 
@@ -405,7 +387,7 @@ fp32_time = time.time() - start
 # AMP 加速
 torch.cuda.synchronize()
 start = time.time()
-with torch.no_grad(), autocast():
+with torch.no_grad(), autocast(device_type="cuda"):
     for _ in range(100):
         y = model(x)
 torch.cuda.synchronize()
@@ -414,7 +396,7 @@ amp_time = time.time() - start
 print(f"FP32: {fp32_time:.3f}s")
 print(f"AMP:  {amp_time:.3f}s")
 print(f"加速比: {fp32_time / amp_time:.2f}x")
-# 典型输出：加速 1.5-2.5x（取决于模型和 GPU）
+# 比较两种 dtype 时保持输入一致，并分别预热。
 ```
 
 ## 7. 常见问题
@@ -433,7 +415,7 @@ print(f"加速比: {fp32_time / amp_time:.2f}x")
 **错误示例**：
 ```python
 # 错误：backward 在 autocast 内
-with autocast():
+with autocast(device_type="cuda"):
     output = model(data)
     loss = criterion(output, target)
     loss.backward()  # 不推荐！
@@ -442,7 +424,7 @@ with autocast():
 **正确示例**：
 ```python
 # 正确：只包裹前向传播
-with autocast():
+with autocast(device_type="cuda"):
     output = model(data)
     loss = criterion(output, target)
 
@@ -453,17 +435,17 @@ loss.backward()  # 在 autocast 外
 
 ```python
 # 方法 1 - 使用 custom_fwd/custom_bwd
-from torch.cuda.amp import custom_fwd, custom_bwd
+from torch.amp import custom_fwd, custom_bwd
 
 class MyFunction(torch.autograd.Function):
     @staticmethod
-    @custom_fwd
+    @custom_fwd(device_type="cuda")
     def forward(ctx, x):
         # Autocast 会自动应用类型转换
         return x * 2
 
     @staticmethod
-    @custom_bwd
+    @custom_bwd(device_type="cuda")
     def backward(ctx, grad_output):
         return grad_output * 2
 
@@ -489,7 +471,7 @@ class MyOp(torch.autograd.Function):
 
 ## 9. 延伸阅读
 
-- [上一篇 - CUDA Stream 与 Event](02-cuda-stream-event.md)
-- [下一篇 - 内存优化实战](04-memory-optimization.md) - 结合 AMP 的显存优化
+- [上一篇 - CUDA Stream 与 Event](https://docs.pytorch.org/docs/2.15/notes/cuda.html#cuda-streams)
+- [下一篇 - 内存优化实战](/pytorch/05-advanced-topics/11-cuda-memory-tutorial/) - 结合 AMP 的显存优化
 - [NVIDIA AMP 文档](https://docs.nvidia.com/deeplearning/performance/mixed-precision-training/)
 - PyTorch 源码：`torch/amp/autocast_mode.py`、`torch/amp/grad_scaler.py`

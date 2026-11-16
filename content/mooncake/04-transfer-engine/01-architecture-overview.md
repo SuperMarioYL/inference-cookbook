@@ -3,10 +3,6 @@ title: "Transfer Engine 架构"
 weight: 1
 ---
 
-[上一篇](../03-mooncake-store/06-code-debug-traces.md) | [目录](../README.md) | [下一篇](02-rdma-transport.md)
-
-# Transfer Engine 架构
-
 ## 8.1 整体架构
 
 Transfer Engine 是 Mooncake 的高性能数据传输引擎，专为大规模 GPU 集群设计：
@@ -189,19 +185,39 @@ struct TransferStatus {
 
 传输状态转换：
 
-```mermaid
-stateDiagram-v2
-    [*] --> WAITING: submit
-    WAITING --> PENDING: schedule
-    PENDING --> COMPLETED: success
-    PENDING --> FAILED: error
-    PENDING --> TIMEOUT: timeout
-    WAITING --> CANCELED: cancel
-    COMPLETED --> [*]
-    FAILED --> [*]
-    TIMEOUT --> [*]
-    CANCELED --> [*]
-```
+{{< stateboard >}}
+title: "批次状态如何随完成事件推进"
+rows: ["slice 0", "slice 1", "批次"]
+steps:
+  - title: "先取得 batch ID"
+    detail: "C++ 调用方先用 allocateBatchID 分配批次，手中已有 batch ID。此时尚未提交传输。"
+    cells:
+      - ["待提交"]
+      - ["待提交"]
+      - ["已分配"]
+    focus: [[2, 0]]
+  - title: "提交传输"
+    detail: "调用 submitTransfer(batch_id, entries)，返回值为 Status。提交成功后才跟踪这两个示例 slice 的完成进度。"
+    cells:
+      - ["在途"]
+      - ["在途"]
+      - ["进行中"]
+    focus: [[2, 0]]
+  - title: "一部分完成"
+    detail: "slice 0 已经完成，slice 1 仍然在途。"
+    cells:
+      - ["完成"]
+      - ["在途"]
+      - ["进行中"]
+    focus: [[0, 0], [2, 0]]
+  - title: "全部完成"
+    detail: "两个 slice 都成功完成，调用方通过状态接口确认整项任务结束。"
+    cells:
+      - ["完成"]
+      - ["完成"]
+      - ["完成"]
+    focus: [[1, 0], [2, 0]]
+{{< /stateboard >}}
 
 ## 8.4 Batch 与 Task 模型
 
@@ -475,22 +491,29 @@ struct ThreadLocalSliceCache {
 
 Slice 缓存原理：
 
-```mermaid
-graph LR
-    subgraph "ThreadLocalSliceCache"
-        direction TB
-        A[tail] --> B[Slice 1]
-        B --> C[Slice 2]
-        C --> D[...]
-        D --> E[Slice N]
-        E --> F[head]
-    end
-
-    G[allocate] --> A
-    F --> H[deallocate]
-
-    subgraph "环形缓冲区"
-        I[容量: 4096]
-        J[head - tail = 使用数]
-    end
-```
+{{< stateboard >}}
+title: "一个线程如何复用 slice 描述符"
+rows: ["槽位", "缓存状态", "任务"]
+steps:
+  - title: "线程有一个空闲描述符"
+    detail: "用三个槽位示意线程本地缓存，S 是可复用的描述符。"
+    cells:
+      - ["0", "1", "2"]
+      - ["S", "·", "·"]
+      - ["·", "·", "·"]
+    focus: [[1, 0]]
+  - title: "提交切片"
+    detail: "线程取走 S，填写这一笔传输的地址与长度。"
+    cells:
+      - ["0", "1", "2"]
+      - ["·", "·", "·"]
+      - ["S", "·", "·"]
+    focus: [[2, 0]]
+  - title: "传输结束"
+    detail: "描述符寿命结束后可回到本地缓存，下一笔请求再取用。"
+    cells:
+      - ["0", "1", "2"]
+      - ["·", "S", "·"]
+      - ["·", "·", "·"]
+    focus: [[1, 1]]
+{{< /stateboard >}}

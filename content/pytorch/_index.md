@@ -2,39 +2,17 @@
 title: "PyTorch"
 linkTitle: "PyTorch"
 weight: 1
-description: "PyTorch 源码深度解析 - 从架构到实现的完整指南"
+description: "从张量执行追到算子分发、图编译、FSDP 与 AMP 的 PyTorch 源码指南"
 ---
 
-PyTorch 是当今最流行的深度学习框架之一，被广泛应用于学术研究和工业生产。本文档深入剖析 PyTorch 源码，帮助开发者理解其内部机制。
+一行 `torch.mm(a, b)` 会触发张量布局检查、算子分发和设备内核；给函数加上 `torch.compile` 后，Dynamo 还能捕获其中的张量计算，让编译后端优化。这里以 **PyTorch 2.15.0** 为代码阅读基线（2026-11-16 核对），从用户手中的调用一路追到实现。[2.15 发布说明](https://pytorch.org/blog/pytorch-2-15-release-blog/) · [固定源码](https://github.com/pytorch/pytorch/tree/v2.15.0)
 
-## 适合谁阅读
+| 想回答的问题 | 阅读入口 |
+|---|---|
+| 如何安装并核对本机版本 | [开发环境搭建](/pytorch/00-overview/02-build-and-dev-env/) |
+| 为什么两个视图能共享同一块内存 | [Tensor、stride 与 view](/pytorch/01-introduction/01-tensor-basics-tutorial/) |
+| 算子由谁派发，梯度在哪里记录 | [Dispatcher](/pytorch/03-core-modules/07-dispatcher-core/)与[计算图](/pytorch/02-fundamentals/05-computational-graph/) |
+| 输入长度变化时为什么重新编译 | [编译栈与可运行示例](/pytorch/05-advanced-topics/01-compiler-stack-overview/) |
+| 多卡训练如何分片，混合精度选哪个入口 | [DDP 与 FSDP](/pytorch/05-advanced-topics/10-ddp-fsdp/)与[AMP](/pytorch/05-advanced-topics/12-amp-mixed-precision/) |
 
-本文档适合以下读者：
-
-- **有 PyTorch 使用经验**，想了解内部实现机制的开发者
-- **对编译器技术感兴趣**，想理解 `torch.compile()` 工作原理的工程师
-- **深度学习系统研究者**，需要深入理解 Autograd、Dispatch、分布式训练等核心模块
-
-## 你将学到什么
-
-本文档涵盖 PyTorch 的 11 个核心模块：
-
-- **基础架构**：Tensor/Storage、Autograd、NN Module、优化器、Dispatch 系统
-- **编译器栈**：FX 图系统、TorchDynamo、TorchInductor、模型导出
-- **进阶主题**：分布式训练（DDP/FSDP）、CUDA 内存管理、混合精度训练
-
-每个模块都配有：源码解析、执行链路追踪、可运行示例、Mermaid 架构图。
-
-## 三条阅读路线
-
-我们提供三条学习路径，适配不同背景和目标：
-
-1. **初学者路线** - 从上层到底层，从 NN Module 到 Tensor Storage
-2. **编译器路线** - `torch.compile()` 全栈，理解 FX → Dynamo → Inductor
-3. **专项路线** - 按需选读分布式训练、GPU 编程、模型部署
-
-详细路线规划请参阅 [阅读路线指南](./READING_GUIDE.md)。
-
-## 快速开始
-
-建议先阅读 [Module 0 - 扬帆起航](./00-overview/) 建立整体认知，了解 PyTorch 的三层架构和核心概念。
+按主题循序阅读，可查看[阅读指南](/pytorch/appendix/01-reading-guide/)。

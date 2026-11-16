@@ -15,7 +15,7 @@ TorchInductor 是 PyTorch 2.x 引入的**动态形状感知编译器后端**,作
 
 - **动态形状支持**: 使用符号形状(Symbolic Shapes)处理动态尺寸的张量
 - **自动内核融合**: 智能融合多个算子为单一内核,减少内存访问
-- **多后端代码生成**: 支持 Triton、C++、SIMD 等多种后端
+- **多后端代码生成**：2.15 的 codegen 目录包括 Triton、C++、CuTeDSL 和 NVGEMM 等路径。算子类型、设备架构、dtype 以及调优配置共同决定候选实现。[v2.15.0 后端源码](https://github.com/pytorch/pytorch/tree/v2.15.0/torch/_inductor/codegen)
 - **设备无关**: 同时支持 CUDA、CPU、ROCm、MPS 等硬件
 
 ### 在 torch.compile 栈中的位置
@@ -124,8 +124,8 @@ flowchart TD
 | **IR** | `ir.py` | 中间表示层(Pointwise、Reduction 等) |
 | **Lowering** | `lowering.py` | 算子 → IR 映射(1000+ 算子) |
 | **Scheduler** | `scheduler.py` | 融合决策、内存规划 |
-| **Triton Codegen** | `codegen/triton.py` | 生成 Triton GPU 内核 |
-| **C++ Codegen** | `codegen/cpp.py` | 生成 CPU C++ 内核 |
+| **Triton Codegen** | `torch/_inductor/codegen/triton.py` | 生成 Triton GPU 内核 |
+| **C++ Codegen** | `torch/_inductor/codegen/cpp.py` | 生成 CPU C++ 内核 |
 | **CodeCache** | `codecache.py` | 编译缓存管理 |
 | **OutputCode** | `output_code.py` | 包装为可调用对象 |
 
@@ -386,27 +386,18 @@ config.autotune_local_cache = True     # 自动调优缓存
 
 ---
 
-## 8. 与其他编译器对比
+## 8. 看一次融合有没有发生
 
-| 特性 | TorchInductor | TorchScript | ONNX Runtime | TVM |
-|------|---------------|-------------|--------------|-----|
-| **动态形状** | ✅ 原生支持 | ❌ 需静态形状 | ⚠️ 部分支持 | ⚠️ 部分支持 |
-| **自动融合** | ✅ 智能融合 | ❌ 手动优化 | ✅ 有限融合 | ✅ 需手动调优 |
-| **Python 兼容** | ✅ 完全兼容 | ⚠️ 受限子集 | ❌ 需导出 | ❌ 需导出 |
-| **多后端** | ✅ Triton/C++/SIMD | ❌ 仅解释执行 | ✅ 多后端 | ✅ 多后端 |
-| **调试性** | ✅ 可读生成代码 | ⚠️ 字节码难读 | ⚠️ 中等 | ❌ 较难 |
-| **上手难度** | 🟢 低(自动) | 🟡 中等 | 🟡 中等 | 🔴 高 |
-
----
+以 `y = x.sin() + 1` 为例。用 `TORCH_LOGS=output_code` 启动 Python，调用编译后的函数，再打开日志中给出的生成文件。若同一个循环或 Triton 内核先做正弦、接着完成加法，中间的 `sin(x)` 就可以留在寄存器里。如果看到两个独立调用，沿两者之间的缓冲区读写追踪，就能找出这次融合停在了哪里。[编译日志与调试](https://docs.pytorch.org/docs/2.15/user_guide/torch_compiler/torch.compiler_troubleshooting.html)
 
 ## 9. 下一步
 
-- **[编译管线流程](./01-compile-pipeline.md)**: 深入 `compile_fx` 的完整流程
-- **[IR 与 Lowering](./02-ir-lowering.md)**: 详解中间表示和算子降低
-- **[调度器与融合](./03-scheduler-fusion.md)**: 融合策略与内存优化
-- **[Triton 代码生成](./04-triton-codegen.md)**: GPU 内核生成细节
-- **[C++ 代码生成](./05-cpp-codegen.md)**: CPU 内核生成细节
-- **[调试指南](./06-inductor-debug.md)**: 调试技巧与常见问题
+- **[编译管线流程](/pytorch/05-advanced-topics/01-compiler-stack-overview/)**: 深入 `compile_fx` 的完整流程
+- **[IR 与 Lowering](https://github.com/pytorch/pytorch/blob/v2.15.0/torch/_inductor/lowering.py)**: 详解中间表示和算子降低
+- **[调度器与融合](https://github.com/pytorch/pytorch/blob/v2.15.0/torch/_inductor/scheduler.py)**: 融合策略与内存优化
+- **[Triton 代码生成](/pytorch/05-advanced-topics/08-triton-codegen/)**: GPU 内核生成细节
+- **[C++ 代码生成](https://github.com/pytorch/pytorch/blob/v2.15.0/torch/_inductor/codegen/cpp.py)**: CPU 内核生成细节
+- **[调试指南](https://docs.pytorch.org/docs/2.15/user_guide/torch_compiler/torch.compiler_troubleshooting.html)**: 调试技巧与常见问题
 
 ---
 

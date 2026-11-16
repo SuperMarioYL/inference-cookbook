@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 464 254" role="img" aria-labelledby="cacheblend-rope-angle-title">
+  <title id="cacheblend-rope-angle-title">手册右移两格，K 怎样旋转</title>
+  <desc>左侧画出 K 的一对旋转维度，右侧显示文档中第一个词的位置。</desc>
+<style>@media (prefers-reduced-motion:no-preference){[aria-labelledby="cacheblend-rope-angle-title"] [data-frame="2"] .rope-pointer{animation:cb-rope-turn .75s ease-out both}}@keyframes cb-rope-turn{from{transform:rotate(0deg)}to{transform:rotate(-60deg)}}</style>
+  <text x="15" y="27" text-anchor="start" class="diagram-title">手册右移两格，K 怎样旋转</text>
+  <g data-frame="0">
+    <title>收集原始 K</title>
+    <desc>作者原型在施加 RoPE 前保存 K。对手册的第一个 token，可以用水平向量画出一对维度的原始方向。</desc>
+    <text x="15" y="62" text-anchor="start" class="subhead">K 的一对旋转维度</text>
+    <text x="248" y="62" text-anchor="start" class="subhead">手册首词的位置</text>
+    <path d="M 52 145 H 213 M 134 218 V 74" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="0.55" stroke-dasharray="none"/>
+    <circle cx="134" cy="145" r="68" fill="none" stroke="var(--figure-edge,#547078)" stroke-dasharray="3 4" opacity=".65"/>
+    <path d="M 134 145 H 202" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="0.6" stroke-dasharray="4 4"/>
+    <g class="rope-pointer" style="--to:0deg; transform:rotate(0deg); transform-origin:134px 145px">
+    <path d="M 134 145 H 198" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="4" opacity="1" stroke-dasharray="none"/>
+    <path d="M 191 139 L 203 145 L 191 151 Z" fill="var(--figure-ink,#162329)"/>
+    </g>
+    <text x="87" y="179" text-anchor="start" class="note">原始 K</text>
+    <rect x="247" y="91" width="56" height="36" rx="5" class="stored"/>
+    <text x="275.0" y="114.0" text-anchor="middle" class="label">M</text>
+    <text x="275" y="151" text-anchor="middle" class="note">0</text>
+    <rect x="311" y="91" width="56" height="36" rx="5" class="idle"/>
+    <text x="339.0" y="114.0" text-anchor="middle" class="label">·</text>
+    <text x="339" y="151" text-anchor="middle" class="note">1</text>
+    <rect x="375" y="91" width="56" height="36" rx="5" class="idle"/>
+    <text x="403.0" y="114.0" text-anchor="middle" class="label">·</text>
+    <text x="403" y="151" text-anchor="middle" class="note">2</text>
+    <text x="247" y="185" text-anchor="start" class="note">收集时保存原始 K</text>
+    <text x="15" y="237" text-anchor="start" class="note">θ 为这对维度每移动一个位置的转角，图中角度为示意。</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>在手册前放入两个 token</title>
+    <desc>检索材料 R₀、R₁ 将手册首词推到位置 2，此时缓冲中仍是原始 K。</desc>
+    <text x="15" y="62" text-anchor="start" class="subhead">K 的一对旋转维度</text>
+    <text x="248" y="62" text-anchor="start" class="subhead">手册首词的位置</text>
+    <path d="M 52 145 H 213 M 134 218 V 74" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="0.55" stroke-dasharray="none"/>
+    <circle cx="134" cy="145" r="68" fill="none" stroke="var(--figure-edge,#547078)" stroke-dasharray="3 4" opacity=".65"/>
+    <path d="M 134 145 H 202" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="0.6" stroke-dasharray="4 4"/>
+    <g class="rope-pointer" style="--to:0deg; transform:rotate(0deg); transform-origin:134px 145px">
+    <path d="M 134 145 H 198" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="4" opacity="1" stroke-dasharray="none"/>
+    <path d="M 191 139 L 203 145 L 191 151 Z" fill="var(--figure-ink,#162329)"/>
+    </g>
+    <text x="87" y="179" text-anchor="start" class="note">原始 K</text>
+    <rect x="247" y="91" width="56" height="36" rx="5" class="fresh"/>
+    <text x="275.0" y="114.0" text-anchor="middle" class="label">R₀</text>
+    <text x="275" y="151" text-anchor="middle" class="note">0</text>
+    <rect x="311" y="91" width="56" height="36" rx="5" class="fresh"/>
+    <text x="339.0" y="114.0" text-anchor="middle" class="label">R₁</text>
+    <text x="339" y="151" text-anchor="middle" class="note">1</text>
+    <rect x="375" y="91" width="56" height="36" rx="5" class="stored"/>
+    <text x="403.0" y="114.0" text-anchor="middle" class="label">M</text>
+    <text x="403" y="151" text-anchor="middle" class="note">2</text>
+    <text x="247" y="185" text-anchor="start" class="note">M 现在位于位置 2</text>
+    <text x="15" y="237" text-anchor="start" class="note">θ 为这对维度每移动一个位置的转角，图中角度为示意。</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>按新位置编码</title>
+    <desc>在这对维度上施加两倍的单步转角，把旋转后的 K 交给注意力。其他维度对使用各自的频率。</desc>
+    <text x="15" y="62" text-anchor="start" class="subhead">K 的一对旋转维度</text>
+    <text x="248" y="62" text-anchor="start" class="subhead">手册首词的位置</text>
+    <path d="M 52 145 H 213 M 134 218 V 74" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="0.55" stroke-dasharray="none"/>
+    <circle cx="134" cy="145" r="68" fill="none" stroke="var(--figure-edge,#547078)" stroke-dasharray="3 4" opacity=".65"/>
+    <path d="M 134 145 H 202" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="0.6" stroke-dasharray="4 4"/>
+    <path d="M 169 145 A 35 35 0 0 0 151.5 114.7" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="2" opacity="1" stroke-dasharray="none"/>
+    <g class="rope-pointer" style="--to:-60deg; transform:rotate(-60deg); transform-origin:134px 145px">
+    <path d="M 134 145 H 198" fill="none" stroke="var(--figure-edge,#547078)" stroke-width="4" opacity="1" stroke-dasharray="none"/>
+    <path d="M 191 139 L 203 145 L 191 151 Z" fill="var(--figure-ink,#162329)"/>
+    </g>
+    <text x="87" y="179" text-anchor="start" class="note">旋转 2θ</text>
+    <rect x="247" y="91" width="56" height="36" rx="5" class="fresh"/>
+    <text x="275.0" y="114.0" text-anchor="middle" class="label">R₀</text>
+    <text x="275" y="151" text-anchor="middle" class="note">0</text>
+    <rect x="311" y="91" width="56" height="36" rx="5" class="fresh"/>
+    <text x="339.0" y="114.0" text-anchor="middle" class="label">R₁</text>
+    <text x="339" y="151" text-anchor="middle" class="note">1</text>
+    <rect x="375" y="91" width="56" height="36" rx="5" class="stored"/>
+    <text x="403.0" y="114.0" text-anchor="middle" class="label">M</text>
+    <text x="403" y="151" text-anchor="middle" class="note">2</text>
+    <text x="247" y="185" text-anchor="start" class="note">将 R(2θ) 作用于 K</text>
+    <text x="15" y="237" text-anchor="start" class="note">θ 为这对维度每移动一个位置的转角，图中角度为示意。</text>
+  </g>
+</svg>

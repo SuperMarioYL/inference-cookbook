@@ -3,20 +3,9 @@ title: "性能分析"
 weight: 2
 ---
 
-## 概述
+## 把采样窗口对齐到同一段负载
 
-### 本章学习目标
-- 掌握 CPU 性能分析方法
-- 学习 GPU 性能分析工具
-- 了解瓶颈定位技巧
-- 熟悉优化验证流程
-
-### 前置知识要求
-- 了解性能分析概念
-- 熟悉 Python profiling
-- 理解 CUDA 执行模型
-
----
+先固定输入输出长度和到达率，等待预热后再开启有限的 profiling 窗口。对比 CPU 准备、设备活动和通信，在吞吐量与首 token、逐 token 延迟之间保留可比的请求分布。 [官方测量入口](https://github.com/sgl-project/sglang/blob/v0.5.23/docs/docs/developer_guide/benchmark_and_profiling.mdx)
 
 ## 性能分析工具
 
@@ -220,19 +209,31 @@ nsys-ui report.nsys-rep
 
 ### 时间线分析
 
-```mermaid
-graph LR
-    subgraph timeline["时间线视图"]
-        CPU_WORK["CPU 工作"]
-        KERNEL_LAUNCH["内核启动"]
-        GPU_EXEC["GPU 执行"]
-        MEMORY_OP["内存操作"]
-
-        CPU_WORK --> KERNEL_LAUNCH
-        KERNEL_LAUNCH --> GPU_EXEC
-        GPU_EXEC --> MEMORY_OP
-    end
-```
+{{< trace >}}
+title: 沿同一批标记一次时间线
+actors: ["CPU", "GPU", "通信组"]
+steps:
+  - from: 0
+    to: 0
+    label: "0–2 ms · 准备"
+    detail: "示意采样窗口从 scheduler 为该批准备输入开始。"
+  - from: 0
+    to: 1
+    label: "2 ms · 提交"
+    detail: "设备开始计算；CPU 可继续响应其他就绪任务。"
+  - from: 1
+    to: 2
+    label: "5 ms · 通信"
+    detail: "一次张量并行同步在设备计算之后开始。"
+  - from: 2
+    to: 1
+    label: "7 ms · 返回"
+    detail: "通信完成后，该批继续后续模型工作。"
+  - from: 1
+    to: 0
+    label: "9 ms · 收取"
+    detail: "CPU 侧收到完成结果；各段应通过同一批次标识对应。"
+{{< /trace >}}
 
 ### 关键指标
 
@@ -566,16 +567,7 @@ graph TB
 
 ---
 
-## 小结
-
-### 要点回顾
-
-1. **CPU 分析**：py-spy 火焰图，line_profiler 逐行
-2. **GPU 分析**：torch.profiler，Nsight Systems
-3. **瓶颈类型**：计算、内存、延迟、同步
-4. **验证优化**：A/B 测试，回归测试
-
-### 工具选择
+## 按观测对象选择工具
 
 | 场景 | 推荐工具 |
 |------|---------|
@@ -583,11 +575,4 @@ graph TB
 | 详细 GPU 分析 | torch.profiler |
 | 系统级分析 | Nsight Systems |
 | 内存泄漏 | tracemalloc |
-
-### 下一章预告
-
-在下一章《常见问题排查》中，我们将：
-- 了解 OOM 问题解决
-- 学习性能问题诊断
-- 掌握调优 checklist
 

@@ -1,0 +1,4 @@
+{{/* Approximate text width in viewBox units at the diagram's 16px font size. */}}
+{{- $text := string . -}}
+{{- $ascii := len (findRE "[[:ascii:]]" $text) -}}
+{{- return (add (mul 9 $ascii) (mul 16 (sub (strings.RuneCount $text) $ascii))) -}}

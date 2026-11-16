@@ -3,9 +3,9 @@ title: "流式响应处理"
 weight: 4
 ---
 
-> 本文档详解 Dynamo 的 SSE 流式响应实现，包括事件转换、断开检测和资源管理机制。
+## 从网络事件还原模型输出
 
----
+在同一请求上分别记录开始响应、首个包含文本的增量以及终止事件。客户端断开后，前端需要把取消传播到下游；这与完整流按 finish reason 正常结束是不同路径。 [取消传播](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/docs/fern/pages/developer-guide/knowledge-base/concepts/fault-tolerance/request-cancellation-architecture.md)
 
 ## 1. SSE 基础
 
@@ -385,18 +385,27 @@ let (tx, rx) = tokio::sync::mpsc::channel(8);
 
 ### 7.2 背压处理
 
-```mermaid
-flowchart TD
-    A["Token 生成"] --> B{"Channel 满?"}
-    B -->|是| C["等待消费"]
-    B -->|否| D["立即发送"]
-
-    C --> E["客户端消费"]
-    E --> D
-
-    D --> F["继续生成"]
-    F --> A
-```
+{{< stateboard >}}
+title: 慢客户端如何让有界队列填满
+rows: ["缓冲槽", "发送端"]
+steps:
+  - title: "收到 A"
+    detail: "示例队列能容纳两项，A 已就绪，客户端还没读取。"
+    cells: [["A", "·"], ["可写", "·"]]
+    focus: [[0, 0]]
+  - title: "再到 B"
+    detail: "现在两个槽都满，再写 C 时发送端需要等待消费。"
+    cells: [["A", "B"], ["等待", "C"]]
+    focus: [[0, 1], [1, 0]]
+  - title: "客户端读 A"
+    detail: "腾出的槽允许 C 入队，原来的 B 仍排在前面。"
+    cells: [["B", "C"], ["可写", "·"]]
+    focus: [[0, 0], [0, 1]]
+  - title: "客户端继续读"
+    detail: "B、C 依序交给消费者，缓冲重新空出。"
+    cells: [["·", "·"], ["可写", "·"]]
+    focus: [[0, 0], [0, 1]]
+{{< /stateboard >}}
 
 ### 7.3 零拷贝序列化
 
@@ -467,23 +476,7 @@ for line in response.iter_lines():
 
 ---
 
-## 总结
-
-Dynamo 流式响应的核心机制：
-
-| 机制 | 实现 |
-|------|------|
-| 事件格式 | SSE (Server-Sent Events) |
-| 事件转换 | EventConverter |
-| 断开检测 | mpsc channel 发送失败 |
-| 资源释放 | AsyncEngineContext.stop_generating() |
-| Keep-Alive | Axum SSE 内置支持 |
-
-这套机制确保了流式响应的可靠性和资源效率。
-
----
-
 ## 参考文件
 
-- [lib/llm/src/http/service/openai.rs](../../../lib/llm/src/http/service/openai.rs) - SSE 实现
-- [lib/llm/src/http/service/sse.rs](../../../lib/llm/src/http/service/sse.rs) - SSE 工具
+- [lib/llm/src/http/service/openai.rs](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/llm/src/http/service/openai.rs) - SSE 实现
+- [断开和取消处理](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/llm/src/http/service/disconnect.rs) - SSE 工具

@@ -3,94 +3,47 @@ title: "反向调用链追踪"
 weight: 2
 ---
 
-## 目录
+FA2 的 CUDA 路径中，Autograd 在上游产生 `dO` 时调用 `FlashAttnFunc.backward`。前向保存 Q、K、V、O、行 log-sum-exp 和必要的 RNG 状态；反向重算当前分块的注意力权重，不必从显存读回整张概率矩阵。[FA2 Autograd 入口](https://github.com/Dao-AILab/flash-attention/blob/v2.8.3.post2/flash_attn/flash_attn_interface.py)
 
-- [1. 概述](#1-概述)
-- [2. 反向调用链全景](#2-反向调用链全景)
-- [3. PyTorch Autograd 触发](#3-pytorch-autograd-触发)
-- [4. C++ 反向绑定层](#4-c-反向绑定层)
-- [5. 反向模板分发](#5-反向模板分发)
-- [6. 反向内核执行](#6-反向内核执行)
-- [7. GQA 梯度归约](#7-gqa-梯度归约)
-- [8. 前向 vs 反向对比](#8-前向-vs-反向对比)
+## 从一个头的一行看梯度
 
----
+设 $P=\operatorname{softmax}(S)$、$O=PV$，其中 $S=QK^T/\sqrt{d}$。没有 dropout 时，`dV = Pᵀ @ dO`，`dP = dO @ Vᵀ`。对一行 softmax，`dS = P * (dP - sum(dP * P))`。等价的行标量 `sum(dO * O)` 已能从输出得到，免去一次完整的概率矩阵访问。再乘入原有缩放，得到 Q、K 的梯度。
 
-## 1. 概述
+{{< trace >}}
+title: "一次反向怎样填满三份梯度"
+actors: ["Autograd", "FA2 包装", "CUDA 扩展", "梯度缓冲"]
+steps:
+  - from: 0
+    to: 1
+    label: "传入 dO"
+    detail: "前向保存的 Q、K、V、O 和 LSE 随 context 取回。"
+  - from: 1
+    to: 3
+    label: "准备三个输出"
+    detail: "Python 包装按 padding 后的形状分配 dQ、dK、dV。"
+  - from: 1
+    to: 2
+    label: "调用反向"
+    detail: "扩展校验条件并分发内核，按块重算概率，累加三种梯度。"
+  - from: 2
+    to: 3
+    label: "写入结果"
+    detail: "内核把数据写入已分配缓冲；GQA 的共享 KV 头要汇合相应梯度。"
+  - from: 3
+    to: 0
+    label: "恢复原始头维"
+    detail: "包装去掉可能存在的额外 padding，把输入梯度返回给 autograd。"
+{{< /trace >}}
 
-反向传播由 PyTorch 的 Autograd 引擎自动触发。当用户调用 `loss.backward()` 时，梯度会沿计算图反向传播，最终到达 `FlashAttnFunc.backward()`，进而调用 CUDA 反向内核。
+`csrc/flash_attn/flash_api.cpp` 的 `mha_bwd` 检查反向输入并准备参数，`run_mha_bwd` 分发到 FA2 的反向模板。启用 dropout 时须重放对应前向的 mask；GQA 中多个 Q 头共享 KV 头，相应的 dK、dV 必须归并。`deterministic` 会影响可选的反向实现。`flash_attn_with_kvcache` 是推理接口，没有对应的反向保证。[FA2 绑定](https://github.com/Dao-AILab/flash-attention/blob/v2.8.3.post2/csrc/flash_attn/flash_api.cpp) · [FA2 反向内核](https://github.com/Dao-AILab/flash-attention/blob/v2.8.3.post2/csrc/flash_attn/src/flash_bwd_kernel.h)
 
-反向调用链的关键特点：
-- **重计算 P 矩阵**：不从前向传播存储 $O(N^2)$ 的 attention 矩阵
-- **保存的张量更多**：需要前向的 Q/K/V/O/LSE/rng_state
-- **额外的参数结构体字段**：`dq_ptr`, `dk_ptr`, `dv_ptr`, `dq_accum_ptr`, `dsoftmax_sum`
-- **GQA 梯度归约**：多个 Q 头的梯度需要归约到对应的 KV 头
+## FA2 的梯度缓冲区与 GQA 归并
 
----
+以下为简化源码，省略无关分支。
 
-## 2. 反向调用链全景
+### FlashAttnFunc.backward
 
-```mermaid
-graph TD
-    subgraph trigger["触发"]
-        T1["loss.backward()"]
-        T2["Autograd 引擎遍历计算图"]
-    end
-
-    subgraph python["Python 层"]
-        P1["FlashAttnFunc.backward()"]
-        P2["_wrapped_flash_attn_backward()"]
-        P3["flash_attn_gpu.bwd()"]
-    end
-
-    subgraph cpp["C++ 层"]
-        C1["mha_bwd()"]
-        C2["set_params_dgrad()"]
-        C3["set_params_fprop()"]
-        C4["分配 dq_accum / softmax_d"]
-        C5["run_mha_bwd()"]
-    end
-
-    subgraph dispatch["分发层"]
-        D1["ARCH_SWITCH"]
-        D2["SOFTCAP_SWITCH"]
-        D3["HEADDIM_SWITCH"]
-    end
-
-    subgraph kernel["内核层"]
-        K1["FlashAttnBwdSm90::operator()"]
-        K2["Producer 0: 加载 Q/dO/LSE"]
-        K3["Producer 1: 存储 dQ"]
-        K4["Consumer: bwd_step()"]
-    end
-
-    subgraph post["后处理"]
-        G1["GQA 梯度归约"]
-        G2["返回 dq, dk, dv"]
-    end
-
-    T1 --> T2 --> P1
-    P1 --> P2 --> P3
-    P3 --> C1
-    C1 --> C2
-    C2 --> C3
-    C1 --> C4
-    C4 --> C5
-    C5 --> D1 --> D2 --> D3
-    D3 --> K1
-    K1 --> K2
-    K1 --> K3
-    K1 --> K4
-    K4 --> G1 --> G2
-```
-
----
-
-## 3. PyTorch Autograd 触发
-
-### 3.1 FlashAttnFunc.backward
-
-当 Autograd 引擎到达 Flash Attention 节点时，调用 `FlashAttnFunc.backward()`（`flash_attn/flash_attn_interface.py:869-900`）：
+当 Autograd 引擎到达 Flash Attention 节点时，调用 `FlashAttnFunc.backward()`（`flash_attn/flash_attn_interface.py`）：
 
 ```python
 @staticmethod
@@ -131,10 +84,10 @@ def backward(ctx, dout, *args):
 - CUDA 反向内核直接原地写入这些缓冲区
 - 返回 12 个值（对应 `forward()` 的 12 个参数），其中 9 个为 `None`
 
-### 3.2 Custom Op 层
+### Custom Op 层
 
 ```python
-# flash_attn/flash_attn_interface.py:241-290
+# flash_attn/flash_attn_interface.py
 @_torch_custom_op_wrapper(
     "flash_attn::_flash_attn_backward",
     mutates_args=("dq", "dk", "dv"),  # 声明原地修改
@@ -164,39 +117,10 @@ def _flash_attn_backward(
 
 ---
 
-## 4. C++ 反向绑定层
-
-### 4.1 mha_bwd 入口
-
-`csrc/flash_attn/flash_api.cpp:767-971`（SM80 版本）：
+### 参数验证与分配
 
 ```cpp
-std::vector<at::Tensor> mha_bwd(
-    const at::Tensor &dout,   // (B, S_q, H, D)
-    const at::Tensor &q,      // (B, S_q, H, D)
-    const at::Tensor &k,      // (B, S_k, Hk, D)
-    const at::Tensor &v,      // (B, S_k, Hk, D)
-    const at::Tensor &out,    // (B, S_q, H, D)
-    const at::Tensor &softmax_lse,  // (B, H, S_q)
-    c10::optional<at::Tensor> &dq_,  // 预分配梯度（可选）
-    c10::optional<at::Tensor> &dk_,
-    c10::optional<at::Tensor> &dv_,
-    c10::optional<at::Tensor> &alibi_slopes_,
-    const float p_dropout,
-    const float softmax_scale,
-    const bool is_causal,
-    int window_size_left, int window_size_right,
-    const float softcap,
-    const bool deterministic,
-    c10::optional<at::Generator> gen_,
-    c10::optional<at::Tensor> &rng_state,
-) {
-```
-
-### 4.2 参数验证与分配
-
-```cpp
-// csrc/flash_attn/flash_api.cpp:849-904
+// csrc/flash_attn/flash_api.cpp
 
 // 梯度张量分配（如果 Python 层没有传入）
 at::Tensor dq, dk, dv;
@@ -223,9 +147,9 @@ auto dq_accum = torch::empty(
 );
 ```
 
-### 4.3 set_params_dgrad
+### set_params_dgrad
 
-`set_params_dgrad()`（`csrc/flash_attn/flash_api.cpp:161-241`）首先调用 `set_params_fprop()` 设置前向参数，然后添加反向特有的字段：
+`set_params_dgrad()`（`csrc/flash_attn/flash_api.cpp`）首先调用 `set_params_fprop()` 设置前向参数，然后添加反向特有的字段：
 
 ```cpp
 void set_params_dgrad(Flash_bwd_params &params, ...) {
@@ -268,10 +192,10 @@ void set_params_dgrad(Flash_bwd_params &params, ...) {
 | `dsoftmax_sum` | `void*` | $D_i = \sum_j dO_{ij} \cdot O_{ij}$ |
 | `deterministic` | `bool` | 确定性模式 |
 
-### 4.4 RNG 状态恢复
+### RNG 状态恢复
 
 ```cpp
-// csrc/flash_attn/flash_api.cpp:936-951
+// csrc/flash_attn/flash_api.cpp
 if (rng_state.has_value()) {
     // 使用前向保存的 RNG 状态
     params.rng_state = reinterpret_cast<uint64_t*>(rng_state.value().data_ptr());
@@ -280,98 +204,38 @@ if (rng_state.has_value()) {
 
 这确保反向传播时能重放与前向完全相同的 Dropout mask。
 
-### 4.5 内核启动
+### 问题
+
+在 GQA 中，`num_heads > num_heads_k`。前向时多个 Q 头共享一个 KV 头；反向时需要将这些 Q 头产生的 dK/dV 梯度归约到对应的 KV 头。
+
+### C++ 层归约
 
 ```cpp
-// csrc/flash_attn/flash_api.cpp:956
-if (seqlen_q > 0) {
-    auto stream = at::cuda::getCurrentCUDAStream().stream();
-    run_mha_bwd(params, stream);
+// csrc/flash_attn/flash_api.cpp
+if (num_heads_k != num_heads) {
+    // dk_expanded: (B, S, H, D) → reshape → (B, S, Hk, H/Hk, D)
+    at::sum_out(dk,
+        at::reshape(dk_expanded, {batch_size, seqlen_k, num_heads_k,
+                                   num_heads / num_heads_k, head_size}),
+        {3}  // 在 group 维度求和
+    );
+    at::sum_out(dv,
+        at::reshape(dv_expanded, {batch_size, seqlen_k, num_heads_k,
+                                   num_heads / num_heads_k, head_size}),
+        {3}
+    );
 }
 ```
 
----
+内核计算时 dK/dV 按完整头数分配（`num_heads` 个头），每个 Q 头独立计算对应 KV 头的梯度贡献。计算完成后，C++ 层将同一 KV 头对应的所有 Q 头梯度求和。
 
-## 5. 反向模板分发
+FA3 的 SM90 实现把准备、主循环和结果回写组织在 `hopper/` 中；如要分析这个实现的争用与并行度，可接着读[Hopper 反向内核](/flashattention/03-cuda-kernel/04-backward-kernel-impl/)。FA4 的反向在 `flash_attn/cute/` 调用 CuTeDSL 路径；功能和 dtype 应以所选架构及 tag 的条件为准。[FA4 接口与反向实现](https://github.com/Dao-AILab/flash-attention/blob/fa4-v4.0.0.beta39/flash_attn/cute/interface.py)
 
-### 5.1 分发结构
+## 对照 FA3 的 Hopper 循环
 
-反向的分发树比前向简单——只需 Arch 和 Softcap 两层：
+以下示意不含 dropout 的密集路径。FA3 的内核调度是这里的观察对象。
 
-```cpp
-// hopper/flash_api.cpp:1246-1257
-void run_mha_bwd(Flash_bwd_params &params, cudaStream_t stream) {
-    ARCH_SWITCH(params.arch, Arch, [&] {
-        SOFTCAP_SWITCH(params.softcap > 0.f, Has_softcap, [&] {
-            run_mha_bwd_constexpr<Arch, Has_softcap>(params, stream);
-        });
-    });
-}
-```
-
-### 5.2 Head Dimension 分发
-
-```cpp
-// hopper/flash_api.cpp:1206-1244
-template<int Arch, bool Has_softcap>
-void run_mha_bwd_constexpr(Flash_bwd_params &params, cudaStream_t stream) {
-    if (!params.is_bf16) {
-        if (params.d_rounded == 64)
-            return run_mha_bwd_<Arch, cutlass::half_t, 64, Has_softcap>(...);
-        if (params.d_rounded == 96)
-            return run_mha_bwd_<Arch, cutlass::half_t, 96, Has_softcap>(...);
-        if (params.d_rounded == 128)
-            return run_mha_bwd_<Arch, cutlass::half_t, 128, Has_softcap>(...);
-        // ... 192, 256
-    } else {
-        // BF16 路径
-    }
-}
-```
-
-**反向 vs 前向的分发差异**：
-
-| 分发维度 | 前向 | 反向 |
-|----------|------|------|
-| Arch | Y | Y |
-| Split | Y | - |
-| PagedKV | Y | - |
-| PackGQA | Y | - |
-| Softcap | Y | Y |
-| Varlen | Y | - |
-| AppendKV | Y | - |
-| dtype | Y | Y |
-| HeadDim | Y | Y |
-
-反向分发更简单的原因：反向不需要 Split-KV、Paged KV、GQA 打包等前向特有的特性。反向的循环结构（N-outer Q-inner）天然不需要这些优化。
-
----
-
-## 6. 反向内核执行
-
-### 6.1 反向内核结构
-
-`FlashAttnBwdSm90`（`hopper/flash_bwd_kernel_sm90.h`）使用三组 Warp Specialization：
-
-```cpp
-CUTLASS_DEVICE void operator()(Params const& params, char* smem_buf) {
-    if (warp_group_idx == 0) {
-        // Producer 0: 加载 Q, dO, LSE
-        collective_mainloop.load_Q_dO(params, ...);
-    }
-    else if (warp_group_idx == NumMmaWarpGroups) {
-        // Producer 1: 通过 TMA 存储 dQ
-        collective_mainloop.store_dQ(params, ...);
-    }
-    else {
-        // Consumer: 计算 dQ, dK, dV
-        collective_mainloop.mma(params, ...);  // 主循环
-        collective_epilogue.store(params, ...); // 写出 dK, dV
-    }
-}
-```
-
-### 6.2 N-outer Q-inner 循环
+### N-outer Q-inner 循环
 
 反向采用与前向相反的循环顺序——外层遍历 K/V 块（N 维度），内层遍历 Q 块：
 
@@ -383,18 +247,18 @@ for each (n_block, bidh, bidb) from Scheduler:
     for m_block in Q_blocks:    // 内层遍历 Q
         加载 Q[m_block], dO[m_block], LSE[m_block]
         bwd_step():
-            S = Q @ K^T           // 重计算 QK^T
+            S = scale * (Q @ K^T)           // 重计算 QK^T
             P = softmax(S, LSE)   // 使用保存的 LSE 重计算 P
             dV += P^T @ dO        // 累加 dV
             dP = dO @ V^T
             dS = P ⊙ (dP - D)    // D = rowsum(dO ⊙ O)
-            dQ += dS @ K          // 累加 dQ（写回 HBM）
-            dK += dS^T @ Q        // 累加 dK（寄存器）
+            dQ += scale * (dS @ K)          // 累加 dQ（写回 HBM）
+            dK += scale * (dS^T @ Q)        // 累加 dK（寄存器）
 
     写出 dK[n_block], dV[n_block]  // 内层结束后写出
 ```
 
-### 6.3 bwd_step 的 5 个 GEMM
+### bwd_step 的 5 个 GEMM
 
 每次 `bwd_step()` 包含 5 个矩阵乘法操作：
 
@@ -409,11 +273,11 @@ graph TD
     end
 
     subgraph gemm["5 个 GEMM"]
-        G1["GEMM1: S = Q @ K^T"]
+        G1["GEMM1: S = scale * (Q @ K^T)"]
         G2["GEMM2: dV += P^T @ dO"]
         G3["GEMM3: dP = dO @ V^T"]
-        G4["GEMM4: dQ += dS @ K"]
-        G5["GEMM5: dK += dS^T @ Q"]
+        G4["GEMM4: 累加 dQ"]
+        G5["GEMM5: 累加 dK"]
     end
 
     subgraph intermediate["中间计算"]
@@ -436,100 +300,3 @@ graph TD
     DS --> G5
     Q --> G5
 ```
-
-### 6.4 dQ 的存储策略
-
-dQ 的累加涉及多个 N 块对同一 Q 块的写入，有两种策略：
-
-**非确定性模式**（默认）：使用原子加法直接累加到全局内存
-```cpp
-// 每个 bwd_step 后通过原子操作写回 dQ
-atomicAdd(dQ_global[m_block], dQ_local);
-```
-
-**确定性模式**（`deterministic=True`）：使用 TMA 存储到 FP32 累加缓冲区
-```cpp
-// Producer 1 通过 TMA 将 dQ 写到 dq_accum 缓冲区
-// 后续通过 reduction kernel 归约
-```
-
----
-
-## 7. GQA 梯度归约
-
-### 7.1 问题
-
-在 GQA 中，`num_heads > num_heads_k`。前向时多个 Q 头共享一个 KV 头；反向时需要将这些 Q 头产生的 dK/dV 梯度归约到对应的 KV 头。
-
-### 7.2 C++ 层归约
-
-```cpp
-// csrc/flash_attn/flash_api.cpp:965-968
-if (num_heads_k != num_heads) {
-    // dk_expanded: (B, S, H, D) → reshape → (B, S, Hk, H/Hk, D)
-    at::sum_out(dk,
-        at::reshape(dk_expanded, {batch_size, seqlen_k, num_heads_k,
-                                   num_heads / num_heads_k, head_size}),
-        {3}  // 在 group 维度求和
-    );
-    at::sum_out(dv,
-        at::reshape(dv_expanded, {batch_size, seqlen_k, num_heads_k,
-                                   num_heads / num_heads_k, head_size}),
-        {3}
-    );
-}
-```
-
-内核计算时 dK/dV 按完整头数分配（`num_heads` 个头），每个 Q 头独立计算对应 KV 头的梯度贡献。计算完成后，C++ 层将同一 KV 头对应的所有 Q 头梯度求和。
-
-### 7.3 确定性 GQA 归约
-
-在 SM90 的 Hopper 路径中，当 `deterministic=True` 时，GQA 归约在内核内部完成，使用专门的 `dKV_swapAB` 优化确保原子操作的确定性：
-
-```cpp
-// 确定性模式下的梯度归约在 epilogue_bwd.hpp 中
-// 通过控制 thread block 的执行顺序避免不确定性
-```
-
----
-
-## 8. 前向 vs 反向对比
-
-### 8.1 调用链对比
-
-| 阶段 | 前向 | 反向 |
-|------|------|------|
-| Python 入口 | `flash_attn_func()` | `loss.backward()` → `FlashAttnFunc.backward()` |
-| Custom Op | `_flash_attn_forward` | `_flash_attn_backward` |
-| C++ 函数 | `mha_fwd()` | `mha_bwd()` |
-| 参数设置 | `set_params_fprop()` | `set_params_dgrad()` → `set_params_fprop()` |
-| 分发层数 | 7 层 SWITCH | 2 层 SWITCH |
-| 内核类 | `FlashAttnFwdSm90` | `FlashAttnBwdSm90` |
-| Warp 分工 | 1 Producer + N Consumer | 2 Producer + N Consumer |
-| 循环顺序 | Q-outer, K/V-inner | N-outer, Q-inner |
-
-### 8.2 内存对比
-
-| 资源 | 前向 | 反向 |
-|------|------|------|
-| 输入 | Q, K, V | dOut, Q, K, V, O, LSE, rng_state |
-| 输出 | O, LSE, rng_state | dQ, dK, dV |
-| 额外分配 | Split 累加器 | dq_accum (FP32), softmax_d |
-| 峰值内存 | $O(B \cdot H \cdot S \cdot D)$ | $O(B \cdot H \cdot S \cdot D)$ + FP32 累加器 |
-
-### 8.3 计算对比
-
-| 指标 | 前向 | 反向 |
-|------|------|------|
-| GEMM 数/块 | 2 (QK, PV) | 5 (QK, PtdO, dOVt, dSK, dStQ) |
-| 计算量 | $O(N^2 d)$ | $O(N^2 d) \times 2.5$ |
-| Softmax | 在线计算 | 从 LSE 重计算 |
-| 数据重用 | K/V 跨 Q 块重用 | Q/dO 跨 N 块重用 |
-
----
-
-## 导航
-
-- 上一篇：[前向调用链追踪](01-forward-call-trace.md)
-- 下一篇：[调试指南](03-debug-guide.md)
-- [返回目录](../README.md)

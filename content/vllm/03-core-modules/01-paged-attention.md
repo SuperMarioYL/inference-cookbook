@@ -3,14 +3,13 @@ title: "PagedAttention 分页注意力"
 weight: 1
 ---
 
+## 定位当前模型使用的后端
 
-> 本章将详细介绍 vLLM 的核心创新——PagedAttention，包括设计思想、数据结构和实现原理。
-
----
+块表解决逻辑 token 到物理 KV 块的映射，执行 attention 的具体后端还依赖硬件、数据类型、头部维度与缓存配置。文中的核函数示意用于解释块表读取；对照 0.33.0 的实际实现，先由选择器确定后端。 [0.33.0 后端选择](https://github.com/vllm-project/vllm/blob/v0.33.0/docs/design/attention_backends.md)
 
 ## 引言
 
-PagedAttention 是 vLLM 最重要的创新，它借鉴了操作系统虚拟内存管理的思想，革命性地解决了 KV Cache 的显存浪费问题。本章将深入剖析其设计原理和实现细节。
+请求把第 32 和第 33 个 token 当作相邻位置，显存中的两个 KV 块却可以相隔很远。PagedAttention 通过块表找到它们。
 
 ---
 
@@ -239,23 +238,7 @@ def get_slot_mapping(token_position, block_size, block_table):
 
 **图解**：
 
-```mermaid
-graph LR
-    subgraph token_pos["Token 位置 35"]
-        T[token_position = 35]
-    end
-
-    subgraph calculation["计算"]
-        LB["逻辑块 = 35 // 16 = 2"]
-        OFF["偏移 = 35 % 16 = 3"]
-        PB["物理块 = block_table[2] = 8"]
-        SLOT["slot = 8 × 16 + 3 = 131"]
-    end
-
-    T --> LB --> PB
-    T --> OFF --> SLOT
-    PB --> SLOT
-```
+{{< mechanism "vllm-slot-address" >}}
 
 ---
 
@@ -286,26 +269,31 @@ graph TB
 
 ### 4.2 按需分配
 
-```mermaid
-sequenceDiagram
-    participant R as Request
-    participant S as Scheduler
-    participant BP as BlockPool
-
-    R->>S: 开始生成（0 tokens）
-    S->>BP: 分配 1 个 block
-    BP-->>S: Block 5
-
-    loop 每 16 个 token
-        R->>S: 需要新空间
-        S->>BP: 分配 1 个 block
-        BP-->>S: Block N
-    end
-
-    R->>S: 生成完成
-    S->>BP: 释放所有 blocks
-    Note over BP: 块立即可用于其他请求
-```
+{{< trace >}}
+title: 越过第 16 个位置时分配新块
+actors: ["请求 A", "调度器", "块池"]
+steps:
+  - from: 0
+    to: 1
+    label: "填满首块"
+    detail: "A 已占用 16 个位置，块表中只有物理块 5。"
+  - from: 1
+    to: 2
+    label: "申请下个块"
+    detail: "调度器为第 17 个位置申请一块空闲空间。"
+  - from: 2
+    to: 1
+    label: "返回块 8"
+    detail: "物理块 8 接在 A 的逻辑块表末尾，已有 16 个位置留在块 5。"
+  - from: 1
+    to: 0
+    label: "继续执行"
+    detail: "第 17 个位置写到块 8 的槽位 0。"
+  - from: 1
+    to: 2
+    label: "归还引用"
+    detail: "A 结束，调度器释放 A 持有的块引用。"
+{{< /trace >}}
 
 ### 4.3 支持 Copy-on-Write
 
@@ -463,42 +451,36 @@ stateDiagram-v2
     note right of Cached : 保留以备复用
 ```
 
-### 6.2 块分配流程
+### 6.2 一轮要再分配几块
 
 ```python
-def allocate_blocks_for_request(request, kv_cache_manager):
-    """为请求分配所需的 blocks"""
-    num_tokens = len(request.prompt_tokens) + request.num_generated_tokens
-    num_blocks_needed = (num_tokens + block_size - 1) // block_size
+def additional_blocks(computed, scheduled, allocated_blocks, block_size):
+    required = (computed + scheduled + block_size - 1) // block_size
+    return max(0, required - allocated_blocks)
 
-    blocks = []
-    for i in range(num_blocks_needed):
-        # 尝试获取空闲块
-        block = kv_cache_manager.get_free_block()
-        if block is None:
-            # 没有空闲块，触发驱逐或返回失败
-            return None
-        blocks.append(block)
-
-    # 更新请求的块表
-    request.block_table = blocks
-    return blocks
+# 已算好 32 个位置，下一轮再算 1 个；已有两个完整块。
+assert additional_blocks(32, 1, 2, 16) == 1
 ```
 
 ### 6.3 块增长过程
 
-```mermaid
-gantt
-    title 请求的块分配时间线
-    dateFormat X
-    axisFormat %s
-
-    section 块分配
-    Block 0 (prefill) :done, b0, 0, 16
-    Block 1 (prefill 续) :done, b1, 16, 32
-    Block 2 (decode) :active, b2, 32, 48
-    Block 3 (decode 续) :active, b3, 48, 64
-```
+{{< stateboard >}}
+title: 第 33 个 token 写到哪里
+rows: ["逻辑块", "已用槽位"]
+steps:
+  - title: 提示词长 16
+    detail: 第 0 块正好写满。
+    cells: [["0", "·", "·"], ["16/16", "·", "·"]]
+    focus: [[1, 0]]
+  - title: 提示词长 32
+    detail: 处理完整段提示词后，两块都已写满。
+    cells: [["0", "1", "·"], ["16/16", "16/16", "·"]]
+    focus: [[1, 1]]
+  - title: 解码输入第 33 个 token
+    detail: 调度器为新位置分配第 2 个逻辑块，当前只需写入一个槽位。
+    cells: [["0", "1", "2"], ["16/16", "16/16", "1/16"]]
+    focus: [[1, 2]]
+{{< /stateboard >}}
 
 ---
 
@@ -507,7 +489,7 @@ gantt
 ### 7.1 文件位置
 
 - Python 接口：`vllm/v1/attention/ops/paged_attn.py`
-- CUDA 内核：`csrc/attention/paged_attention_v1.cu`、`paged_attention_v2.cu`
+- CUDA 内核：[按平台、模型与缓存布局选择 attention backend](https://github.com/vllm-project/vllm/blob/v0.33.0/vllm/v1/attention/selector.py)
 
 ### 7.2 V1 vs V2 内核
 
@@ -520,7 +502,7 @@ gantt
 ### 7.3 内核参数
 
 ```cpp
-// paged_attention_v2.cu (简化)
+// 教学伪代码：展示块表寻址与加权累积
 template<typename T, int BLOCK_SIZE, int NUM_THREADS>
 __global__ void paged_attention_v2_kernel(
     T* __restrict__ out,              // 输出
@@ -545,74 +527,40 @@ __global__ void paged_attention_v2_kernel(
 
 ### 8.1 显存效率
 
-| 方案 | 显存利用率 | 最大并发 |
-|------|-----------|---------|
-| 传统预分配 | 20-40% | 低 |
-| PagedAttention | 96%+ | 高 2-4 倍 |
+最大长度预留会留下未使用空间，分页分配则按实际进度增长。对普通全注意力、单个不共享的请求，若每块 16 个 token、当前序列长 35，则需要 3 块共 48 个槽位，尾块尚余 13 个。共享前缀后物理块数还会受同时活跃的请求与缓存回收影响。可用这组计数在运行中核对块表，实际吞吐仍需结合模型、输入分布与并发测量。
 
-### 8.2 吞吐量提升
+### 8.2 尾块随序列长度变化
 
-```mermaid
-graph LR
-    subgraph throughput_compare["吞吐量对比"]
-        T1["传统方案<br/>1x 基准"]
-        T2["PagedAttention<br/>2-4x 提升"]
-    end
+{{< stateboard >}}
+title: 同一个请求的尾块能空多少
+rows: ["物理块", "已用槽位"]
+steps:
+  - title: "序列长 35"
+    detail: "三个已分配块共 48 个槽，尾块只用 3 个，空余 13 个，占已分配空间约 27.1%。"
+    cells: [["P5", "P2", "P8", "·"], ["16", "16", "3", "·"]]
+    focus: [[0, 2], [1, 2]]
+  - title: "增长到 48"
+    detail: "第 3 个块填满，48 个槽全部使用。"
+    cells: [["P5", "P2", "P8", "·"], ["16", "16", "16", "·"]]
+    focus: [[1, 2]]
+  - title: "再增加 1 个位置"
+    detail: "引擎为位置 48 另取一块。49 个位置放进 64 个槽，尾块余 15 个，占约 23.4%。"
+    cells: [["P5", "P2", "P8", "P12"], ["16", "16", "16", "1"]]
+    focus: [[0, 3], [1, 3]]
+{{< /stateboard >}}
 
-    style T2 fill:#c8e6c9
-```
+### 分页怎样影响吞吐
 
-### 8.3 碎片率
+当 KV 空间限制了并发，分页节省的槽位可以让更多请求进入执行批。比较部署时，固定模型、显存预算、输入和输出长度，分别记录能同时接纳的请求数与每秒输出 token。论文中的性能数字对应当时的模型、请求分布与对照实现。[PagedAttention 原论文](https://arxiv.org/abs/2309.06180)
 
-```
-传统方案:
-- 内部碎片: 50-70%
-- 外部碎片: 10-20%
-- 总碎片: 60-80%
-
-PagedAttention:
-- 内部碎片: < 4% (最后一个块)
-- 外部碎片: 0% (固定大小块)
-- 总碎片: < 4%
-```
-
----
-
-## 9. 本章小结
-
-### 核心创新
-
-1. **分块存储**：将 KV Cache 分成固定大小的 Block
-2. **非连续分配**：Block 可以分散在显存任意位置
-3. **按需分配**：生成新 token 时才分配新 Block
-4. **块表映射**：通过 Block Table 管理逻辑到物理的映射
-
-### 关键数据结构
-
-| 结构 | 作用 |
-|------|------|
-| Block | KV Cache 的基本存储单元 |
-| Block Table | 逻辑块 → 物理块映射 |
-| Slot Mapping | Token 位置 → 缓存槽位 |
-| BlockPool | 管理所有空闲块 |
-
-### 优势总结
-
-- **显存效率**：从 20-40% 提升到 96%+
-- **减少碎片**：从 60-80% 降到 4% 以下
-- **支持共享**：多请求可共享相同前缀的 Block
-- **按需增长**：不需要预分配最大长度
-
-### 代码位置
+## 分页相关代码入口
 
 | 功能 | 文件 |
 |------|------|
 | Python 接口 | `vllm/v1/attention/ops/paged_attn.py` |
-| CUDA 内核 | `csrc/attention/paged_attention_v2.cu` |
+| 后端选择入口 | `vllm/v1/attention/selector.py` |
 | 块管理 | `vllm/v1/core/block_pool.py` |
 | 块表 | `vllm/v1/worker/block_table.py` |
-
----
 
 ## 思考题
 
@@ -624,6 +572,5 @@ PagedAttention:
 
 ## 下一步
 
-了解了 PagedAttention 的原理后，让我们来看看 KV Cache Manager 是如何管理这些 Block 的：
 
-👉 [下一章：KV Cache 管理器](02-kv-cache-manager.md)
+[下一章：KV Cache 管理器](02-kv-cache-manager.md)

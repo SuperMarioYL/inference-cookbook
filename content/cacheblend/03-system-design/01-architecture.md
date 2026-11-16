@@ -3,7 +3,7 @@ title: "整体架构"
 weight: 1
 ---
 
-本文档介绍 CacheBlend 系统的整体架构设计，包括核心组件、与 vLLM 的集成方式以及数据流与控制流的详细说明。
+一条新提示到达时，系统先确定哪些文档已有 KV，再安排逐层读取。模型一边消费本层缓存，一边重算受新上下文影响较大的位置。
 
 ---
 
@@ -77,31 +77,27 @@ graph TB
 
 ## 3.1.3 数据流与控制流
 
-```mermaid
-sequenceDiagram
-    participant U as 用户
-    participant R as 检索器
-    participant LC as Loading Controller
-    participant KS as KV Cache Store
-    participant F as Fusor
-    participant LLM as LLM Engine
-
-    U->>R: 1. 提交查询
-    R->>LC: 2. 返回相关文本块列表
-    LC->>KS: 3. 查询 KV Cache 是否存在
-    KS->>LC: 4. 返回 KV Cache 位置信息
-    LC->>LC: 5. 计算理想重计算比例
-    LC->>F: 6. 发送重计算比例
-    LC->>KS: 7. 开始加载 KV Cache 到 GPU
-
-    loop 每一层
-        KS->>F: 8. 加载第 i 层 KV
-        F->>F: 9. 执行选择性重计算
-    end
-
-    F->>LLM: 10. 提供融合的 KV Cache
-    LLM->>U: 11. 生成并返回响应
-```
+{{< trace >}}
+title: "检索到的两份文档如何进入模型"
+actors: ["检索器", "控制器", "缓存存储", "Fusor", "模型"]
+steps:
+  - from: 0
+    to: 1
+    label: "返回文档"
+    detail: "检索器按本次问题返回 M 与 R，控制器保留它们在提示中的顺序。"
+  - from: 1
+    to: 2
+    label: "查询缓存"
+    detail: "控制器查询哪份文档的 KV 可用，并安排逐层读取。"
+  - from: 2
+    to: 3
+    label: "加载当前层"
+    detail: "命中的数据先送给 Fusor，未命中的文档部分仍需计算。"
+  - from: 3
+    to: 4
+    label: "拼出本层 KV"
+    detail: "Fusor 结合复用与重算的位置，让模型继续这一层的注意力。"
+{{< /trace >}}
 
 ---
 

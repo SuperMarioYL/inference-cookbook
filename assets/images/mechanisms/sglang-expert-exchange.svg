@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 472 245" role="img" aria-labelledby="sglang-expert-exchange-title">
+  <title id="sglang-expert-exchange-title">两个 token 到对方的专家计算</title>
+  <desc>两张卡各持有一个专家，图示单专家选路以及返回 token 原位置的过程。</desc>
+  <text x="16" y="29" class="diagram-title" text-anchor="start">两个 token 到对方的专家计算</text>
+  <text x="100" y="68" class="label" text-anchor="middle">GPU 0 · 专家 E0</text>
+  <text x="364" y="68" class="label" text-anchor="middle">GPU 1 · 专家 E1</text>
+  <path d="M160 104 L305 104" class="edge"/>
+  <path d="M160 155 L305 155" class="edge"/>
+  <g data-frame="0">
+    <title>原始输入</title>
+    <desc>GPU 0 收到 token a，GPU 1 收到 token b。示例用 top-1 路由。</desc>
+    <rect x="32" y="84" width="134" height="40" rx="5" class="stored"/><text x="99.0" y="109.0" class="label" text-anchor="middle">a</text>
+    <rect x="304" y="84" width="134" height="40" rx="5" class="stored"/><text x="371.0" y="109.0" class="label" text-anchor="middle">b</text>
+    <text x="99" y="166" class="label" text-anchor="middle">入口</text>
+    <text x="371" y="166" class="label" text-anchor="middle">入口</text>
+    <text x="235" y="215" class="number" text-anchor="middle">token 各有原始位置</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>选定专家</title>
+    <desc>门控为 a 选 E1、为 b 选 E0，两个 token 都要跨卡。</desc>
+    <rect x="32" y="84" width="134" height="40" rx="5" class="stored"/><text x="99.0" y="109.0" class="label" text-anchor="middle">a → E1</text>
+    <rect x="304" y="84" width="134" height="40" rx="5" class="stored"/><text x="371.0" y="109.0" class="label" text-anchor="middle">b → E0</text>
+    <text x="99" y="166" class="label" text-anchor="middle">等待分发</text>
+    <text x="371" y="166" class="label" text-anchor="middle">等待分发</text>
+    <text x="235" y="215" class="number" text-anchor="middle">门控计算目的 rank</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>交换输入</title>
+    <desc>all-to-all 把 b 送到 GPU 0 的 E0、把 a 送到 GPU 1 的 E1。</desc>
+    <rect x="32" y="84" width="134" height="40" rx="5" class="fresh"/><text x="99.0" y="109.0" class="label" text-anchor="middle">b</text>
+    <rect x="304" y="84" width="134" height="40" rx="5" class="fresh"/><text x="371.0" y="109.0" class="label" text-anchor="middle">a</text>
+    <text x="99" y="166" class="label" text-anchor="middle">E0 输入</text>
+    <text x="371" y="166" class="label" text-anchor="middle">E1 输入</text>
+    <text x="235" y="215" class="number" text-anchor="middle">dispatch：输入换卡</text>
+    <circle cx="305" cy="104" r="4" class="packet" data-dx="-118" data-dy="0"/>
+    <circle cx="163" cy="155" r="4" class="packet" data-dx="118" data-dy="0"/>
+  </g>
+  <g data-frame="3" display="none">
+    <title>专家计算</title>
+    <desc>每张卡只在本地参数上运行专家，产生 E0(b) 与 E1(a)。</desc>
+    <rect x="32" y="84" width="134" height="40" rx="5" class="stored"/><text x="99.0" y="109.0" class="label" text-anchor="middle">E0(b)</text>
+    <rect x="304" y="84" width="134" height="40" rx="5" class="stored"/><text x="371.0" y="109.0" class="label" text-anchor="middle">E1(a)</text>
+    <text x="99" y="166" class="label" text-anchor="middle">专家输出</text>
+    <text x="371" y="166" class="label" text-anchor="middle">专家输出</text>
+    <text x="235" y="215" class="number" text-anchor="middle">专家输出暂在目标卡</text>
+  </g>
+  <g data-frame="4" display="none">
+    <title>结果回到原位</title>
+    <desc>逆向交换将 E1(a) 发还 a 的原始位置，将 E0(b) 发还 b 的原始位置。</desc>
+    <rect x="32" y="84" width="134" height="40" rx="5" class="fresh"/><text x="99.0" y="109.0" class="label" text-anchor="middle">E1(a)</text>
+    <rect x="304" y="84" width="134" height="40" rx="5" class="fresh"/><text x="371.0" y="109.0" class="label" text-anchor="middle">E0(b)</text>
+    <text x="99" y="166" class="label" text-anchor="middle">位置 a</text>
+    <text x="371" y="166" class="label" text-anchor="middle">位置 b</text>
+    <text x="235" y="215" class="number" text-anchor="middle">combine：写回原始 token</text>
+    <circle cx="305" cy="104" r="4" class="packet" data-dx="-118" data-dy="0"/>
+    <circle cx="163" cy="155" r="4" class="packet" data-dx="118" data-dy="0"/>
+  </g>
+</svg>

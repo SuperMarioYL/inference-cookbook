@@ -3,8 +3,11 @@ title: "执行器与 Worker"
 weight: 2
 ---
 
+## 从 executor 找到实际载入的 worker
 
-在上一章中，我们了解了 vLLM 的入口点和请求处理流程。本章我们将深入 Executor 和 Worker 层，了解模型是如何在 GPU 上执行的。
+Executor 选择单进程、多进程或 Ray 路径，CUDA worker 再依 vllm_config.use_v2_model_runner 选择模型执行器。排查跨 rank 等待，应分别对照执行器的派发和 worker 的设备状态。 [GPU worker 的实际选择](https://github.com/vllm-project/vllm/blob/v0.33.0/vllm/v1/worker/gpu_worker.py)
+
+调度器确定本轮要计算的 token 后，executor 将工作交给对应的 worker。线程、进程和设备上的执行边界可以沿这次调用逐层观察。
 
 ---
 
@@ -111,8 +114,8 @@ def get_class(vllm_config: VllmConfig) -> type["Executor"]:
     distributed_executor_backend = vllm_config.parallel_config.distributed_executor_backend
 
     if distributed_executor_backend == "ray":
-        from vllm.v1.executor.ray_executor import RayDistributedExecutor
-        return RayDistributedExecutor
+        from vllm.v1.executor.ray_executor_v2 import RayExecutorV2
+        return RayExecutorV2
 
     elif distributed_executor_backend == "mp":
         from vllm.v1.executor.multiproc_executor import MultiprocExecutor
@@ -138,7 +141,7 @@ graph TD
 
     Executor --> Uni[UniProcExecutor<br/>单进程单 GPU]
     Executor --> MP[MultiprocExecutor<br/>多进程多 GPU]
-    Executor --> Ray[RayDistributedExecutor<br/>Ray 分布式]
+    Executor --> Ray[RayExecutorV2<br/>Ray 分布式]
 
     Uni -.-> Single[单 GPU 场景]
     MP -.-> Multi[单机多卡场景]
@@ -208,12 +211,12 @@ class MultiprocExecutor(Executor):
         return results
 ```
 
-### 3.4 RayDistributedExecutor - Ray 分布式
+### 3.4 RayExecutorV2 - Ray 分布式
 
 ```python
-# vllm/v1/executor/ray_executor.py
+# vllm/v1/executor/ray_executor_v2.py
 
-class RayDistributedExecutor(Executor):
+class RayExecutorV2(MultiprocExecutor):
     """Ray 分布式 Executor，用于多机场景"""
 
     uses_ray = True
@@ -357,30 +360,27 @@ class Worker(WorkerBase):
 
 ### 4.3 Worker 初始化流程
 
-```mermaid
-sequenceDiagram
-    participant Exec as Executor
-    participant Worker as Worker
-    participant Device as CUDA Device
-    participant Model as ModelRunner
-
-    Exec->>Worker: 创建 Worker
-    Worker->>Worker: __init__()
-
-    Exec->>Worker: init_device()
-    Worker->>Device: torch.cuda.set_device()
-    Worker->>Device: init_distributed_environment()
-    Worker->>Device: ensure_model_parallel_initialized()
-    Note over Device: NCCL 初始化完成
-
-    Exec->>Worker: load_model()
-    Worker->>Model: 创建 GPUModelRunner
-    Model->>Model: load_model()
-    Note over Model: 模型权重加载到 GPU
-
-    Exec->>Worker: initialize_cache()
-    Worker->>Worker: 分配 KV Cache 内存
-```
+{{< trace >}}
+title: 一个 CUDA worker 的启动次序
+actors: ["执行器", "Worker", "设备"]
+steps:
+  - from: 0
+    to: 1
+    label: "创建 rank 0"
+    detail: "执行器把本进程的 rank 与模型配置交给 worker。"
+  - from: 1
+    to: 2
+    label: "选择设备"
+    detail: "worker 绑定本地设备并参与配置要求的通信组初始化。"
+  - from: 1
+    to: 1
+    label: "创建 runner"
+    detail: "worker 按配置选择模型执行器，随后加载权重。"
+  - from: 1
+    to: 2
+    label: "准备运行"
+    detail: "权重、缓存和运行缓冲准备好后，执行器才可以提交第一个批次。"
+{{< /trace >}}
 
 ---
 
@@ -677,7 +677,7 @@ def wake_up(self, tags: list[str] | None = None) -> None:
 | Executor 基类 | `vllm/v1/executor/abstract.py` | `Executor` |
 | 单进程 Executor | `vllm/v1/executor/uniproc_executor.py` | `UniProcExecutor` |
 | 多进程 Executor | `vllm/v1/executor/multiproc_executor.py` | `MultiprocExecutor` |
-| Ray Executor | `vllm/v1/executor/ray_executor.py` | `RayDistributedExecutor` |
+| Ray Executor | `vllm/v1/executor/ray_executor_v2.py` | `RayExecutorV2` |
 | Worker 基类 | `vllm/v1/worker/worker_base.py` | `WorkerBase` |
 | GPU Worker | `vllm/v1/worker/gpu_worker.py` | `Worker` |
 | GPU ModelRunner | `vllm/v1/worker/gpu_model_runner.py` | `GPUModelRunner` |
@@ -685,37 +685,8 @@ def wake_up(self, tags: list[str] | None = None) -> None:
 
 ---
 
-## 10. 小结
-
-本章我们深入了解了 Executor 和 Worker 层：
-
-1. **Executor 类型**：
-   - `UniProcExecutor`：单进程单 GPU
-   - `MultiprocExecutor`：单机多卡
-   - `RayDistributedExecutor`：多机分布式
-
-2. **Worker 职责**：
-   - 设备初始化
-   - 模型加载
-   - 模型执行
-   - KV Cache 管理
-
-3. **ModelRunner**：
-   - 输入准备
-   - 前向传播
-   - logits 计算
-
-4. **分布式执行**：
-   - 张量并行：切分权重矩阵
-   - 流水线并行：切分模型层
-   - collective_rpc：跨 Worker 通信
-
-在下一章中，我们将深入模型前向传播的具体实现。
-
----
-
 ## 导航
 
 - 上一篇：[入口点分析](01-entry-points.md)
 - 下一篇：[模型前向传播](03-model-forward.md)
-- [返回目录](../README.md)
+- [返回目录](/vllm/00-overview/overview/)

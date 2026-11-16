@@ -18,78 +18,7 @@ weight: 1
 
 ## 1. 安装与环境准备
 
-### 1.1 硬件要求
-
-| 组件 | 最低要求 | 推荐配置 |
-|------|---------|---------|
-| GPU | NVIDIA Ampere (A100) | NVIDIA Hopper (H100/H200) |
-| CUDA | 12.0+ | 12.3+ (Hopper/FA3) |
-| 内存 | 32GB RAM | 96GB+ RAM（编译需要） |
-| PyTorch | 2.2+ | 2.4+（torch.compile 支持） |
-
-Flash Attention 同时支持 AMD ROCm 平台（MI200x/MI300x）。
-
-### 1.2 安装方式
-
-**方式一：PyPI 安装（推荐）**
-
-```bash
-pip install flash-attn --no-build-isolation
-```
-
-**方式二：从源码编译**
-
-```bash
-git clone https://github.com/Dao-AILab/flash-attention.git
-cd flash-attention
-python setup.py install
-```
-
-如果编译时内存不足，限制并行任务数：
-
-```bash
-MAX_JOBS=4 pip install flash-attn --no-build-isolation
-```
-
-**方式三：安装 Flash Attention 3（Hopper 专用）**
-
-```bash
-cd flash-attention/hopper
-python setup.py install
-```
-
-### 1.3 环境变量
-
-```bash
-# 指定目标 GPU 架构（减少编译时间）
-FLASH_ATTN_CUDA_ARCHS="80;90" pip install flash-attn --no-build-isolation
-
-# 跳过 CUDA 编译（仅使用 Python 层）
-FLASH_ATTENTION_SKIP_CUDA_BUILD=TRUE pip install flash-attn
-
-# 禁用特定功能以减小二进制体积
-FLASH_ATTENTION_DISABLE_FP8=TRUE
-FLASH_ATTENTION_DISABLE_PACKGQA=TRUE
-FLASH_ATTENTION_DISABLE_SPLIT=TRUE
-```
-
-### 1.4 验证安装
-
-```python
-import flash_attn
-print(flash_attn.__version__)
-
-import torch
-from flash_attn import flash_attn_func
-
-q = torch.randn(1, 128, 8, 64, device='cuda', dtype=torch.float16)
-k = torch.randn(1, 128, 8, 64, device='cuda', dtype=torch.float16)
-v = torch.randn(1, 128, 8, 64, device='cuda', dtype=torch.float16)
-out = flash_attn_func(q, k, v)
-print(f"输出形状: {out.shape}")  # torch.Size([1, 128, 8, 64])
-```
-
----
+本篇示例使用 `from flash_attn import ...`，对应 FA2 稳定包 `flash-attn==2.8.3.post2`。先按[分代安装说明](/flashattention/00-overview/03-quick-start/)完成一次小规模数值验证，再增加头数或改变序列长度。
 
 ## 2. 核心 API 概览
 
@@ -349,9 +278,11 @@ out = flash_attn_func(q, k, v, causal=True)
 
 ### 6.3 PackGQA 控制
 
-对于推理场景，可以手动控制 PackGQA 优化：
+以下单独演示 FA3 的 Hopper 入口。FA2 的稠密 `flash_attn_func` 自动处理 GQA 头数关系，签名中没有 `pack_gqa`。
 
 ```python
+from flash_attn_3.flash_attn_interface import flash_attn_func
+
 # 自动决策（默认）
 out = flash_attn_func(q, k, v, causal=True)
 
@@ -359,7 +290,7 @@ out = flash_attn_func(q, k, v, causal=True)
 out = flash_attn_func(q, k, v, causal=True, pack_gqa=True)
 ```
 
-> 详见 [GQA 与 MQA 实现](../06-advanced-features/03-gqa-mqa.md)
+> 详见 [GQA 与 MQA 实现](/flashattention/06-advanced-features/03-gqa-mqa/)
 
 ---
 
@@ -367,21 +298,11 @@ out = flash_attn_func(q, k, v, causal=True, pack_gqa=True)
 
 ### 7.1 为什么需要变长 API
 
-标准 API 要求同一 batch 内所有序列等长。当序列长度差异大时，padding 浪费计算。变长 API 将所有序列拼接为一个连续张量，彻底消除 padding：
+稠密接口用 [B,S,H,d] 表示一批输入。长度不同时，变长接口用连续 token 行与前缀和描述各条序列。
 
-```mermaid
-graph LR
-    subgraph padded["Padded（标准 API）"]
-        P1["序列1 (len=5) + PAD PAD PAD"]
-        P2["序列2 (len=3) + PAD PAD PAD PAD PAD"]
-        P3["序列3 (len=8)"]
-    end
+例中三条序列长度为 3、1、2；合并后用四个偏移定位各条序列的起止位置。
 
-    subgraph unpadded["Unpadded（变长 API）"]
-        U1["序列1(5) | 序列2(3) | 序列3(8)"]
-        U2["cu_seqlens = [0, 5, 8, 16]"]
-    end
-```
+{{< mechanism "fa-unpad-pack" >}}
 
 ### 7.2 基础用法
 
@@ -494,23 +415,23 @@ out = flash_attn_func(q, k, v, softcap=50.0)
 
 Softcap 在 masking 之前应用：$S_{capped} = \text{softcap} \cdot \tanh(S / \text{softcap})$。
 
-### 8.6 返回注意力概率（调试用）
+### 8.6 查看 FA2 的 dropout 测试输出
+
+FA2 的测试接口会额外返回每行的 softmax log-sum-exp。要拿到包含 dropout 信息的 `S_dmask`，调用还需启用 dropout。
 
 ```python
 out, softmax_lse, S_dmask = flash_attn_func(
-    q, k, v,
-    return_attn_probs=True
+    q, k, v, dropout_p=0.1, return_attn_probs=True
 )
-# softmax_lse: (batch, num_heads, seqlen_q) - log-sum-exp 值
-# S_dmask: (batch, num_heads, seqlen_q, seqlen_k) - dropout mask
+print(softmax_lse.shape, S_dmask.shape)
 ```
 
-> **注意**：`return_attn_probs=True` 仅用于调试和测试，不应在生产环境使用，因为它会显著增加内存消耗。
+`S_dmask` 的符号编码保留或丢弃的位置，数值可能带有内核使用的缩放。需要逐元素核对归一化概率时，可以用一组小 Q、K 显式计算参考 softmax。[FA2 接口实现](https://github.com/Dao-AILab/flash-attention/blob/v2.8.3.post2/flash_attn/flash_attn_interface.py)
 
 ---
 
 ## 导航
 
-- 上一篇：[FP8 支持](../06-advanced-features/04-fp8-support.md)
-- 下一篇：[训练集成](02-training-integration.md)
-- [返回目录](../README.md)
+- 上一篇：[FP8 支持](/flashattention/06-advanced-features/04-fp8-support/)
+- 下一篇：[训练集成](/flashattention/07-usage-tutorial/02-training-integration/)
+- [返回目录](/flashattention/00-overview/overview/)

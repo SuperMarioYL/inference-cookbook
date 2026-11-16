@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 472 265" role="img" aria-labelledby="fa-pack-heads-title">
+  <title id="fa-pack-heads-title">单 token decode 的 PackGQA</title>
+  <desc>四个 Q 头共享一个 KV 头，行重排可在同一个查询 tile 中容纳同组查询。</desc>
+<defs><marker id="fa-pack-heads-end" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+<text x="14" y="28" class="diagram-title" text-anchor="start">单 token decode 的 PackGQA</text>
+
+  <g data-frame="0">
+    <title>分开计算</title>
+    <desc>每个头只有一个查询位置，若各占独立 tile，剩余行没有这条请求的 Q。</desc>
+    <text x="16" y="65" class="label" text-anchor="start">查询头</text>
+    <text x="180" y="65" class="label" text-anchor="start">执行行</text>
+    <text x="358" y="65" class="label" text-anchor="start">共享 KV</text>
+    <rect x="15" y="74" width="64" height="30" rx="4" class="idle"/><text x="47" y="94" class="label" text-anchor="middle">Q0</text>
+    <rect x="154" y="74" width="146" height="30" rx="4" class="idle"/><text x="227" y="94" class="label" text-anchor="middle">tile 0 · 行 0</text>
+    <path d="M84,89 L146,89" class="edge" marker-end="url(#fa-pack-heads-end)"/>
+    <rect x="15" y="110" width="64" height="30" rx="4" class="idle"/><text x="47" y="130" class="label" text-anchor="middle">Q1</text>
+    <rect x="154" y="110" width="146" height="30" rx="4" class="idle"/><text x="227" y="130" class="label" text-anchor="middle">tile 1 · 行 0</text>
+    <path d="M84,125 L146,125" class="edge" marker-end="url(#fa-pack-heads-end)"/>
+    <rect x="15" y="146" width="64" height="30" rx="4" class="idle"/><text x="47" y="166" class="label" text-anchor="middle">Q2</text>
+    <rect x="154" y="146" width="146" height="30" rx="4" class="idle"/><text x="227" y="166" class="label" text-anchor="middle">tile 2 · 行 0</text>
+    <path d="M84,161 L146,161" class="edge" marker-end="url(#fa-pack-heads-end)"/>
+    <rect x="15" y="182" width="64" height="30" rx="4" class="idle"/><text x="47" y="202" class="label" text-anchor="middle">Q3</text>
+    <rect x="154" y="182" width="146" height="30" rx="4" class="idle"/><text x="227" y="202" class="label" text-anchor="middle">tile 3 · 行 0</text>
+    <path d="M84,197 L146,197" class="edge" marker-end="url(#fa-pack-heads-end)"/>
+    <rect x="358" y="128" width="84" height="36" rx="4" class="stored"/><text x="400" y="151" class="label" text-anchor="middle">KV0</text>
+    <path d="M301,147 L350,147" class="edge" marker-end="url(#fa-pack-heads-end)"/>
+    <text x="16" y="250" class="note" text-anchor="start">每个 Q 头各占一项工作</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>把头装入行</title>
+    <desc>把同一 KV 组的四个查询重排到同一 tile，供同一工作单元处理。</desc>
+    <text x="16" y="65" class="label" text-anchor="start">查询头</text>
+    <text x="180" y="65" class="label" text-anchor="start">执行行</text>
+    <text x="358" y="65" class="label" text-anchor="start">共享 KV</text>
+    <rect x="15" y="74" width="64" height="30" rx="4" class="fresh"/><text x="47" y="94" class="label" text-anchor="middle">Q0</text>
+    <rect x="172" y="74" width="116" height="30" rx="4" class="fresh"/><text x="230" y="94" class="label" text-anchor="middle">tile 0 · 行 0</text>
+    <path d="M84,89 L164,89" class="edge" marker-end="url(#fa-pack-heads-end)"/>
+    <rect x="15" y="110" width="64" height="30" rx="4" class="fresh"/><text x="47" y="130" class="label" text-anchor="middle">Q1</text>
+    <rect x="172" y="110" width="116" height="30" rx="4" class="fresh"/><text x="230" y="130" class="label" text-anchor="middle">tile 0 · 行 1</text>
+    <path d="M84,125 L164,125" class="edge" marker-end="url(#fa-pack-heads-end)"/>
+    <rect x="15" y="146" width="64" height="30" rx="4" class="fresh"/><text x="47" y="166" class="label" text-anchor="middle">Q2</text>
+    <rect x="172" y="146" width="116" height="30" rx="4" class="fresh"/><text x="230" y="166" class="label" text-anchor="middle">tile 0 · 行 2</text>
+    <path d="M84,161 L164,161" class="edge" marker-end="url(#fa-pack-heads-end)"/>
+    <rect x="15" y="182" width="64" height="30" rx="4" class="fresh"/><text x="47" y="202" class="label" text-anchor="middle">Q3</text>
+    <rect x="172" y="182" width="116" height="30" rx="4" class="fresh"/><text x="230" y="202" class="label" text-anchor="middle">tile 0 · 行 3</text>
+    <path d="M84,197 L164,197" class="edge" marker-end="url(#fa-pack-heads-end)"/>
+    <rect x="358" y="128" width="84" height="36" rx="4" class="stored"/><text x="400" y="151" class="label" text-anchor="middle">KV0</text>
+    <path d="M301,147 L350,147" class="edge" marker-end="url(#fa-pack-heads-end)"/>
+    <text x="16" y="250" class="note" text-anchor="start">把四个查询头排到同一 tile 的四行</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>分开写出</title>
+    <desc>结果仍分别对应 Q0 到 Q3；KV 头保持一份，共享不会把输出合并。</desc>
+    <text x="16" y="65" class="label" text-anchor="start">查询头</text>
+    <text x="180" y="65" class="label" text-anchor="start">执行行</text>
+    <text x="358" y="65" class="label" text-anchor="start">共享 KV</text>
+    <rect x="15" y="74" width="64" height="30" rx="4" class="fresh"/><text x="47" y="94" class="label" text-anchor="middle">Q0</text>
+    <rect x="172" y="74" width="116" height="30" rx="4" class="stored"/><text x="230" y="94" class="label" text-anchor="middle">tile 0 · 行 0</text>
+    <path d="M84,89 L164,89" class="edge" marker-end="url(#fa-pack-heads-end)"/>
+    <rect x="15" y="110" width="64" height="30" rx="4" class="fresh"/><text x="47" y="130" class="label" text-anchor="middle">Q1</text>
+    <rect x="172" y="110" width="116" height="30" rx="4" class="stored"/><text x="230" y="130" class="label" text-anchor="middle">tile 0 · 行 1</text>
+    <path d="M84,125 L164,125" class="edge" marker-end="url(#fa-pack-heads-end)"/>
+    <rect x="15" y="146" width="64" height="30" rx="4" class="fresh"/><text x="47" y="166" class="label" text-anchor="middle">Q2</text>
+    <rect x="172" y="146" width="116" height="30" rx="4" class="stored"/><text x="230" y="166" class="label" text-anchor="middle">tile 0 · 行 2</text>
+    <path d="M84,161 L164,161" class="edge" marker-end="url(#fa-pack-heads-end)"/>
+    <rect x="15" y="182" width="64" height="30" rx="4" class="fresh"/><text x="47" y="202" class="label" text-anchor="middle">Q3</text>
+    <rect x="172" y="182" width="116" height="30" rx="4" class="stored"/><text x="230" y="202" class="label" text-anchor="middle">tile 0 · 行 3</text>
+    <path d="M84,197 L164,197" class="edge" marker-end="url(#fa-pack-heads-end)"/>
+    <rect x="358" y="128" width="84" height="36" rx="4" class="stored"/><text x="400" y="151" class="label" text-anchor="middle">KV0</text>
+    <path d="M301,147 L350,147" class="edge" marker-end="url(#fa-pack-heads-end)"/>
+    <text x="16" y="250" class="note" text-anchor="start">仍为四个 Q 头分别产生四个输出</text>
+  </g>
+</svg>

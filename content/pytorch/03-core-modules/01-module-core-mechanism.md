@@ -5,7 +5,7 @@ weight: 1
 
 ## 1. 概述
 
-`torch.nn.Module` 是 PyTorch 神经网络的基石类，定义在 `torch/nn/modules/module.py` 中。本文将从源码层面深入分析 Module 的核心机制：初始化体系、属性拦截与自动注册、Parameter 类的设计、Buffer 系统、递归遍历算法、以及模式切换与设备迁移。
+给模块赋值 `self.proj = nn.Linear(4, 2)` 后，线性层会出现在 `named_modules()` 中，其权重也会出现在 `parameters()` 中。注册行为来自 `torch/nn/modules/module.py` 对属性赋值的处理。
 
 源码文件定位：
 - Module 主体：`torch/nn/modules/module.py`
@@ -531,4 +531,4 @@ Module 的核心机制可以概括为以下几个设计要点：
 4. **Parameter 作为 Tensor 子类**：利用继承关系，Parameter 可以参与所有 Tensor 运算，同时通过类型标识被 `__setattr__` 识别并自动注册
 5. **`_apply` 作为通用转换框架**：`to()`、`cpu()`、`cuda()`、`float()`、`half()` 等方法底层都委托给 `_apply`，实现了统一的递归转换机制
 
-这些设计共同构成了一个简洁而强大的抽象层，让开发者只需关注网络结构和前向传播逻辑，而参数管理、序列化、设备迁移等工程问题由 Module 框架自动处理。
+`named_parameters()`、`state_dict()` 和 `to(device)` 都沿着已注册的子模块工作。普通 Python 列表中未注册的子模块不会自动出现在这些遍历中。

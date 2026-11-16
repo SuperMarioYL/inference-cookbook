@@ -6,4 +6,4 @@ description: >
   Online Softmax、分块策略与前向/反向传递算法
 ---
 
-本部分深入解析 Flash Attention 的核心算法设计，包括 Online Softmax 演进、Tiling 策略以及前向与反向传递的完整算法流程。
+[两块在线 softmax](/flashattention/02-core-algorithm/01-online-softmax/)给出可手算的中间值；随后沿分块、前向和反向阅读。涉及 `hopper/` 的具体管线与模板对应 FA3，通用分块公式可在不同实现间复用。

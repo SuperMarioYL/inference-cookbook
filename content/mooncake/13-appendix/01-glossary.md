@@ -3,7 +3,7 @@ title: "术语表与缩略词"
 weight: 1
 ---
 
-本文提供 Mooncake 文档中使用的核心术语、技术缩略词的中英对照与详细解释。
+遇到 segment、replica 或 lease 时，先看哪个组件持有它，再查它在何时失效。
 
 ---
 
@@ -19,7 +19,7 @@ weight: 1
 | Prefill-Decode Disaggregation | P/D 分离 | P/D | 将 Prefill 和 Decode 阶段部署在不同的物理节点上执行 |
 | Mooncake Store | - | - | Mooncake 的分布式 KVCache 存储引擎 |
 | Transfer Engine | 传输引擎 | TE | 负责高性能跨节点数据传输的模块 |
-| Conductor | 指挥者 | - | 全局调度器,负责请求分发与资源调度 |
+| Conductor | 指挥者 | - | 开源前缀缓存索引，按事件维护 KV 位置并供路由器查询 |
 
 ### 1.2 系统组件
 

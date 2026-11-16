@@ -1,0 +1,178 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 472 265" role="img" aria-labelledby="fa-causal-tiles-title">
+  <title id="fa-causal-tiles-title">因果遮蔽中的三种 KV 块</title>
+  <desc>长度相同的 6×6 自注意力，打勾表示当前行可以看到该列。</desc>
+<defs><marker id="fa-causal-tiles-end" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+<text x="14" y="28" class="diagram-title" text-anchor="start">因果遮蔽中的三种 KV 块</text>
+
+  <g data-frame="0">
+    <title>完整块</title>
+    <desc>Q2、Q3 都能看到 K0、K1，块内不需要额外的因果逐项判断。</desc>
+    <text x="17" y="64" class="label" text-anchor="start">Q 行</text>
+    <text x="147" y="58" class="label" text-anchor="start">K 列</text>
+    <text x="355" y="97" class="subhead" text-anchor="start">左侧块</text>
+    <text x="94" y="81" class="note" text-anchor="middle">0</text>
+    <text x="133" y="81" class="note" text-anchor="middle">1</text>
+    <text x="172" y="81" class="note" text-anchor="middle">2</text>
+    <text x="211" y="81" class="note" text-anchor="middle">3</text>
+    <text x="250" y="81" class="note" text-anchor="middle">4</text>
+    <text x="289" y="81" class="note" text-anchor="middle">5</text>
+    <text x="43" y="105" class="note" text-anchor="middle">0</text>
+    <rect x="76" y="87" width="35" height="21" rx="4" class="idle"/><text x="93.5" y="102.5" class="label" text-anchor="middle">·</text>
+    <rect x="115" y="87" width="35" height="21" rx="4" class="idle"/>
+    <rect x="154" y="87" width="35" height="21" rx="4" class="idle"/>
+    <rect x="193" y="87" width="35" height="21" rx="4" class="idle"/>
+    <rect x="232" y="87" width="35" height="21" rx="4" class="idle"/>
+    <rect x="271" y="87" width="35" height="21" rx="4" class="idle"/>
+    <text x="43" y="128" class="note" text-anchor="middle">1</text>
+    <rect x="76" y="110" width="35" height="21" rx="4" class="idle"/><text x="93.5" y="125.5" class="label" text-anchor="middle">·</text>
+    <rect x="115" y="110" width="35" height="21" rx="4" class="idle"/><text x="132.5" y="125.5" class="label" text-anchor="middle">·</text>
+    <rect x="154" y="110" width="35" height="21" rx="4" class="idle"/>
+    <rect x="193" y="110" width="35" height="21" rx="4" class="idle"/>
+    <rect x="232" y="110" width="35" height="21" rx="4" class="idle"/>
+    <rect x="271" y="110" width="35" height="21" rx="4" class="idle"/>
+    <text x="43" y="151" class="note" text-anchor="middle">2</text>
+    <rect x="76" y="133" width="35" height="21" rx="4" class="fresh"/><text x="93.5" y="148.5" class="label" text-anchor="middle">✓</text>
+    <rect x="115" y="133" width="35" height="21" rx="4" class="fresh"/><text x="132.5" y="148.5" class="label" text-anchor="middle">✓</text>
+    <rect x="154" y="133" width="35" height="21" rx="4" class="idle"/><text x="171.5" y="148.5" class="label" text-anchor="middle">·</text>
+    <rect x="193" y="133" width="35" height="21" rx="4" class="idle"/>
+    <rect x="232" y="133" width="35" height="21" rx="4" class="idle"/>
+    <rect x="271" y="133" width="35" height="21" rx="4" class="idle"/>
+    <text x="43" y="174" class="note" text-anchor="middle">3</text>
+    <rect x="76" y="156" width="35" height="21" rx="4" class="fresh"/><text x="93.5" y="171.5" class="label" text-anchor="middle">✓</text>
+    <rect x="115" y="156" width="35" height="21" rx="4" class="fresh"/><text x="132.5" y="171.5" class="label" text-anchor="middle">✓</text>
+    <rect x="154" y="156" width="35" height="21" rx="4" class="idle"/><text x="171.5" y="171.5" class="label" text-anchor="middle">·</text>
+    <rect x="193" y="156" width="35" height="21" rx="4" class="idle"/><text x="210.5" y="171.5" class="label" text-anchor="middle">·</text>
+    <rect x="232" y="156" width="35" height="21" rx="4" class="idle"/>
+    <rect x="271" y="156" width="35" height="21" rx="4" class="idle"/>
+    <text x="43" y="197" class="note" text-anchor="middle">4</text>
+    <rect x="76" y="179" width="35" height="21" rx="4" class="idle"/><text x="93.5" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="115" y="179" width="35" height="21" rx="4" class="idle"/><text x="132.5" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="154" y="179" width="35" height="21" rx="4" class="idle"/><text x="171.5" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="193" y="179" width="35" height="21" rx="4" class="idle"/><text x="210.5" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="232" y="179" width="35" height="21" rx="4" class="idle"/><text x="249.5" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="271" y="179" width="35" height="21" rx="4" class="idle"/>
+    <text x="43" y="220" class="note" text-anchor="middle">5</text>
+    <rect x="76" y="202" width="35" height="21" rx="4" class="idle"/><text x="93.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <rect x="115" y="202" width="35" height="21" rx="4" class="idle"/><text x="132.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <rect x="154" y="202" width="35" height="21" rx="4" class="idle"/><text x="171.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <rect x="193" y="202" width="35" height="21" rx="4" class="idle"/><text x="210.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <rect x="232" y="202" width="35" height="21" rx="4" class="idle"/><text x="249.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <rect x="271" y="202" width="35" height="21" rx="4" class="idle"/><text x="288.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <text x="356" y="128" class="label" text-anchor="start">四格可见</text>
+    <text x="17" y="250" class="note" text-anchor="start">K0、K1 对这两行均可见</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>边界块</title>
+    <desc>同一 2×2 块内同时存在可见和不可见位置，要把 Q2 对 K3 的分数屏蔽。</desc>
+    <text x="17" y="64" class="label" text-anchor="start">Q 行</text>
+    <text x="147" y="58" class="label" text-anchor="start">K 列</text>
+    <text x="355" y="97" class="subhead" text-anchor="start">对角块</text>
+    <text x="94" y="81" class="note" text-anchor="middle">0</text>
+    <text x="133" y="81" class="note" text-anchor="middle">1</text>
+    <text x="172" y="81" class="note" text-anchor="middle">2</text>
+    <text x="211" y="81" class="note" text-anchor="middle">3</text>
+    <text x="250" y="81" class="note" text-anchor="middle">4</text>
+    <text x="289" y="81" class="note" text-anchor="middle">5</text>
+    <text x="43" y="105" class="note" text-anchor="middle">0</text>
+    <rect x="76" y="87" width="35" height="21" rx="4" class="idle"/><text x="93.5" y="102.5" class="label" text-anchor="middle">·</text>
+    <rect x="115" y="87" width="35" height="21" rx="4" class="idle"/>
+    <rect x="154" y="87" width="35" height="21" rx="4" class="idle"/>
+    <rect x="193" y="87" width="35" height="21" rx="4" class="idle"/>
+    <rect x="232" y="87" width="35" height="21" rx="4" class="idle"/>
+    <rect x="271" y="87" width="35" height="21" rx="4" class="idle"/>
+    <text x="43" y="128" class="note" text-anchor="middle">1</text>
+    <rect x="76" y="110" width="35" height="21" rx="4" class="idle"/><text x="93.5" y="125.5" class="label" text-anchor="middle">·</text>
+    <rect x="115" y="110" width="35" height="21" rx="4" class="idle"/><text x="132.5" y="125.5" class="label" text-anchor="middle">·</text>
+    <rect x="154" y="110" width="35" height="21" rx="4" class="idle"/>
+    <rect x="193" y="110" width="35" height="21" rx="4" class="idle"/>
+    <rect x="232" y="110" width="35" height="21" rx="4" class="idle"/>
+    <rect x="271" y="110" width="35" height="21" rx="4" class="idle"/>
+    <text x="43" y="151" class="note" text-anchor="middle">2</text>
+    <rect x="76" y="133" width="35" height="21" rx="4" class="idle"/><text x="93.5" y="148.5" class="label" text-anchor="middle">·</text>
+    <rect x="115" y="133" width="35" height="21" rx="4" class="idle"/><text x="132.5" y="148.5" class="label" text-anchor="middle">·</text>
+    <rect x="154" y="133" width="35" height="21" rx="4" class="fresh"/><text x="171.5" y="148.5" class="label" text-anchor="middle">✓</text>
+    <rect x="193" y="133" width="35" height="21" rx="4" class="fresh"/><text x="210.5" y="148.5" class="label" text-anchor="middle">×</text>
+    <rect x="232" y="133" width="35" height="21" rx="4" class="idle"/>
+    <rect x="271" y="133" width="35" height="21" rx="4" class="idle"/>
+    <text x="43" y="174" class="note" text-anchor="middle">3</text>
+    <rect x="76" y="156" width="35" height="21" rx="4" class="idle"/><text x="93.5" y="171.5" class="label" text-anchor="middle">·</text>
+    <rect x="115" y="156" width="35" height="21" rx="4" class="idle"/><text x="132.5" y="171.5" class="label" text-anchor="middle">·</text>
+    <rect x="154" y="156" width="35" height="21" rx="4" class="fresh"/><text x="171.5" y="171.5" class="label" text-anchor="middle">✓</text>
+    <rect x="193" y="156" width="35" height="21" rx="4" class="fresh"/><text x="210.5" y="171.5" class="label" text-anchor="middle">✓</text>
+    <rect x="232" y="156" width="35" height="21" rx="4" class="idle"/>
+    <rect x="271" y="156" width="35" height="21" rx="4" class="idle"/>
+    <text x="43" y="197" class="note" text-anchor="middle">4</text>
+    <rect x="76" y="179" width="35" height="21" rx="4" class="idle"/><text x="93.5" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="115" y="179" width="35" height="21" rx="4" class="idle"/><text x="132.5" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="154" y="179" width="35" height="21" rx="4" class="idle"/><text x="171.5" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="193" y="179" width="35" height="21" rx="4" class="idle"/><text x="210.5" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="232" y="179" width="35" height="21" rx="4" class="idle"/><text x="249.5" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="271" y="179" width="35" height="21" rx="4" class="idle"/>
+    <text x="43" y="220" class="note" text-anchor="middle">5</text>
+    <rect x="76" y="202" width="35" height="21" rx="4" class="idle"/><text x="93.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <rect x="115" y="202" width="35" height="21" rx="4" class="idle"/><text x="132.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <rect x="154" y="202" width="35" height="21" rx="4" class="idle"/><text x="171.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <rect x="193" y="202" width="35" height="21" rx="4" class="idle"/><text x="210.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <rect x="232" y="202" width="35" height="21" rx="4" class="idle"/><text x="249.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <rect x="271" y="202" width="35" height="21" rx="4" class="idle"/><text x="288.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <text x="356" y="128" class="label" text-anchor="start">三格可见</text>
+    <text x="17" y="250" class="note" text-anchor="start">Q2 不能看到 K3，其余三格可见</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>跳过块</title>
+    <desc>K4、K5 对两行都处在未来，调度范围可以跳过整块。</desc>
+    <text x="17" y="64" class="label" text-anchor="start">Q 行</text>
+    <text x="147" y="58" class="label" text-anchor="start">K 列</text>
+    <text x="355" y="97" class="subhead" text-anchor="start">未来块</text>
+    <text x="94" y="81" class="note" text-anchor="middle">0</text>
+    <text x="133" y="81" class="note" text-anchor="middle">1</text>
+    <text x="172" y="81" class="note" text-anchor="middle">2</text>
+    <text x="211" y="81" class="note" text-anchor="middle">3</text>
+    <text x="250" y="81" class="note" text-anchor="middle">4</text>
+    <text x="289" y="81" class="note" text-anchor="middle">5</text>
+    <text x="43" y="105" class="note" text-anchor="middle">0</text>
+    <rect x="76" y="87" width="35" height="21" rx="4" class="idle"/><text x="93.5" y="102.5" class="label" text-anchor="middle">·</text>
+    <rect x="115" y="87" width="35" height="21" rx="4" class="idle"/>
+    <rect x="154" y="87" width="35" height="21" rx="4" class="idle"/>
+    <rect x="193" y="87" width="35" height="21" rx="4" class="idle"/>
+    <rect x="232" y="87" width="35" height="21" rx="4" class="idle"/>
+    <rect x="271" y="87" width="35" height="21" rx="4" class="idle"/>
+    <text x="43" y="128" class="note" text-anchor="middle">1</text>
+    <rect x="76" y="110" width="35" height="21" rx="4" class="idle"/><text x="93.5" y="125.5" class="label" text-anchor="middle">·</text>
+    <rect x="115" y="110" width="35" height="21" rx="4" class="idle"/><text x="132.5" y="125.5" class="label" text-anchor="middle">·</text>
+    <rect x="154" y="110" width="35" height="21" rx="4" class="idle"/>
+    <rect x="193" y="110" width="35" height="21" rx="4" class="idle"/>
+    <rect x="232" y="110" width="35" height="21" rx="4" class="idle"/>
+    <rect x="271" y="110" width="35" height="21" rx="4" class="idle"/>
+    <text x="43" y="151" class="note" text-anchor="middle">2</text>
+    <rect x="76" y="133" width="35" height="21" rx="4" class="idle"/><text x="93.5" y="148.5" class="label" text-anchor="middle">·</text>
+    <rect x="115" y="133" width="35" height="21" rx="4" class="idle"/><text x="132.5" y="148.5" class="label" text-anchor="middle">·</text>
+    <rect x="154" y="133" width="35" height="21" rx="4" class="idle"/><text x="171.5" y="148.5" class="label" text-anchor="middle">·</text>
+    <rect x="193" y="133" width="35" height="21" rx="4" class="idle"/>
+    <rect x="232" y="133" width="35" height="21" rx="4" class="fresh"/><text x="249.5" y="148.5" class="label" text-anchor="middle">×</text>
+    <rect x="271" y="133" width="35" height="21" rx="4" class="fresh"/><text x="288.5" y="148.5" class="label" text-anchor="middle">×</text>
+    <text x="43" y="174" class="note" text-anchor="middle">3</text>
+    <rect x="76" y="156" width="35" height="21" rx="4" class="idle"/><text x="93.5" y="171.5" class="label" text-anchor="middle">·</text>
+    <rect x="115" y="156" width="35" height="21" rx="4" class="idle"/><text x="132.5" y="171.5" class="label" text-anchor="middle">·</text>
+    <rect x="154" y="156" width="35" height="21" rx="4" class="idle"/><text x="171.5" y="171.5" class="label" text-anchor="middle">·</text>
+    <rect x="193" y="156" width="35" height="21" rx="4" class="idle"/><text x="210.5" y="171.5" class="label" text-anchor="middle">·</text>
+    <rect x="232" y="156" width="35" height="21" rx="4" class="fresh"/><text x="249.5" y="171.5" class="label" text-anchor="middle">×</text>
+    <rect x="271" y="156" width="35" height="21" rx="4" class="fresh"/><text x="288.5" y="171.5" class="label" text-anchor="middle">×</text>
+    <text x="43" y="197" class="note" text-anchor="middle">4</text>
+    <rect x="76" y="179" width="35" height="21" rx="4" class="idle"/><text x="93.5" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="115" y="179" width="35" height="21" rx="4" class="idle"/><text x="132.5" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="154" y="179" width="35" height="21" rx="4" class="idle"/><text x="171.5" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="193" y="179" width="35" height="21" rx="4" class="idle"/><text x="210.5" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="232" y="179" width="35" height="21" rx="4" class="idle"/><text x="249.5" y="194.5" class="label" text-anchor="middle">·</text>
+    <rect x="271" y="179" width="35" height="21" rx="4" class="idle"/>
+    <text x="43" y="220" class="note" text-anchor="middle">5</text>
+    <rect x="76" y="202" width="35" height="21" rx="4" class="idle"/><text x="93.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <rect x="115" y="202" width="35" height="21" rx="4" class="idle"/><text x="132.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <rect x="154" y="202" width="35" height="21" rx="4" class="idle"/><text x="171.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <rect x="193" y="202" width="35" height="21" rx="4" class="idle"/><text x="210.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <rect x="232" y="202" width="35" height="21" rx="4" class="idle"/><text x="249.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <rect x="271" y="202" width="35" height="21" rx="4" class="idle"/><text x="288.5" y="217.5" class="label" text-anchor="middle">·</text>
+    <text x="356" y="128" class="label" text-anchor="start">零格可见</text>
+    <text x="17" y="250" class="note" text-anchor="start">Q2、Q3 都还看不到 K4、K5</text>
+  </g>
+</svg>

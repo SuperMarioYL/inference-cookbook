@@ -1,436 +1,39 @@
 ---
-title: "调度器原理"
+title: "调度器怎样安排一轮 token"
 weight: 4
 ---
 
-
-调度器（Scheduler）是 vLLM 的"大脑"，它决定了**哪些请求可以运行**以及**每个请求能处理多少 token**。一个好的调度策略直接影响系统的吞吐量、延迟和资源利用率。
-
-本章我们将深入了解 vLLM 调度器的工作原理、调度算法和实现细节。
-
----
-
-## 1. Scheduler 在架构中的位置
-
-```mermaid
-graph TD
-    subgraph user_layer["用户层"]
-        User[用户请求]
-    end
-
-    subgraph engine_layer["引擎层"]
-        Engine[EngineCore]
-    end
-
-    subgraph scheduling_layer["调度层"]
-        Scheduler[Scheduler<br/>调度器]
-        Waiting[waiting 队列]
-        Running[running 队列]
-    end
-
-    subgraph memory_layer["内存管理层"]
-        KVM[KVCacheManager]
-    end
-
-    subgraph execution_layer["执行层"]
-        Executor[ModelExecutor]
-    end
-
-    User --> Engine
-    Engine --> Scheduler
-    Scheduler --> Waiting
-    Scheduler --> Running
-    Scheduler -->|allocate/free| KVM
-    Scheduler -->|SchedulerOutput| Executor
-
-    style Scheduler fill:#e1f5fe
-```
-
-**Scheduler 的核心职责：**
-
-1. **请求队列管理**：维护 waiting 和 running 两个队列
-2. **资源分配决策**：决定哪些请求可以获得 GPU 资源
-3. **内存协调**：与 KVCacheManager 协作管理 KV Cache
-4. **抢占处理**：在内存不足时执行抢占策略
-5. **输出构建**：为 ModelExecutor 构建 SchedulerOutput
-
----
-
-## 2. 核心数据结构
-
-### 2.1 请求队列
-
-```python
-# vllm/v1/core/sched/scheduler.py
-
-class Scheduler:
-    def __init__(self, ...):
-        # 等待队列：存放新到达和被抢占的请求
-        self.waiting = create_request_queue(self.policy)
-
-        # 运行队列：存放正在处理的请求
-        self.running: list[Request] = []
-
-        # 请求字典：通过 request_id 快速查找
-        self.requests: dict[str, Request] = {}
-```
-
-**两个队列的关系：**
-
-```mermaid
-stateDiagram-v2
-    [*] --> WAITING: add_request()
-
-    WAITING --> RUNNING: 调度成功
-    RUNNING --> WAITING: 被抢占
-
-    RUNNING --> FINISHED: 完成
-
-    FINISHED --> [*]: 释放资源
-```
-
-### 2.2 调度约束
-
-```python
-class Scheduler:
-    def __init__(self, ...):
-        # 最大并发请求数
-        self.max_num_running_reqs = self.scheduler_config.max_num_seqs
-
-        # 每步最大 token 数
-        self.max_num_scheduled_tokens = self.scheduler_config.max_num_batched_tokens
-
-        # 最大序列长度
-        self.max_model_len = vllm_config.model_config.max_model_len
-```
-
-**约束说明：**
-
-| 约束 | 默认值 | 说明 |
-|-----|-------|------|
-| `max_num_seqs` | 256 | 最多同时运行的请求数 |
-| `max_num_batched_tokens` | 2048 | 每步最多处理的 token 数 |
-| `max_model_len` | 模型配置 | 单个序列的最大长度 |
-
-### 2.3 SchedulerOutput - 调度输出
-
-```python
-# vllm/v1/core/sched/output.py
-
-@dataclass
-class SchedulerOutput:
-    """调度器的输出，传递给 ModelExecutor"""
-
-    # 新调度的请求
-    scheduled_new_reqs: list[NewRequestData]
-
-    # 继续运行的请求
-    scheduled_cached_reqs: CachedRequestData
-
-    # 每个请求调度的 token 数
-    num_scheduled_tokens: dict[str, int]
-
-    # 总调度 token 数
-    total_num_scheduled_tokens: int
-
-    # 抢占的请求 ID
-    preempted_req_ids: set[str]
-
-    # 完成的请求 ID
-    finished_req_ids: set[str]
-```
-
----
-
-## 3. schedule() 方法详解
-
-`schedule()` 是调度器的核心方法，每个 step 调用一次。
-
-### 3.1 调度算法概述
-
-```
-vLLM 的调度没有明确的 "prefill 阶段" 或 "decode 阶段"。
-每个请求只有两个关键状态：
-  - num_computed_tokens: 已计算的 token 数
-  - num_tokens: 总 token 数（prompt + output）
-
-每一步，调度器尝试分配 token，使 num_computed_tokens 追上 num_tokens。
-这种设计足够通用，支持分块预填充、前缀缓存、投机解码等各种优化。
-```
-
-### 3.2 完整调度流程
-
-```mermaid
-flowchart TD
-    Start[schedule 开始] --> Init[初始化预算和输出列表]
-    Init --> RunLoop{running 队列}
-
-    subgraph process_running["处理运行中请求"]
-        RunLoop --> |遍历| CalcTokens[计算需要调度的 token 数]
-        CalcTokens --> Allocate[allocate_slots 分配 KV Cache]
-        Allocate --> AllocOK{分配成功?}
-        AllocOK -->|是| AddToScheduled[加入调度列表<br/>减少 token 预算]
-        AllocOK -->|否| Preempt[抢占低优先级请求]
-        Preempt --> RetryAlloc{重试分配}
-        RetryAlloc -->|成功| AddToScheduled
-        RetryAlloc -->|失败| SkipReq[跳过此请求]
-        AddToScheduled --> RunLoop
-        SkipReq --> RunLoop
-    end
-
-    RunLoop -->|完成| WaitCheck{有抢占?}
-    WaitCheck -->|是| SkipWaiting[跳过 waiting 队列]
-    WaitCheck -->|否| WaitLoop{waiting 队列}
-
-    subgraph process_waiting["处理等待请求"]
-        WaitLoop --> |遍历| CheckStatus[检查请求状态]
-        CheckStatus --> ReadyCheck{可以调度?}
-        ReadyCheck -->|否| SkipWait[跳过并继续]
-        ReadyCheck -->|是| GetCache[查找前缀缓存]
-        GetCache --> CalcNewTokens[计算需要调度的 token 数]
-        CalcNewTokens --> AllocWait[allocate_slots 分配]
-        AllocWait --> AllocWaitOK{分配成功?}
-        AllocWaitOK -->|是| MoveToRunning[移入 running 队列]
-        AllocWaitOK -->|否| StopWait[停止处理 waiting]
-        MoveToRunning --> WaitLoop
-        SkipWait --> WaitLoop
-    end
-
-    WaitLoop -->|完成| BuildOutput[构建 SchedulerOutput]
-    SkipWaiting --> BuildOutput
-    StopWait --> BuildOutput
-    BuildOutput --> Return[返回输出]
-```
-
-### 3.3 处理 Running 请求
-
-```python
-def schedule(self) -> SchedulerOutput:
-    # ... 初始化 ...
-
-    # 第一步：处理 RUNNING 请求
-    req_index = 0
-    while req_index < len(self.running) and token_budget > 0:
-        request = self.running[req_index]
-
-        # 计算需要调度的 token 数
-        num_new_tokens = (
-            request.num_tokens_with_spec      # 总 token 数
-            + request.num_output_placeholders  # 输出占位符
-            - request.num_computed_tokens      # 已计算的 token 数
-        )
-
-        # 应用长 prefill 分块限制
-        if 0 < threshold < num_new_tokens:
-            num_new_tokens = threshold
-
-        # 不超过 token 预算
-        num_new_tokens = min(num_new_tokens, token_budget)
-
-        # 不超过模型最大长度
-        num_new_tokens = min(
-            num_new_tokens,
-            self.max_model_len - 1 - request.num_computed_tokens
-        )
-
-        if num_new_tokens == 0:
-            req_index += 1
-            continue
-
-        # 尝试分配 KV Cache
-        while True:
-            new_blocks = self.kv_cache_manager.allocate_slots(
-                request,
-                num_new_tokens,
-                num_lookahead_tokens=self.num_lookahead_tokens,
-            )
-
-            if new_blocks is not None:
-                # 分配成功
-                break
-
-            # 分配失败，执行抢占
-            preempted_req = self._select_preempt_target()
-            self._preempt_request(preempted_req, timestamp)
-
-            if preempted_req == request:
-                # 自己被抢占了，无法继续
-                break
-
-        if new_blocks is None:
-            break
-
-        # 调度成功
-        scheduled_running_reqs.append(request)
-        token_budget -= num_new_tokens
-        req_index += 1
-```
-
-### 3.4 处理 Waiting 请求
-
-```python
-    # 第二步：处理 WAITING 请求（只有没有抢占时才处理）
-    if not preempted_reqs:
-        while self.waiting and token_budget > 0:
-            # 检查并发限制
-            if len(self.running) == self.max_num_running_reqs:
-                break
-
-            request = self.waiting.peek_request()
-
-            # 检查各种等待状态
-            if request.status == RequestStatus.WAITING_FOR_REMOTE_KVS:
-                # 等待远程 KV Cache 加载
-                ...
-
-            if request.status == RequestStatus.WAITING_FOR_FSM:
-                # 等待语法编译
-                ...
-
-            # 查找前缀缓存
-            new_computed_blocks, num_cached = (
-                self.kv_cache_manager.get_computed_blocks(request)
-            )
-
-            # 计算需要调度的 token 数
-            num_new_tokens = request.num_tokens - num_cached
-            num_new_tokens = min(num_new_tokens, token_budget)
-
-            # 分配 KV Cache
-            new_blocks = self.kv_cache_manager.allocate_slots(
-                request,
-                num_new_tokens,
-                num_new_computed_tokens=num_cached,
-                new_computed_blocks=new_computed_blocks,
-            )
-
-            if new_blocks is None:
-                # 无法分配，停止处理 waiting 队列
-                break
-
-            # 调度成功，移入 running 队列
-            request = self.waiting.pop_request()
-            self.running.append(request)
-            request.status = RequestStatus.RUNNING
-            request.num_computed_tokens = num_cached
-            token_budget -= num_new_tokens
-```
-
----
-
-## 4. 抢占机制
-
-当 KV Cache 内存不足时，调度器需要抢占一些请求来释放空间。
-
-### 4.1 抢占策略
-
-```python
-def _select_preempt_target(self) -> Request:
-    """选择要抢占的请求"""
-    if self.policy == SchedulingPolicy.PRIORITY:
-        # 优先级调度：抢占优先级最低、到达最晚的请求
-        return max(
-            self.running,
-            key=lambda r: (r.priority, r.arrival_time),
-        )
-    else:
-        # FCFS：抢占最后加入的请求
-        return self.running[-1]
-```
-
-### 4.2 抢占流程
-
-```python
-def _preempt_request(self, request: Request, timestamp: float) -> None:
-    """抢占请求并放回 waiting 队列"""
-    assert request.status == RequestStatus.RUNNING
-
-    # 释放 KV Cache
-    self.kv_cache_manager.free(request)
-    self.encoder_cache_manager.free(request)
-
-    # 更新请求状态
-    request.status = RequestStatus.PREEMPTED
-    request.num_computed_tokens = 0  # 重置计算进度
-    request.num_preemptions += 1
-
-    # 放回 waiting 队列头部（优先恢复）
-    self.waiting.prepend_request(request)
-```
-
-### 4.3 抢占流程图
-
-```mermaid
-sequenceDiagram
-    participant Scheduler
-    participant KVM as KVCacheManager
-    participant Running as running 队列
-    participant Waiting as waiting 队列
-    participant Request as 请求
-
-    Note over Scheduler: allocate_slots 失败
-
-    Scheduler->>Running: 选择抢占目标
-    Running-->>Scheduler: victim 请求
-
-    Scheduler->>Request: status = PREEMPTED
-    Scheduler->>Request: num_computed_tokens = 0
-    Scheduler->>Request: num_preemptions += 1
-
-    Scheduler->>KVM: free(victim)
-    Note over KVM: 释放 KV Cache 块
-
-    Scheduler->>Running: remove(victim)
-    Scheduler->>Waiting: prepend(victim)
-    Note over Waiting: victim 加入队列头部<br/>等待恢复
-
-    Scheduler->>KVM: retry allocate_slots
-    Note over Scheduler: 重试分配
-```
-
----
-
-## 5. 调度策略
-
-### 5.1 FCFS（先来先服务）
-
-```python
-# 默认策略
-class SchedulingPolicy(Enum):
-    FCFS = "fcfs"
-    PRIORITY = "priority"
-```
-
-**FCFS 特点：**
-- 按请求到达顺序处理
-- 简单公平
-- 可能导致"队头阻塞"
-
-### 5.2 Priority（优先级调度）
-
-```python
-# 基于优先级的调度
-def _select_preempt_target(self):
-    if self.policy == SchedulingPolicy.PRIORITY:
-        # 选择优先级最低的请求
-        return max(
-            self.running,
-            key=lambda r: (r.priority, r.arrival_time),
-        )
-```
-
-**Priority 特点：**
-- 高优先级请求优先处理
-- 支持紧急请求插队
-- 可能导致低优先级请求"饥饿"
-
----
-
-## 6. 分块预填充（Chunked Prefill）
+一次调度的单位是本轮允许执行的 token。一个新请求可能有数千个提示词 token 尚未处理；一个正在生成的请求可能只差下一个 token。两者都通过已计算 token 数与目标进度之间的差值表达。调度器结合 token 预算、可用 KV 块、并发约束和请求状态决定本轮新增工作。
+
+某一轮有 8 个 token 的预算。A、B 各要解码一个位置，新请求 C 的长提示已经获准分块处理，KV 空间充足。调度器可以给 A、B 各 1 个，给 C 6 个。
+
+{{< stateboard >}}
+title: 一轮 8 个 token 怎样分
+rows: ["解码 A", "解码 B", "预填充 C", "剩余预算"]
+steps:
+  - title: "准备调度"
+    detail: "本轮上限为 8，A、B 各追一个位置，C 的提示词仍有至少六个位置待算。"
+    cells: [["0"], ["0"], ["0"], ["8"]]
+    focus: [[3, 0]]
+  - title: "分给 A 和 B"
+    detail: "两个解码请求各得到一个位置，剩余预算是 6。"
+    cells: [["1"], ["1"], ["0"], ["6"]]
+    focus: [[0, 0], [1, 0], [3, 0]]
+  - title: "加入 C 的片段"
+    detail: "C 取得六个提示词位置。这轮设备共处理八个位置，三条请求的输出仍各自独立。"
+    cells: [["1"], ["1"], ["6"], ["0"]]
+    focus: [[2, 0], [3, 0]]
+{{< /stateboard >}}
+
+普通 step 中，EngineCore 调用 scheduler 的 `schedule`，提交 executor 的 `execute_model`，需要时再取采样结果，然后调用 `update_from_output`。打开批次流水或采用特定后端时，执行与收取结果的时序有变化。长提示词延迟大应分别查看等待时间、实际分到的 token 预算和前缀命中；增加最大并发可能同时增加显存压力。
+
+## 从预算追到调度输出
+
+先在 `schedule` 找到本轮共享的 token 预算。跟踪一个请求的 `num_computed_tokens` 与要追上的目标，遇到前缀命中时把命中长度加入起始进度。再看 `SchedulerOutput.num_scheduled_tokens` 以及 `finished_req_ids`；前者是这轮分给各请求的工作量，后者用于通知执行侧更新已经结束的请求。
 
 对于长输入，vLLM 支持分块预填充，将 prefill 分成多个 chunk 处理。
 
-### 6.1 工作原理
+### 工作原理
 
 ```
 传统 Prefill（一次性处理）:
@@ -443,189 +46,36 @@ step 3: [token_513 ... token_768] → 处理 256 个 token
 step 4: [token_769 ... token_1000] → 处理 232 个 token
 ```
 
-### 6.2 配置参数
+## 当 GPU 块分配不足
 
-```python
-# 长 prefill 分块阈值
-threshold = self.scheduler_config.long_prefill_token_threshold
-
-if 0 < threshold < num_new_tokens:
-    num_new_tokens = threshold  # 限制每次处理的 token 数
-```
-
-### 6.3 好处
-
-1. **降低延迟**：长 prefill 不会阻塞其他请求
-2. **更好的资源利用**：允许多个请求交替执行
-3. **内存平滑**：避免一次性分配大量 KV Cache
+当 running 请求的 `allocate_slots` 失败，调度器可能抢占另一条运行请求。释放其资源后，它会回到候选集合；再次选中时按当时的缓存重新计算命中和剩余工作。具体抢占对象取决于 FCFS 或 priority 策略。
 
 ```mermaid
-gantt
-    title 分块 Prefill vs 传统 Prefill
-    dateFormat X
-    axisFormat %s
+stateDiagram-v2
+    [*] --> WAITING: 请求入队
 
-    section 传统 Prefill
-    请求 A (1000 tokens) :a1, 0, 100
-    请求 B (等待)        :a2, 100, 150
+    WAITING --> RUNNING: 调度成功
+    RUNNING --> WAITING: 被抢占
 
-    section 分块 Prefill
-    请求 A chunk 1       :b1, 0, 25
-    请求 B step 1        :b2, 25, 30
-    请求 A chunk 2       :b3, 30, 55
-    请求 B step 2        :b4, 55, 60
-    请求 A chunk 3       :b5, 60, 85
-    请求 B step 3        :b6, 85, 90
+    RUNNING --> FINISHED: 完成
+
+    FINISHED --> [*]: 释放资源
 ```
 
----
+## 怎样读取分块实验
 
-## 7. 调度器与其他组件的协作
+用相同模型交替送入短输出与长提示，固定到达间隔与最大输出长度。看日志中的实际 token 预算、首 token 延迟与已开始生成请求的间隔；仅用总 token/s 会把长请求占用一轮的影响平均掉。
 
-### 7.1 完整的调度循环
+## 对照普通 step 与批次队列
 
-```mermaid
-sequenceDiagram
-    participant EC as EngineCore
-    participant Sched as Scheduler
-    participant KVM as KVCacheManager
-    participant Exec as ModelExecutor
+固定版本的 `EngineCore.step` 返回引擎输出以及是否执行了模型。普通路径先取得 `SchedulerOutput`，然后以非阻塞方式提交执行。如果后端此次没有直接给出模型输出，core 再经采样路径取得结果。最后将 scheduler 的输入记录与相应模型结果送回 `update_from_output`。开启批次队列的 `step_with_batch_queue` 可以交错提交与取结果，单看日志打印先后容易把不同批次误配。[EngineCore 两种执行路径](https://github.com/vllm-project/vllm/blob/v0.33.0/vllm/v1/engine/core.py#L667)
 
-    loop 每个 step
-        EC->>Sched: schedule()
+再看一个总预算为 4 的 `SchedulerOutput`。A 解码 1 个位置，B 还有 3 个提示位置待算，分配结果是 `{A: 1, B: 3}`。worker 接收 4 个输入位置。B 的提示用于计算后续输出，回复里只包含它实际生成的内容。
 
-        rect rgb(230, 245, 230)
-            Note over Sched,KVM: 处理 running 请求
-            Sched->>KVM: allocate_slots()
-            alt 内存不足
-                Sched->>Sched: _preempt_request()
-                Sched->>KVM: free()
-            end
-        end
+| 遇到的问题 | 断点处先记录 | 下一步看什么 |
+|---|---|---|
+| B 等待但没出现在本批 | 等待状态、剩余 token 预算、可用 KV 块 | 确认准入失败原因，区分缓存空间与预算。 |
+| B 已分配但没收到文本 | 新计算 token、是否走到取样、core 返回的请求 ID | 去输出处理和反分词处找这条请求。 |
+| A 的生成间隔突然拉长 | 本轮 B 的新增提示词数量、实际设备时间 | 缩小分块进行对照，分别观察首 token 与逐 token 延迟。 |
 
-        rect rgb(245, 230, 230)
-            Note over Sched,KVM: 处理 waiting 请求
-            Sched->>KVM: get_computed_blocks()
-            Sched->>KVM: allocate_slots()
-        end
-
-        Sched-->>EC: SchedulerOutput
-
-        EC->>Exec: execute_model(SchedulerOutput)
-        Exec-->>EC: ModelRunnerOutput
-
-        EC->>Sched: update_from_output()
-        Note over Sched: 更新请求状态<br/>检查完成条件
-    end
-```
-
-### 7.2 请求状态更新
-
-```python
-def update_from_output(
-    self,
-    model_runner_output: ModelRunnerOutput,
-    ...
-) -> EngineCoreOutputs:
-    """根据模型输出更新请求状态"""
-
-    for req_id, sampler_output in model_output.items():
-        request = self.requests[req_id]
-
-        # 追加输出 token
-        request.append_output_token_ids(sampler_output.sampled_token_ids)
-
-        # 检查停止条件
-        stopped = check_stop(request, self.max_model_len)
-
-        if stopped:
-            # 请求完成
-            self._free_request(request)
-            self.finished_req_ids.add(req_id)
-            outputs.append(...)
-```
-
----
-
-## 8. 配置与调优
-
-### 8.1 关键配置参数
-
-| 参数 | 说明 | 建议值 |
-|-----|------|-------|
-| `max_num_seqs` | 最大并发请求数 | 根据 GPU 内存调整 |
-| `max_num_batched_tokens` | 每步最大 token 数 | 2048-8192 |
-| `enable_chunked_prefill` | 启用分块预填充 | 建议开启 |
-| `long_prefill_token_threshold` | 长 prefill 阈值 | 256-512 |
-| `policy` | 调度策略 | fcfs 或 priority |
-
-### 8.2 性能调优建议
-
-**1. 提高吞吐量**
-
-```python
-# 增加最大并发数
-llm = LLM(model="...", max_num_seqs=512)
-
-llm = LLM(model="...", max_num_batched_tokens=4096)
-```
-
-**2. 降低延迟**
-
-```python
-# 启用分块预填充
-llm = LLM(
-    model="...",
-    enable_chunked_prefill=True,
-    long_prefill_token_threshold=256,
-)
-```
-
-**3. 处理高优先级请求**
-
-```python
-# 使用优先级调度
-llm = LLM(model="...", policy="priority")
-
-llm.generate(prompt, priority=0)  # 高优先级
-llm.generate(prompt, priority=10)  # 低优先级
-```
-
----
-
-## 9. 代码位置速查
-
-| 功能 | 文件 | 关键类/函数 |
-|-----|------|------------|
-| Scheduler 主类 | `vllm/v1/core/sched/scheduler.py` | `Scheduler` |
-| schedule 方法 | `vllm/v1/core/sched/scheduler.py:313` | `schedule()` |
-| 抢占逻辑 | `vllm/v1/core/sched/scheduler.py:892` | `_preempt_request()` |
-| 调度输出 | `vllm/v1/core/sched/output.py` | `SchedulerOutput` |
-| 请求队列 | `vllm/v1/core/sched/request_queue.py` | `create_request_queue()` |
-| 调度策略 | `vllm/v1/core/sched/request_queue.py` | `SchedulingPolicy` |
-
----
-
-## 10. 小结
-
-本章我们深入了解了 vLLM 调度器的工作原理：
-
-1. **双队列管理**：waiting 和 running 队列
-2. **调度算法**：
-   - 先处理 running 请求
-   - 再处理 waiting 请求
-   - 内存不足时执行抢占
-3. **抢占机制**：释放低优先级请求的资源
-4. **调度策略**：FCFS 和 Priority
-5. **分块预填充**：降低长输入的延迟影响
-6. **与其他组件协作**：KVCacheManager、ModelExecutor
-
-在下一章中，我们将学习连续批处理（Continuous Batching）机制，了解 vLLM 如何实现高效的动态批处理。
-
----
-
-## 导航
-
-- 上一篇：[Block Pool 内存块池](03-block-pool.md)
-- 下一篇：[连续批处理机制](05-continuous-batching.md)
-- [返回目录](../README.md)
+[V1 调度器](https://github.com/vllm-project/vllm/blob/v0.33.0/vllm/v1/core/sched/scheduler.py) · [执行与结果回收](https://github.com/vllm-project/vllm/blob/v0.33.0/vllm/v1/engine/core.py)

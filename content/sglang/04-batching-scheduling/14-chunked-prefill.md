@@ -3,20 +3,9 @@ title: "Chunked Prefill"
 weight: 2
 ---
 
-## 概述
+## 分块改变哪段工作占用当前轮次
 
-### 本章学习目标
-- 理解长上下文 Prefill 的挑战
-- 掌握 Chunked Prefill 的工作原理
-- 了解混合模式调度
-- 学习调度优化策略
-
-### 前置知识要求
-- 了解连续批处理
-- 熟悉 Prefill/Decode 阶段
-- 理解 KV Cache 机制
-
----
+一条提示还有 160 个 token 待算，若每轮最多分给它 64 个位置，三块依次是 64、64、32。其他请求也占用预算时，还可以再拆小。比较分块前后，观察长请求的首 token 延迟和已有请求的解码间隔。 [分块与批次参数](https://github.com/sgl-project/sglang/blob/v0.5.23/docs/docs/advanced_features/server_arguments.mdx)
 
 ## 长上下文挑战
 
@@ -58,52 +47,13 @@ graph TB
 
 ## Chunked Prefill 原理
 
-### 核心思想
+### 一个长提示和一个正在生成的请求
 
-将长 Prefill 分成多个小块，与 Decode 交替执行：
+P 有 160 个尚未计算的位置，D 已在逐步生成。图示一种允许 D 在两个分块之间推进的调度顺序。
 
-```mermaid
-sequenceDiagram
-    participant P as Prefill 请求
-    participant D as Decode 请求
-    participant GPU
+{{< mechanism "sglang-prefill-turns" >}}
 
-    Note over P,GPU: Chunked Prefill
-
-    P->>GPU: Chunk 1 (2K tokens)
-    D->>GPU: Decode Step
-    P->>GPU: Chunk 2 (2K tokens)
-    D->>GPU: Decode Step
-    P->>GPU: Chunk 3 (2K tokens)
-    D->>GPU: Decode Step
-    P->>GPU: Chunk 4 (2K tokens)
-    D->>GPU: Decode Step
-
-    Note over P: Prefill 完成
-    P->>GPU: 开始 Decode
-```
-
-### 分块策略
-
-```mermaid
-graph TB
-    subgraph chunk["分块策略"]
-        INPUT["输入 10K tokens"]
-        C1["Chunk 1: 0-2K"]
-        C2["Chunk 2: 2K-4K"]
-        C3["Chunk 3: 4K-6K"]
-        C4["Chunk 4: 6K-8K"]
-        C5["Chunk 5: 8K-10K"]
-
-        INPUT --> C1
-        INPUT --> C2
-        INPUT --> C3
-        INPUT --> C4
-        INPUT --> C5
-    end
-```
-
----
+若还有 10,240 个提示位置，每块最多 2,048 个位置且设备空间充足，单个请求分五轮可以处理完。插入解码请求时，五个预填充轮次在时间轴上可以相隔更远。
 
 ## SGLang 实现
 
@@ -341,12 +291,12 @@ class ServerArgs:
 ```bash
 # 启用 Chunked Prefill（默认）
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --chunked-prefill-size 8192
 
 # 禁用 Chunked Prefill
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --chunked-prefill-size -1
 ```
 
@@ -427,26 +377,3 @@ graph TB
 ```
 
 ---
-
-## 小结
-
-### 要点回顾
-
-1. **问题**：长 Prefill 阻塞 Decode，导致延迟抖动
-2. **方案**：将 Prefill 分块，与 Decode 交替执行
-3. **混合模式**：同一批次包含 Prefill 和 Decode
-4. **权衡**：轻微增加 Prefill 延迟，换取 ITL 稳定性
-
-### 关键参数
-
-| 参数 | 作用 | 建议值 |
-|------|------|--------|
-| `chunked_prefill_size` | 单个分块大小 | 4096-8192 |
-| `max_prefill_tokens` | 批次 Prefill 上限 | 16384 |
-
-### 下一章预告
-
-在下一章《调度策略详解》中，我们将：
-- 了解 LPM/FCFS/DFS-Weight 等策略
-- 学习优先级调度机制
-- 掌握策略选择原则

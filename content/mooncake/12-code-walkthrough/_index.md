@@ -1,21 +1,9 @@
 ---
-title: "代码链路分析"
+title: "从请求和块跟踪源码"
 linkTitle: "代码链路分析"
 weight: 12
 description: >
   跟踪关键代码执行路径,理解请求处理细节
 ---
 
-本部分通过代码链路追踪,帮助开发者深入理解 Mooncake 各个模块的实现细节和调用关系。
-
-通过详细的调用序列图和关键函数分析,你将能够:
-- 理解 Prefill 和 Decode 请求的完整处理流程
-- 掌握 KVCache 从创建到驱逐的生命周期
-- 了解 RDMA 数据传输的底层实现
-- 学习 Conductor 的调度决策机制
-
-每个链路分析都包含:
-- Mermaid 序列图展示调用关系
-- 关键函数签名和代码位置
-- 调试断点建议
-- 常见问题排查
+[P 端](./01-prefill-request-trace.md)和 [D 端](./02-decode-request-trace.md)沿 vLLM v0.30.0 的 Mooncake connector 追踪同一笔传输。[Store 生命周期](./03-kvcache-lifecycle.md)与 [Conductor 查询](./05-conductor-scheduling-trace.md)则沿 Mooncake v0.3.14 自身的源码展开。

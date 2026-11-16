@@ -3,9 +3,9 @@ title: "错误处理"
 weight: 5
 ---
 
-> 本文档详解 Dynamo HTTP 层的错误处理机制和 Prometheus 指标监控实现。
+## 用失败阶段解释返回码
 
----
+区分请求解析失败、目标模型不可用、生成时后端报错、流中途断开。1.6.2 修正了 TensorRT-LLM prompt 超出引擎 token 预算时的状态码（400）；当 HTTP 已开始流式响应时，还要检查流内错误与后端日志。 [HTTP 错误类型](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/llm/src/http/service/error.rs)
 
 ## 1. 错误类型定义
 
@@ -356,30 +356,27 @@ impl Drop for InflightGuard {
 
 ### 6.4 RAII 流程
 
-```mermaid
-sequenceDiagram
-    participant Handler as 请求处理器
-    participant Guard as InflightGuard
-    participant Metrics as Metrics
-
-    Handler->>Guard: 创建 Guard
-    Guard->>Metrics: inflight++
-    Guard->>Guard: 开始计时
-
-    Handler->>Handler: 处理请求
-
-    alt 成功
-        Handler->>Guard: mark_ok()
-        Guard->>Guard: status = Success
-    else 失败
-        Note over Guard: status 保持 Error
-    end
-
-    Handler->>Guard: Guard 离开作用域
-    Guard->>Metrics: inflight--
-    Guard->>Metrics: request_counter++
-    Guard->>Metrics: 记录耗时
-```
+{{< trace >}}
+title: 在途数怎样回到零
+actors: ["处理函数", "请求守卫", "指标"]
+steps:
+  - from: 0
+    to: 1
+    label: "开始 R7"
+    detail: "为本次调用记录开始时间。"
+  - from: 1
+    to: 2
+    label: "增加在途数"
+    detail: "并发计数由 0 变为 1。"
+  - from: 0
+    to: 1
+    label: "标记状态"
+    detail: "请求成功或报错后，处理路径将结果交给守卫。"
+  - from: 1
+    to: 2
+    label: "释放时结算"
+    detail: "离开作用域时更新时延和结束状态，在途计数由 1 回到 0。"
+{{< /trace >}}
 
 ---
 
@@ -501,23 +498,7 @@ groups:
 
 ---
 
-## 总结
-
-Dynamo HTTP 层的错误处理和监控特性：
-
-| 特性 | 实现 |
-|------|------|
-| 错误类型 | ServiceHttpError, HttpError |
-| 响应格式 | JSON ErrorResponse |
-| RAII 指标 | InflightGuard |
-| 指标类型 | Counter, Gauge, Histogram |
-| 监控集成 | Prometheus 兼容 |
-
-这套机制确保了服务的可观测性和故障排查能力。
-
----
-
 ## 参考文件
 
-- [lib/llm/src/http/service/error.rs](../../../lib/llm/src/http/service/error.rs) - 错误类型定义
-- [lib/llm/src/http/service/metrics.rs](../../../lib/llm/src/http/service/metrics.rs) - 指标实现
+- [lib/llm/src/http/service/error.rs](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/llm/src/http/service/error.rs) - 错误类型定义
+- [lib/llm/src/http/service/metrics.rs](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/llm/src/http/service/metrics.rs) - 指标实现

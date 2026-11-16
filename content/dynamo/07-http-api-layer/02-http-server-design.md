@@ -3,9 +3,9 @@ title: "HTTP Server 设计"
 weight: 2
 ---
 
-> 本文档详解 Dynamo HTTP 服务的架构设计，包括 HttpService、DeploymentState 和 ModelManager 的实现细节。
+## 前端准备好与模型准备好是不同状态
 
----
+1.6.2 的 /health 在没有发现 worker 时也可能返回 200；应查看正文中的 endpoints 和 instances，再核对模型就绪端点和一次实际生成。进入 draining 状态会改变 readiness，已有请求仍可能在返回。 [就绪与排空状态](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/docs/fern/pages/reference/observability/health-checks.mdx)
 
 ## 1. 整体架构
 
@@ -484,24 +484,31 @@ axum::serve(listener, router)
 
 关闭流程：
 
-```mermaid
-sequenceDiagram
-    participant Main as 主程序
-    participant Token as CancellationToken
-    participant Axum as Axum Server
-    participant Conn as 活跃连接
-
-    Main->>Token: cancel()
-    Token->>Axum: 触发关闭
-    Axum->>Axum: 停止接受新连接
-
-    loop 等待活跃连接
-        Axum->>Conn: 等待完成
-        Conn-->>Axum: 请求完成
-    end
-
-    Axum-->>Main: 服务关闭完成
-```
+{{< trace >}}
+title: Frontend 如何排空一个已接受的请求
+actors: ["系统", "Frontend", "请求 R7", "就绪探针"]
+steps:
+  - from: 0
+    to: 1
+    label: "收到关闭信号"
+    detail: "前端进入 draining 阶段。"
+  - from: 1
+    to: 3
+    label: "返回未就绪"
+    detail: "readiness 转为未就绪，负载均衡器可据此移除新流量。"
+  - from: 1
+    to: 2
+    label: "等待已有请求"
+    detail: "已接纳的 R7 在关闭期限内继续生成。"
+  - from: 2
+    to: 1
+    label: "返回末项"
+    detail: "R7 完成，待排空的活动请求减少。"
+  - from: 1
+    to: 0
+    label: "退出服务"
+    detail: "排空结束或达到期限后，进程继续清理并关闭。"
+{{< /trace >}}
 
 ---
 
@@ -509,10 +516,10 @@ sequenceDiagram
 
 ### 7.1 etcd Watch 机制
 
-HTTP 服务通过 etcd Watch 动态发现可用模型：
+以下为配置 etcd 时的订阅示意。HTTP 服务接收的成员信息由当前发现后端提供：
 
 ```rust
-// components/http/src/main.rs
+// components/src/dynamo/frontend/main.py
 
 async fn app(runtime: Runtime) -> Result<()> {
     let http_service = HttpService::builder()
@@ -610,24 +617,8 @@ handle.await??;
 
 ---
 
-## 总结
-
-Dynamo HTTP Server 的核心设计：
-
-| 特性 | 实现 |
-|------|------|
-| 框架 | Axum（Tokio 生态） |
-| 状态管理 | DeploymentState + Arc |
-| 模型管理 | ModelManager + ModelEngines |
-| 动态发现 | etcd Watch |
-| 优雅关闭 | CancellationToken |
-
-这套设计提供了高性能、可扩展的 HTTP 服务基础设施。
-
----
-
 ## 参考文件
 
-- [lib/llm/src/http/service/service_v2.rs](../../../lib/llm/src/http/service/service_v2.rs) - HttpService 实现
-- [lib/llm/src/http/service.rs](../../../lib/llm/src/http/service.rs) - 服务模块定义
-- [components/http/src/main.rs](../../../components/http/src/main.rs) - HTTP 服务入口
+- [lib/llm/src/http/service/service_v2.rs](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/llm/src/http/service/service_v2.rs) - HttpService 实现
+- [lib/llm/src/http/service.rs](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/lib/llm/src/http/service.rs) - 服务模块定义
+- [前端进程入口](https://github.com/ai-dynamo/dynamo/blob/v1.6.2/components/src/dynamo/frontend/main.py) - HTTP 服务入口

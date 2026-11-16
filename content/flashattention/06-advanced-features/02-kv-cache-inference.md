@@ -40,14 +40,9 @@ graph TD
     end
 ```
 
-**源文件**：
-- Python API：`flash_attn/flash_attn_interface.py:1474-1600`
-- C++ 绑定：`hopper/flash_api.cpp`（`mha_fwd_kvcache`）
-- Paged KV：`hopper/paged_kv.h`
-- Split 启发式：`hopper/heuristics.h`
-- Combine 内核：`hopper/flash_fwd_combine_kernel.h`
+### 先确定本章两条源码路线
 
----
+FA2 Python 示例来自 `flash_attn.flash_attn_interface`，对应 `csrc/flash_attn/flash_api.cpp` 中的 `mha_fwd_kvcache`。后文分析 `hopper/paged_kv.h`、`hopper/heuristics.h` 和 `hopper/flash_fwd_combine_kernel.h` 时转到 FA3 的页寻址、划分及合并实现。这些文件在同一个上游仓库中，各自有独立的调用入口。[FA2 Python](https://github.com/Dao-AILab/flash-attention/blob/v2.8.3.post2/flash_attn/flash_attn_interface.py) · [FA3 内核](https://github.com/Dao-AILab/flash-attention/tree/fa4-v4.0.0.beta39/hopper)
 
 ## 2. flash_attn_with_kvcache 工作流
 
@@ -79,23 +74,23 @@ def flash_attn_with_kvcache(
 
 ### 2.2 执行流程
 
-```mermaid
-graph TD
-    A["输入: Q, K_cache, V_cache, K_new, V_new"] --> B{"K_new 非空?"}
-    B -->|"是"| C["原地更新<br/>K_cache[cache_seqlens:] = K_new<br/>V_cache[cache_seqlens:] = V_new"]
-    B -->|"否"| D["使用现有 cache"]
-    C --> E{"Rotary 非空?"}
-    D --> E
-    E -->|"是"| F["融合 RoPE<br/>Q 和 K_new 同时旋转"]
-    E -->|"否"| G["跳过 RoPE"]
-    F --> H{"num_splits > 1?"}
-    G --> H
-    H -->|"是"| I["Split-KV 模式<br/>多个内核并行处理 KV 子范围"]
-    H -->|"否"| J["单次内核处理全部 KV"]
-    I --> K["Combine Kernel<br/>合并 Split 结果"]
-    J --> L["返回 Output"]
-    K --> L
-```
+{{< stateboard >}}
+title: "追加一个 token，再用它计算注意力"
+rows: ["逻辑位置", "缓存 KV", "有效长度"]
+steps:
+  - title: "写入前"
+    detail: "旧 cache_seqlens 为 2，前两格已经存有 KV0 和 KV1。"
+    cells: [["0", "1", "2"], ["KV0", "KV1", "·"], ["2", "·", "·"]]
+    focus: [[2, 0]]
+  - title: "写入第三格"
+    detail: "本次传入 k_new、v_new，接口按旧长度把这对向量写到位置 2。"
+    cells: [["0", "1", "2"], ["KV0", "KV1", "KV2"], ["2", "·", "·"]]
+    focus: [[1, 2]]
+  - title: "消费并记账"
+    detail: "新 Q 的注意力可读到三个位置；调用方为下一次调用把长度由 2 递增到 3。"
+    cells: [["0", "1", "2"], ["KV0", "KV1", "KV2"], ["3", "·", "·"]]
+    focus: [[2, 0]]
+{{< /stateboard >}}
 
 ### 2.3 原地 KV Cache 更新
 
@@ -174,28 +169,13 @@ void load_page_table(const int n_block) {
 2. 使用 `cutlass::FastDivmod` 避免昂贵的整数除法
 3. 通过 `__shfl_sync` 将计算结果广播给同 warp 的其他线程
 
-```mermaid
-graph LR
-    subgraph threads["Warp 内线程分工"]
-        T0["Thread 0<br/>计算行 0,8 的地址"]
-        T1["Thread 1<br/>计算行 1,9 的地址"]
-        T7["Thread 7<br/>计算行 7,15 的地址"]
-    end
+先独立看一次寻址：同一逻辑序列的第 0 页和第 1 页可以落在页池里不相邻的位置。
 
-    subgraph broadcast["__shfl_sync 广播"]
-        B0["所有线程获得行 0 地址"]
-        B1["所有线程获得行 1 地址"]
-        B7["所有线程获得行 7 地址"]
-    end
-
-    T0 --> B0
-    T1 --> B1
-    T7 --> B7
-```
+{{< mechanism "fa-page-map" >}}
 
 ### 3.4 页面大小要求
 
-`page_block_size` 必须是 256 的倍数，以满足 TMA 和 GMMA 的对齐要求。常见取值为 256。
+FA2 稳定 CUDA 接口在 C++ 入口检查 `page_block_size % 256 == 0`。下面 Hopper 小节讲另一条实现路径，其 tile 选择不能反推为所有软件包的页大小。[FA2 检查](https://github.com/Dao-AILab/flash-attention/blob/v2.8.3.post2/csrc/flash_attn/flash_api.cpp)
 
 ---
 
@@ -419,6 +399,8 @@ cache_batch_idx = torch.tensor([2, 5, 0], dtype=torch.int32, device="cuda")
 
 ## 导航
 
-- 上一篇：[因果遮蔽与 Masking](01-causal-and-masking.md)
-- 下一篇：[GQA 与 MQA](03-gqa-mqa.md)
-- [返回目录](../README.md)
+- 上一篇：[因果遮蔽与 Masking](/flashattention/06-advanced-features/01-causal-and-masking/)
+- 下一篇：[GQA 与 MQA](/flashattention/06-advanced-features/03-gqa-mqa/)
+- [返回目录](/flashattention/00-overview/overview/)
+
+内核接收到的块表来自推理引擎。两个请求能否指向同一块，以及请求结束后谁来减引用，可以接着看 [vLLM 的物理块池](/vllm/03-core-modules/03-block-pool/)。

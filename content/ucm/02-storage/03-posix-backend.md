@@ -1,223 +1,52 @@
 ---
-title: "POSIX 本地存储后端"
+title: "POSIX 后端怎样定位并读写一个缓存块"
 weight: 3
 ---
 
+POSIX 后端把块数据存放在配置的文件系统目录。单机目录适合验证；位于共享挂载时，多个节点看到的数据范围、挂载语义和访问权限取决于该文件系统。`Cache|Posix` 还会用 Host 缓冲搬运设备数据。[部署示例](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/docs/source/user-guide/prefix-cache/pipeline_store.md)
 
-> **阅读时间**: 约 12 分钟
-> **前置要求**: [工厂模式](./02-factory-pattern.md)
+## 从查找到加载
 
----
+在 `PosixStore::Lookup` 中，后端把一批 block ID 交给 `SpaceManager` 查询并累计命中数。`LookupOnPrefix` 返回连续匹配的最后下标；统计命中块数时使用“下标加一”，返回 -1 表示起始块就未命中。即使后续位置有数据，普通连续前缀也只能从开头逐块使用。[PosixStore](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/store/posix/cc/posix_store.cc)
 
-## 概述
+{{< stateboard >}}
+title: "实际示例里的两个 4 KiB 块"
+rows: ["块", "文件系统", "前缀返回"]
+steps:
+  - title: "第一次查询"
+    detail: "临时目录中还没有 A、B，最后连续命中下标为 -1。"
+    cells:
+      - ["A", "B"]
+      - ["·", "·"]
+      - ["−1", "·"]
+    focus: [[2, 0]]
+  - title: "写出并等待"
+    detail: "两个主机缓冲写入 POSIX 后端，调用者等待 dump 完成。"
+    cells:
+      - ["A", "B"]
+      - ["4 KiB", "4 KiB"]
+      - ["·", "·"]
+    focus: [[1, 0], [1, 1]]
+  - title: "再次查询和读取"
+    detail: "两个块均可读，最后连续命中下标为 1。独立的目的缓冲可以逐字节比对。"
+    cells:
+      - ["A", "B"]
+      - ["可读", "可读"]
+      - ["1", "·"]
+    focus: [[1, 0], [1, 1], [2, 0]]
+{{< /stateboard >}}
 
-POSIX Store 是 UCM 最基础的存储后端，使用本地文件系统存储 KV Cache。本文详解其设计和实现。
+`Load`、`Dump` 将任务交给传输管理器。路径布局由 `SpaceLayout` 和实际配置决定；例如 `data_dir_shard_bytes` 控制路径分片。调试时用运行配置、后端查询结果和日志核对，客户端应通过 Store 查询对象。[文件布局](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/store/posix/cc/space_layout.cc) · [传输管理](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/store/posix/cc/trans_manager.cc)
 
----
+## 一次可解释的测量
 
-## 1. 设计概述
+先测冷请求的保存，再测相同前缀的读取。记录 `posix_capacity_gb`、文件系统/挂载点、I/O 引擎及并发。对照 POSIX 命中与读取量，可以区分“命中 Host cache”和“访问了文件系统”；块大小、设备数和并发必须一致才能比较 TTFT。[指标定义](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/docs/source/user-guide/metrics/metrics_list.md)
 
-### 1.1 特点
-
-```mermaid
-mindmap
-  root["POSIX Store"]
-    advantages["优势"]
-      a1["零外部依赖"]
-      a2["低延迟"]
-      a3["简单可靠"]
-      a4["易于调试"]
-    features["特性"]
-      f1["分桶存储"]
-      f2["Direct I/O 支持"]
-      f3["异步操作"]
-      f4["C++ 实现"]
-```
-### 1.2 适用场景
-| 场景 | 适合程度 | 说明 |
-|------|----------|------|
-| 单机开发/测试 | 最佳 | 简单、无需配置 |
-| 单机生产 | 良好 | 配合 Cache Store 使用 |
-| 多机集群 | 不适合 | 无法跨节点共享 |
----
-## 2. 文件布局
-
-### 2.1 目录结构
-
-```
-/data/ucm_cache/           # 根目录
-├── 0/                     # Bucket 0
-│   ├── 0/                 # Sub-bucket 0
-│   │   ├── a1b2c3d4...    # Block 文件
-│   │   └── e5f6g7h8...
-│   ├── 1/
-│   └── ...
-├── 1/                     # Bucket 1
-│   └── ...
-└── ...
-```
-
-### 2.2 分桶策略
+## 从页缓存看一次读回
 
 ```mermaid
 graph TB
-    subgraph bucketing["分桶算法"]
-        BlockID["Block ID (16 bytes)"]
-        Byte0["字节 0"]
-        Byte1["字节 1"]
-
-        BlockID --> Byte0
-        BlockID --> Byte1
-
-        Byte0 --> Bucket["Bucket = byte0 % 256"]
-        Byte1 --> SubBucket["SubBucket = byte1 % 256"]
-    end
-
-    subgraph path["最终路径"]
-        P["{root}/{bucket}/{sub_bucket}/{block_id_hex}"]
-    end
-
-    Bucket --> path
-    SubBucket --> path
-```
-
-**分桶原因**:
-- 避免单目录文件过多
-- 提高文件系统性能
-- 支持并行 I/O
-
-### 2.3 Block 文件格式
-
-```
-┌─────────────────────────────────────────────┐
-│                 Block 文件                   │
-├─────────────────────────────────────────────┤
-│ Header (可选)                                │
-│   - Magic Number: 4 bytes                   │
-│   - Version: 4 bytes                        │
-│   - Block Size: 4 bytes                     │
-│   - Num Layers: 4 bytes                     │
-├─────────────────────────────────────────────┤
-│ Layer 0 KV Cache                            │
-│   - K: [block_size, num_heads, head_dim]    │
-│   - V: [block_size, num_heads, head_dim]    │
-├─────────────────────────────────────────────┤
-│ Layer 1 KV Cache                            │
-│   ...                                       │
-├─────────────────────────────────────────────┤
-│ Layer N KV Cache                            │
-│   ...                                       │
-└─────────────────────────────────────────────┘
-```
-
----
-## 3. 核心实现
-### 3.1 Python 接口
-**代码位置**: `ucm/store/posix/connector.py`
-```python
-class UcmPosixStore(UcmKVStoreBase):
-    """POSIX 文件系统存储后端"""
-    def __init__(self, config: dict):
-        self.storage_path = config.get('storage_backends', '/tmp/ucm_cache')
-        self.io_direct = config.get('io_direct', False)
-        self.block_size = config.get('block_size', 16)
-
-        # 初始化 C++ 实现
-        self._cc_store = self._init_cc_store()
-        # 确保目录存在
-        self._ensure_directories()
-
-    def lookup(self, block_ids: List[bytes]) -> List[bool]:
-        """查询 Block 是否存在"""
-        results = []
-        for block_id in block_ids:
-            path = self._get_block_path(block_id)
-            results.append(os.path.exists(path))
-        return results
-
-    def load(self, block_ids, offset, dst_tensor) -> Task:
-        """从文件加载 KV 到 GPU"""
-        return self._cc_store.load(
-            block_ids,
-            offset,
-            dst_tensor.data_ptr(),
-            dst_tensor.nbytes
-        )
-    def dump(self, block_ids, offset, src_tensor) -> Task:
-        """从 GPU 保存 KV 到文件"""
-        return self._cc_store.dump(
-            block_ids,
-            offset,
-            src_tensor.data_ptr(),
-            src_tensor.nbytes
-        )
-
-    def _get_block_path(self, block_id: bytes) -> str:
-        """计算 Block 文件路径"""
-        bucket = block_id[0]
-        sub_bucket = block_id[1]
-        hex_id = block_id.hex()
-        return os.path.join(
-            self.storage_path,
-            str(bucket),
-            str(sub_bucket),
-            hex_id
-        )
-```
-### 3.2 C++ 实现
-**代码位置**: `ucm/csrc/store/posix_store.cpp`
-```cpp
-class PosixStore : public StoreV1 {
-public:
-    PosixStore(const std::string& base_path, bool use_direct_io)
-        : base_path_(base_path), use_direct_io_(use_direct_io) {
-        // 初始化
-    }
-    Task Load(const std::vector<BlockId>& block_ids,
-              void* dst_addr,
-              size_t size) override {
-        auto task = CreateTask(TaskType::LOAD);
-
-        // 异步执行
-        thread_pool_.Submit([=]() {
-            for (const auto& block_id : block_ids) {
-                std::string path = GetBlockPath(block_id);
-                ReadFile(path, dst_addr, size);
-            }
-            task->Complete();
-        });
-        return task;
-    }
-
-private:
-    void ReadFile(const std::string& path, void* dst, size_t size) {
-        int flags = O_RDONLY;
-        if (use_direct_io_) {
-            flags |= O_DIRECT;
-        }
-        int fd = open(path.c_str(), flags);
-        if (fd < 0) {
-            throw std::runtime_error("Failed to open file");
-        }
-
-        ssize_t bytes_read = read(fd, dst, size);
-        close(fd);
-        if (bytes_read != size) {
-            throw std::runtime_error("Incomplete read");
-        }
-    }
-};
-```
-
----
-
-## 4. Direct I/O 支持
-
-### 4.1 什么是 Direct I/O
-
-```mermaid
-graph TB
-    subgraph buffered["Buffered I/O（默认）"]
+    subgraph buffered["Buffered I/O"]
         B1["应用"] --> B2["Page Cache"]
         B2 --> B3["磁盘"]
         Note1["数据经过内核缓存"]
@@ -229,122 +58,63 @@ graph TB
     end
 ```
 
-### 4.2 何时使用
+启用 direct I/O 时，地址、长度及偏移需满足所用文件系统和设备的对齐要求。诊断一次实际 I/O，应先确认配置确实生效；引擎 HBM 和 UCM Host cache 的命中都可能绕过此次文件访问。
 
-| 场景 | 推荐 | 原因 |
-|------|------|------|
-| 有 UCM Cache Store | Direct I/O | 避免双重缓存 |
-| 无额外缓存层 | Buffered I/O | 利用 Page Cache |
-| NVMe SSD | Direct I/O | 发挥最大性能 |
-| HDD | Buffered I/O | Page Cache 有益 |
-### 4.3 配置方式
-```yaml
-ucm_connectors:
-  - ucm_connector_name: "UcmPosixStore"
-    ucm_connector_config:
-      storage_backends: "/data/ucm_cache"
-      io_direct: true  # 启用 Direct I/O
-```
-### 4.4 对齐要求
-使用 Direct I/O 时需要满足对齐要求：
-```cpp
-// 对齐要求
-constexpr size_t DIRECT_IO_ALIGNMENT = 512;  // 通常是 512 或 4096
-void* aligned_buffer = aligned_alloc(DIRECT_IO_ALIGNMENT, size);
-// 确保地址对齐
-assert(reinterpret_cast<uintptr_t>(aligned_buffer) % DIRECT_IO_ALIGNMENT == 0);
-// 确保大小对齐
-assert(size % DIRECT_IO_ALIGNMENT == 0);
-```
----
-## 5. 性能优化
+## 无 GPU 时，验证真实 POSIX 库的读写
 
-### 5.1 批量操作
+下面的例子使用 v0.9.1 wheel 提供的原生 `Posix` 管线。写入两个各 4 KiB 的主机缓冲区，再从同一临时目录读回。本次运行使用 `vllm/vllm-openai-cpu:v0.33.0-arm64` 镜像中的 Linux arm64、CPython 3.12.16 和 CPU PyTorch，已完成逐字节对照；这项实验只验证 POSIX 与主存，设备 H2D 和 vLLM 的前缀回填需要另外验证。
 
-```python
-for block_id in block_ids:
-    store.load([block_id], offset, tensor)
-    store.wait(task)
-
-task = store.load(block_ids, offset, tensor)
-store.wait(task)
-```
-
-### 5.2 异步 I/O
-
-```python
-tasks = []
-for batch in batches:
-    task = store.load(batch.block_ids, batch.offset, batch.tensor)
-    tasks.append(task)
-
-for task in tasks:
-    store.wait(task)
-```
-
-### 5.3 预取优化
-
-```python
-current_task = store.load(current_batch.block_ids, ...)
-
-next_task = store.load(next_batch.block_ids, ...)
-
-store.wait(current_task)
-
-
-```
-
----
-## 6. 配置参考
-### 6.1 完整配置
-```yaml
-ucm_connectors:
-  - ucm_connector_name: "UcmPosixStore"
-    ucm_connector_config:
-      # 存储路径（必需）
-      storage_backends: "/data/ucm_cache"
-
-      # Direct I/O（可选，默认 false）
-      io_direct: true
-      # Block 大小（可选，默认 16）
-      block_size: 16
-
-      # 线程池大小（可选）
-      io_threads: 8
-      # 预分配 bucket 目录（可选）
-      preallocate_buckets: true
-```
-### 6.2 环境变量
-```bash
-export UCM_POSIX_STORAGE_PATH=/custom/path
-
-export UCM_POSIX_DEBUG=1
-```
----
-## 7. 常见问题
-
-### 7.1 权限错误
+把下面的 Python 保存为当前目录的 `check_posix.py`，再在 CPU 镜像内安装固定 wheel 并运行。镜像在这里提供 Python 与 CPU PyTorch；示例不会启动其中的 vLLM 服务。
 
 ```bash
-mkdir -p /data/ucm_cache
-chmod 755 /data/ucm_cache
+docker run --rm --platform linux/arm64 -v "$PWD/check_posix.py:/tmp/check_posix.py:ro" \
+  --entrypoint bash vllm/vllm-openai-cpu:v0.33.0-arm64 -lc \
+  'uv pip install --python /opt/venv/bin/python "uc-manager[cu129]==0.9.1" && /opt/venv/bin/python /tmp/check_posix.py'
 ```
-
-### 7.2 磁盘空间不足
-
-```bash
-df -h /data/ucm_cache
-
-find /data/ucm_cache -type f -mtime +7 -delete
-```
-
-### 7.3 Direct I/O 失败
 
 ```python
-# 某些网络文件系统不支持 Direct I/O
+from tempfile import TemporaryDirectory
 
-config = {
-    "storage_backends": "/data/ucm_cache",
-    "io_direct": False
-}
+import numpy as np
+from ucm.store.factory_v1 import UcmConnectorFactoryV1
+
+
+def addresses(arrays):
+    return [[array.ctypes.data] for array in arrays]
+
+
+with TemporaryDirectory() as store_dir:
+    config = {
+        "store_pipeline": "Posix",
+        "storage_backends": [store_dir],
+        "tensor_size": 4096,
+        "shard_size": 4096,
+        "block_size": 4096,
+        "posix_io_engine": "psync",
+        "posix_data_trans_concurrency": 1,
+        "posix_lookup_concurrency": 1,
+        "io_direct": False,
+    }
+
+    def open_store(device_id):
+        return UcmConnectorFactoryV1.create_connector(
+            "UcmPipelineStore",
+            {**config, "device_id": device_id},
+            "ucm.store.pipeline.connector",
+        )
+
+    worker, lookup = open_store(0), open_store(-1)
+    keys = [b"cookbook-block-a", b"cookbook-block-b"]
+    source = [np.arange(4096, dtype=np.uint8), np.full(4096, 37, dtype=np.uint8)]
+    target = [np.zeros_like(array) for array in source]
+    shards = [0, 0]
+
+    assert lookup.lookup_on_prefix(keys) == -1
+    worker.wait(worker.dump_data(keys, shards, addresses(source)))
+    assert lookup.lookup_on_prefix(keys) == 1
+    worker.wait(worker.load_data(keys, shards, addresses(target)))
+    assert all(np.array_equal(before, after) for before, after in zip(source, target))
+    print("Two 4096-byte blocks matched")
 ```
+
+`-1` 表示起始块也未命中，`1` 表示下标 0 和 1 两块都属于连续命中前缀。这里使用独立的目标数组，并让源/目标内存一直存活到异步任务的 `wait` 返回。用这个例子先确认后端返回的字节正确，再接上 [vLLM 外部读取](../01-overview/03-quick-start.md)，更容易判断问题在存储还是引擎侧。

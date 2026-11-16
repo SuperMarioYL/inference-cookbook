@@ -1,272 +1,54 @@
 ---
-title: "快速开始"
+title: "用两次请求验证 vLLM 外部前缀缓存"
 weight: 3
 ---
 
+下面选用发布矩阵中的 **vLLM 0.30.0、CUDA 12.9、CPython 3.12、UCM 0.9.1**。准备支持该 CUDA 运行时的 Linux GPU 主机、本地模型目录及可写缓存目录。官方已经把匹配的后端 wheel 装进镜像，避免另行猜测 PyTorch/CUDA 组合。[运行时与 wheel 对照](https://github.com/ModelEngine-Group/unified-cache-management/releases/tag/v0.9.1)
 
-> **阅读时间**: 约 10 分钟
-> **前置要求**: [架构概览](./02-architecture-overview.md)
+## 启动带外部存储的引擎
 
----
-
-## 概述
-
-本文提供 UCM 的快速上手指南，帮助你在最短时间内运行第一个 UCM 增强的推理示例。
-
----
-
-## 1. 环境准备
-
-### 1.1 系统要求
-
-| 组件 | 最低要求 | 推荐配置 |
-|------|----------|----------|
-| 操作系统 | Linux (Ubuntu 20.04+) | Ubuntu 22.04 |
-| Python | 3.10+ | 3.10 |
-| PyTorch | 2.0+ | 2.1+ |
-| CUDA | 11.8+ | 12.1+ |
-| GPU | 16GB+ 显存 | A100 40GB+ |
-
-### 1.2 安装 UCM
-
-```bash
-# 方式 1: pip 安装
-pip install ucm
-
-git clone https://github.com/your-org/unified-cache-management.git
-cd unified-cache-management
-# 设置平台
-export PLATFORM=cuda  # 或 ascend, musa, maca
-
-pip install -e .
-```
-### 1.3 验证安装
-```bash
-python -c "import ucm; print(ucm.__version__)"
-```
----
-## 2. 基础配置
-
-### 2.1 创建配置文件
-
-创建 `ucm_config.yaml`:
+把以下 YAML 存为 `ucm.yaml`。示例使用挂载进容器的 `/cache` 作为 POSIX 存储，容量配置应小于磁盘可用空间。其他参数按同版本发布示例核对。[官方配置样例](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/examples/ucm_config_example.yaml)
 
 ```yaml
 ucm_connectors:
-  - ucm_connector_name: "UcmPipelineStore"
+  - ucm_connector_name: UcmPipelineStore
     ucm_connector_config:
-      # 使用 Cache + POSIX 组合
       store_pipeline: "Cache|Posix"
-      # KV Cache 存储路径
-      storage_backends: "/tmp/ucm_cache"
-      # Pinned Memory 缓冲区数量
-      buffer_number: 1024
-      # 启用 Direct I/O
-      io_direct: false
-
-# ucm_sparse_config:
-#     sparse_ratio: 0.3
+      storage_backends: /cache
+      cache_buffer_capacity_gb: 2
+      posix_capacity_gb: 8
+      posix_io_engine: psync
 ```
 
-### 2.2 创建存储目录
+`MODEL_DIR` 设置为已下载、单卡可加载且支持前缀缓存的模型绝对路径，例如 Qwen2.5 指令模型。`/v1/completions` 使用固定模型名 `cookbook`。此处关闭引擎本地前缀命中，便于观察第二次请求从 UCM 读回的块数。
 
 ```bash
-mkdir -p /tmp/ucm_cache
+mkdir -p ./ucm-data
+docker run --rm --gpus all --ipc=host -p 7800:7800 \
+  -e ENABLE_UCM_PATCH=1 -v "${MODEL_DIR:?set MODEL_DIR}:/model:ro" \
+  -v "$PWD/ucm.yaml:/workspace/ucm.yaml:ro" -v "$PWD/ucm-data:/cache" \
+  --entrypoint vllm ghcr.io/modelengine-group/vllm-openai:v0.30.0-cu129-ucm-0.9.1 \
+  serve /model --served-model-name cookbook --port 7800 --enforce-eager \
+  --max-model-len 4096 --block-size 128 --no-enable-prefix-caching \
+  --kv-transfer-config '{"kv_connector":"UCMConnector","kv_connector_module_path":"ucm.integration.vllm.ucm_connector","kv_role":"kv_both","kv_connector_extra_config":{"UCM_CONFIG_FILE":"/workspace/ucm.yaml"}}'
 ```
 
----
-## 3. 第一个推理示例
-### 3.1 离线推理代码
-创建 `inference.py`:
-```python
-from dataclasses import asdict
-from vllm import LLM, SamplingParams
-from vllm.config import KVTransferConfig
-from vllm.engine.arg_utils import EngineArgs
-# 1. 配置 UCM 连接器
-ktc = KVTransferConfig(
-    kv_connector="UCMConnector",
-    kv_connector_module_path="ucm.integration.vllm.ucm_connector",
-    kv_role="kv_both",
-    kv_connector_extra_config={
-        "UCM_CONFIG_FILE": "./ucm_config.yaml"
-    }
-)
-# 2. 配置 vLLM 引擎参数
-llm_args = EngineArgs(
-    model="meta-llama/Llama-2-7b-hf",  # 替换为你的模型路径
-    kv_transfer_config=ktc,
-    max_model_len=4096,
-    gpu_memory_utilization=0.8,
-    enforce_eager=True,  # 建议首次运行使用
-)
+## 发送同一份手册、两个问题
 
-llm = LLM(**asdict(llm_args))
-
-prompts = [
-    "请帮我翻译以下内容：Hello, how are you?",
-    "请帮我翻译以下内容：Good morning!",
-    "请帮我翻译以下内容：Thank you very much.",
-]
-
-sampling_params = SamplingParams(
-    temperature=0.7,
-    max_tokens=100,
-)
-# 6. 执行推理
-print("Starting inference...")
-outputs = llm.generate(prompts, sampling_params)
-# 7. 打印结果
-for output in outputs:
-    prompt = output.prompt
-    generated_text = output.outputs[0].text
-    print(f"\nPrompt: {prompt}")
-    print(f"Generated: {generated_text}")
-```
-### 3.2 运行推理
-```bash
-python inference.py
-```
-### 3.3 预期输出
-```
-Starting inference...
-
-Prompt: 请帮我翻译以下内容：Hello, how are you?
-Generated: 你好，你好吗？
-Prompt: 请帮我翻译以下内容：Good morning!
-Generated: 早上好！
-
-Prompt: 请帮我翻译以下内容：Thank you very much.
-Generated: 非常感谢。
-```
-
----
-
-## 4. 验证 UCM 生效
-
-### 4.1 查看日志
-
-设置详细日志查看 UCM 运行情况：
-
-```bash
-export UNIFIED_CACHE_LOG_LEVEL=INFO
-python inference.py
-```
-你应该能看到类似以下日志：
-```
-[UCM] Initializing UCMDirectConnector...
-[UCM] Store pipeline: Cache|Posix
-[UCM] Storage backends: /tmp/ucm_cache
-[UCM] Request 1: lookup 0 blocks, hit 0
-[UCM] Request 1: loading 32 blocks
-[UCM] Request 1: saving 32 blocks
-[UCM] Request 2: lookup 32 blocks, hit 28  # 第二个请求复用了前缀
-```
-### 4.2 检查缓存文件
-```bash
-ls -la /tmp/ucm_cache/
-
-# /tmp/ucm_cache/
-# ├── 0/
-# │   │   ├── abc123.bin
-# │   │   └── def456.bin
-# │       └── ...
-```
----
-## 5. 多轮对话示例
-
-### 5.1 代码示例
+在另一终端运行。重复的手册应超过若干完整块，才能排除“文字看起来相同，但开头不足一个完整缓存块”的情况。若第一次请求的异步保存尚未结束，等写入完成后再运行第二次。
 
 ```python
-from vllm import LLM, SamplingParams
-from vllm.config import KVTransferConfig
-from vllm.engine.arg_utils import EngineArgs
-from dataclasses import asdict
+import json
+from urllib.request import Request, urlopen
 
-ktc = KVTransferConfig(
-    kv_connector="UCMConnector",
-    kv_connector_module_path="ucm.integration.vllm.ucm_connector",
-    kv_role="kv_both",
-    kv_connector_extra_config={
-        "UCM_CONFIG_FILE": "./ucm_config.yaml"
-    }
-)
-
-llm_args = EngineArgs(
-    model="meta-llama/Llama-2-7b-hf",
-    kv_transfer_config=ktc,
-    max_model_len=4096,
-    gpu_memory_utilization=0.8,
-    enforce_eager=True,
-)
-
-llm = LLM(**asdict(llm_args))
-sampling_params = SamplingParams(temperature=0.7, max_tokens=200)
-
-conversation_history = ""
-
-rounds = [
-    "你好，请介绍一下你自己。",
-    "你能帮我写代码吗？",
-    "请用 Python 写一个快速排序。",
-]
-
-for i, user_input in enumerate(rounds):
-    # 构建完整对话
-    conversation_history += f"用户: {user_input}\n助手: "
-
-    # 推理
-    outputs = llm.generate([conversation_history], sampling_params)
-    response = outputs[0].outputs[0].text
-
-    # 更新历史
-    conversation_history += response + "\n"
-
-    print(f"\n=== Round {i+1} ===")
-    print(f"用户: {user_input}")
-    print(f"助手: {response}")
+manual = "设备每周检查电源、温度和日志；异常情况记入维护记录。\n" * 56
+for question in ("每周检查哪些项目？", "异常应该记在哪里？"):
+    payload = json.dumps({"model": "cookbook", "prompt": manual + question,
+                          "max_tokens": 24, "temperature": 0}).encode()
+    req = Request("http://localhost:7800/v1/completions", data=payload,
+                  headers={"Content-Type": "application/json"})
+    with urlopen(req) as response:
+        print(json.load(response)["choices"][0]["text"])
 ```
 
-### 5.2 观察 KV 复用
-
-在多轮对话中，你会发现：
-- 第一轮：所有 Block 都是新计算的
-- 后续轮次：历史对话的 KV 会被复用，只计算新增部分
-
-```
-[UCM] Round 1: hit 0 blocks (新对话)
-[UCM] Round 2: hit 45 blocks (复用第一轮)
-[UCM] Round 3: hit 78 blocks (复用前两轮)
-```
-
----
-## 6. 常见问题
-### 6.1 ImportError: No module named 'ucm'
-```bash
-pip install -e .
-
-python -c "import sys; print(sys.path)"
-```
-### 6.2 CUDA out of memory
-```python
-llm_args = EngineArgs(
-    model="...",
-    gpu_memory_utilization=0.6,  # 从 0.8 降低到 0.6
-    max_model_len=2048,  # 减少最大长度
-)
-```
-### 6.3 KV Cache 目录权限问题
-```bash
-chmod -R 755 /tmp/ucm_cache
-```
----
-## 7. 下一步
-
-完成快速开始后，建议继续阅读：
-
-| 目标 | 推荐文档 |
-|------|----------|
-| 深入理解存储层 | [存储抽象](../02-storage/01-storage-abstraction.md) |
-| 了解稀疏注意力 | [稀疏基础](../03-sparse-attention/01-sparse-fundamentals.md) |
-| 生产环境部署 | [部署指南](../06-engineering-practice/01-deployment-guide.md) |
-| 性能调优 | [性能调优](../06-engineering-practice/03-performance-tuning.md) |
+先确认引擎确实加载了 connector，然后对照两次请求的 HBM 命中与外部命中。启用相应指标采集时，比较 `ucm:gpu_hbm_hit_tokens_total`、`ucm:ucm_hit_tokens_total` 和 POSIX 读取计数的增量。第一轮观察写入完成，第二轮观察外部命中和读取字节的增量。线上保留本地前缀缓存时，两层可以同时贡献命中。[指标说明](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/docs/source/user-guide/metrics/metrics_list.md) · [上游 vLLM 示例](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/docs/source/getting-started/quickstart_vllm.md)

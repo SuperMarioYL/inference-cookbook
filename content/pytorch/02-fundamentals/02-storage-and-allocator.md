@@ -3,7 +3,7 @@ title: "Storage 和内存分配"
 weight: 2
 ---
 
-> 本文深入分析 PyTorch 的 Storage、StorageImpl、DataPtr 以及 Allocator 体系，涵盖从 Storage 封装层到底层内存分配的完整链路，并解析 Copy-on-Write (CoW) 机制。
+
 > 核心源码位置:
 > - `c10/core/Storage.h`
 > - `c10/core/StorageImpl.h`
@@ -14,7 +14,7 @@ weight: 2
 
 ## 1. 概述
 
-在上一篇文章中，我们了解到 `TensorImpl` 通过 `storage_` 成员指向底层数据。本文将沿着这条链路继续向下探索，完整梳理 `Storage -> StorageImpl -> DataPtr -> Allocator` 的层次关系。
+TensorImpl 的 storage_ 成员通向实际存储。排查张量视图是否共享内存时，可以从 StorageImpl 跟到 DataPtr，查看底层分配与释放由谁负责。
 
 PyTorch 的内存管理体系层次清晰：
 
@@ -32,7 +32,7 @@ flowchart TB
     subgraph storage_wrapper["Storage - 轻量包装层"]
         S["Storage
 c10/core/Storage.h"]
-        S_PTR["storage_impl_ : intrusive_ptr&lt;StorageImpl&gt;"]
+        S_PTR["storage_impl_ : 引用计数指针（StorageImpl）"]
         S --> S_PTR
     end
 
@@ -184,7 +184,7 @@ bool unique = storage.unique();
 bool is_alias = storage1.is_alias_of(storage2);
 ```
 
-`is_alias_of` 方法用于检测两个 Storage 是否指向同一块内存，这在 View 检测和优化中非常重要。
+要确定两个 Storage 是否互为别名，可以调用 `is_alias_of`。两个张量即使形状不同，也可能通过视图访问同一块存储。
 
 ---
 
@@ -439,15 +439,15 @@ sequenceDiagram
 
     Tensor->>SI: new StorageImpl(size=48bytes, allocator)
     SI->>AL: allocate(48)
-    AL->>MEM: posix_memalign(48, 64)
+    AL->>MEM: 申请对齐的 48 字节
     MEM-->>AL: void* ptr
     AL-->>SI: DataPtr(ptr, CPU)
-    SI-->>ST: intrusive_ptr&lt;StorageImpl&gt;
+    SI-->>ST: 引用计数指针（StorageImpl）
 
     Tensor->>TI: new TensorImpl(storage, key_set, dtype)
     Note over TI: 设置 sizes=[3,4]<br/>strides=[4,1]<br/>storage_offset=0<br/>numel=12
 
-    TI-->>Tensor: intrusive_ptr&lt;TensorImpl&gt;
+    TI-->>Tensor: 引用计数指针（TensorImpl）
     Tensor-->>User: tensor([...])
 ```
 
@@ -492,28 +492,25 @@ CoW 的核心思想是"延迟复制" -- 只有在真正需要修改数据时才�
 
 ### 8.3 CoW 状态转换
 
-```mermaid
-stateDiagram-v2
-    [*] --> Normal : 创建新 Storage
+下例关注已采用 CoW 的内部存储。普通张量切片的共享写入见[视图示例](/pytorch/01-introduction/01-tensor-basics-tutorial/)。
 
-    Normal --> CoW_Shared : lazy_clone_storage()
-    state CoW_Shared {
-        direction LR
-        Original["原始 Storage"] --> SharedMem["共享内存块"]
-        Clone["克隆 Storage"] --> SharedMem
-    }
-
-    CoW_Shared --> Materialized : mutable_data_ptr() 触发物化
-    state Materialized {
-        direction LR
-        Orig["Storage A"] --> MemA["独立内存 A"]
-        Cloned["Storage B"] --> MemB["独立内存 B (复制)"]
-    }
-
-    Normal --> Normal : data() 只读访问
-    CoW_Shared --> CoW_Shared : data() 只读访问
-    Materialized --> Materialized : 后续任意访问
-```
+{{< stateboard >}}
+title: "写时复制怎样拆开共享数据"
+rows: ["对象", "底层块", "首值"]
+steps:
+  - title: "已有数据"
+    detail: "示意 A 的存储首元素为 5。"
+    cells: [["A", "·"], ["块甲", "·"], ["5", "·"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "延迟复制"
+    detail: "lazy_clone_storage 创建 B，两份存储元数据暂时共用块甲。"
+    cells: [["A", "B"], ["块甲", "块甲"], ["5", "5"]]
+    focus: [[1, 1], [2, 1]]
+  - title: "B 获取可写存储"
+    detail: "CoW 路径为 B 准备独立内存；随后将 B 的首元素写为 8。"
+    cells: [["A", "B"], ["块甲", "块乙"], ["5", "8"]]
+    focus: [[1, 1], [2, 1]]
+{{< /stateboard >}}
 
 ### 8.4 CoW 在 StorageImpl 中的集成
 
@@ -648,4 +645,4 @@ PyTorch 的 Storage/Allocator 体系呈现出清晰的分层设计：
 
 ---
 
-> **上一篇**: [TensorImpl 深度解析](./01-tensorimpl-deep-dive.md)
+> **上一篇**: [TensorImpl 深度解析](/pytorch/02-fundamentals/01-tensorimpl-deep-dive/)

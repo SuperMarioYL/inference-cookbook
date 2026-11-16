@@ -4,14 +4,13 @@ weight: 2
 ---
 
 
-> **阅读时间**: 约 15 分钟
 > **前置要求**: [Transformer 与注意力机制基础](./01-transformer-attention.md)
 
 ---
 
 ## 概述
 
-KV Cache 是 LLM 推理优化的核心技术。本文深入讲解 KV Cache 的原理、内存计算和优化动机。
+每追加一个 token，全注意力层就要为它保留一份 K 和 V。把每层的 KV 头数、头维度和元素字节数相乘，再加总各层，就能算出序列增长一格的代价。
 
 ---
 
@@ -130,21 +129,34 @@ $$
 
 ### 3.3 线性增长的挑战
 
-```mermaid
-graph LR
-    subgraph growth["KV Cache 随序列长度线性增长"]
-        S1["512 tokens<br/>256 MB"] --> S2["1024 tokens<br/>512 MB"]
-        S2 --> S3["2048 tokens<br/>1 GB"]
-        S3 --> S4["4096 tokens<br/>2 GB"]
-        S4 --> S5["8192 tokens<br/>4 GB"]
-    end
-    subgraph limit["GPU 显存限制"]
-        G1["A100 80GB"]
-        G2["减去模型权重 ~14GB"]
-        G3["减去激活值 ~10GB"]
-        G4["剩余 ~56GB 用于 KV Cache"]
-    end
-```
+{{< stateboard >}}
+title: "长度翻倍时，KV 占用如何变化"
+rows: ["每层字节", "层数", "总计"]
+steps:
+  - title: "一个 token"
+    detail: "示例用 2 个 KV 头、每头 4 维、FP16。K 和 V 合计每层 32 字节。"
+    cells:
+      - ["32 B"]
+      - ["2"]
+      - ["64 B"]
+    focus: [[0, 0], [2, 0]]
+  - title: "两个 token"
+    detail: "模型有两层，保存两个位置需 128 字节。"
+    cells:
+      - ["64 B"]
+      - ["2"]
+      - ["128 B"]
+    focus: [[0, 0], [2, 0]]
+  - title: "四个 token"
+    detail: "保持头数、维度和精度不变，总字节数继续按位置数线性增长。"
+    cells:
+      - ["128 B"]
+      - ["2"]
+      - ["256 B"]
+    focus: [[0, 0], [2, 0]]
+{{< /stateboard >}}
+
+这里计算 K/V 张量的有效数据量。引擎实际分配还要考虑块对齐、保留容量和每个 rank 的布局。
 **关键问题**:
 - 单请求长序列会占用大量显存
 - 并发请求会快速耗尽显存
@@ -271,24 +283,32 @@ graph TB
     只计算一次 KV，三个请求共享
 ```
 ### 6.2 多轮对话
-```mermaid
-sequenceDiagram
-    participant User as 用户
-    participant LLM as 模型
-    participant Cache as KV Cache
-    User->>LLM: 第一轮问题
-    LLM->>Cache: 存储 Round 1 的 KV
-    LLM->>User: 回答 1
-    User->>LLM: 第二轮问题
-    Cache-->>LLM: 复用 Round 1 的 KV
-    LLM->>Cache: 追加 Round 2 的 KV
-    LLM->>User: 回答 2
-
-    User->>LLM: 第三轮问题
-    Cache-->>LLM: 复用 Round 1+2 的 KV
-    LLM->>Cache: 追加 Round 3 的 KV
-    LLM->>User: 回答 3
-```
+{{< stateboard >}}
+title: "第二轮对话可以接着哪部分算"
+rows: ["轮次一", "轮次二", "KV"]
+steps:
+  - title: "第一轮"
+    detail: "提示 P1 和回答 A1 构成已经处理的历史。"
+    cells:
+      - ["P1", "A1", "·"]
+      - ["·", "·", "·"]
+      - ["P1", "A1", "·"]
+    focus: [[2, 0], [2, 1]]
+  - title: "追加问题"
+    detail: "聊天模板与历史 token 完全一致时，前两格形成可复用前缀。"
+    cells:
+      - ["P1", "A1", "·"]
+      - ["P1", "A1", "P2"]
+      - ["P1", "A1", "·"]
+    focus: [[1, 0], [1, 1]]
+  - title: "处理 P2"
+    detail: "引擎读取仍然可用的完整块，计算新问题以及块边界处的余量。"
+    cells:
+      - ["P1", "A1", "·"]
+      - ["P1", "A1", "P2"]
+      - ["P1", "A1", "P2"]
+    focus: [[1, 2], [2, 2]]
+{{< /stateboard >}}
 
 ### 6.3 RAG 检索增强
 

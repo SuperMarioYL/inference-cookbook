@@ -4,7 +4,6 @@ weight: 5
 ---
 
 
-> **阅读时间**: 约 15 分钟
 > **前置要求**: [GSA 算法](./04-gsa-algorithm.md)
 
 ---
@@ -38,23 +37,7 @@ graph TB
 
 ### 1.2 On-Device 解决方案
 
-```mermaid
-graph TB
-    subgraph ondevice["GSA On-Device 流程"]
-        O1["GPU: Query 生成"]
-        O2["GPU: Hash 编码"]
-        O3["GPU: 相似度检索"]
-        O4["GPU: 注意力计算"]
-
-        O1 --> O2 --> O3 --> O4
-    end
-    subgraph advantage["优势"]
-        A1["无 D2H/H2D 传输"]
-        A2["全 GPU 流水线"]
-        A3["低延迟"]
-    end
-    ondevice --> advantage
-```
+设备路径从 query 生成哈希表示，在设备内选出候选，再读取对应的 K/V。下文“数据流”按这三种数据分别展示它们的去向。
 
 ---
 
@@ -64,7 +47,7 @@ graph TB
 
 将浮点向量编码为紧凑的二进制 Hash，支持高效的 GPU 端相似度计算。
 
-**代码位置**: `ucm/sparse/gsa_on_device/hash_encoder.py`
+[v0.9.1 实现](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/sparse/gsa_on_device/hash_encoder.py)
 
 ```python
 class HashEncoder:
@@ -253,7 +236,7 @@ class TopKSelector:
 
 ### 3.1 GSA On-Device 类
 
-**代码位置**: `ucm/sparse/gsa_on_device/gsa_on_device.py`
+[v0.9.1 实现](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/sparse/gsa_on_device/gsa_on_device.py)
 
 ```python
 class GSAOnDevice(UcmSparseBase):
@@ -356,31 +339,27 @@ class GSAOnDevice(UcmSparseBase):
 
 ### 3.2 数据流
 
-```mermaid
-flowchart TB
-    subgraph gpu["GPU 端"]
-        Q["Query Tensor"]
-        QR["Query 表示"]
-        QH["Query Hash"]
-        BH["Block Hashes"]
-        DIST["Hamming 距离矩阵"]
-        SEL["选中索引"]
-        ATT["稀疏注意力"]
-
-        Q --> QR
-        QR --> QH
-        QH --> DIST
-        BH --> DIST
-        DIST --> SEL
-        SEL --> ATT
-    end
-
-    subgraph cpu["CPU 端（初始化）"]
-        INIT["Block Hash 预计算"]
-    end
-
-    cpu --> |"一次传输"| BH
-```
+{{< trace >}}
+title: "设备上从哈希表示到候选索引"
+actors: ["当前 query", "哈希编码", "候选块", "注意力"]
+steps:
+  - from: 0
+    to: 1
+    label: "生成 query 表示"
+    detail: "当前 query 转成用于筛选的哈希表示。"
+  - from: 1
+    to: 2
+    label: "计算距离"
+    detail: "设备侧比较 query 与已有块的哈希表示。"
+  - from: 2
+    to: 2
+    label: "选取候选"
+    detail: "距离排序产生要访问的原块索引，并结合当前策略保留所需范围。"
+  - from: 2
+    to: 3
+    label: "读取原始 KV"
+    detail: "注意力按选中的索引访问实际 K、V 张量；哈希只用于选择。"
+{{< /trace >}}
 
 ---
 ## 4. 性能优化
@@ -443,49 +422,8 @@ def fused_hash_distance_topk_kernel(
 
 ---
 
-## 5. 配置参数
+## 5. 真实配置与性能对照
 
-### 5.1 参数说明
+固定版离线示例选择 `ucm_sparse_config: {"GSAOnDevice": {}}`，模型配置由 `GSAOnDeviceConfig` 处理。模型家族和设备路径会影响长度阈值、哈希表示及索引布局。应先按该 tag 的支持表选择模型/引擎，再按相应模型的配置字段调整。[离线示例](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/examples/offline_inference_gsaondevice.py) · [配置类](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/sparse/gsa_on_device/gsa_on_device_config.py)
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `hash_bits` | 64 | Hash 比特数 |
-| `hash_planes` | 64 | LSH 超平面数 |
-| `sparse_ratio` | 0.3 | 稀疏比例 |
-| `local_window_sz` | 2 | 局部窗口 |
-| `init_window_sz` | 1 | 起始窗口 |
-| `hash_cache_size` | 10000 | Hash 缓存大小 |
-### 5.2 配置示例
-```yaml
-ucm_sparse_config:
-  GSA_OnDevice:
-    # Hash 配置
-    hash_bits: 64
-    hash_planes: 64
-
-    # 稀疏配置
-    sparse_ratio: 0.3
-    local_window_sz: 2
-    init_window_sz: 1
-    # 缓存配置
-    hash_cache_size: 10000
-```
----
-## 6. 性能对比
-
-### 6.1 延迟对比
-
-| 操作 | GSA (CPU) | GSA On-Device |
-|------|-----------|---------------|
-| Block 选择 | 2-5 ms | 0.1-0.3 ms |
-| D2H 传输 | 0.5-1 ms | 0 ms |
-| H2D 传输 | 0.5-1 ms | 0 ms |
-| **总延迟** | 3-7 ms | 0.1-0.3 ms |
-
-### 6.2 适用场景
-
-| 场景 | 推荐 | 原因 |
-|------|------|------|
-| 低延迟推理 | On-Device | 避免 CPU-GPU 同步 |
-| 大 Batch | GSA | CPU 并行检索 |
-| 显存受限 | GSA | Hash 缓存在 CPU |
+跟踪 `HashEncoder.compute_hash` 得到 query/key 的表示，再看候选选择如何更新本层 attention 的元数据。把检索搬到设备可以省去部分主机交互，也会占用设备计算和内存带宽；吞吐变化应在同一输入长度、并发、模型精度下测量。分别报告完整注意力与 GSAOnDevice 的答案正确率、P50/P99 单步耗时、额外显存和有效选择的块数。[编码实现](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/sparse/gsa_on_device/hash_encoder.py)

@@ -3,20 +3,9 @@ title: "Torch Compile"
 weight: 2
 ---
 
-## 概述
+## 第一次编译与稳定请求如何计时
 
-### 本章学习目标
-- 理解 torch.compile 的工作原理
-- 掌握 SGLang 中的编译优化
-- 了解内核融合机制
-- 学习编译配置和调优
-
-### 前置知识要求
-- 了解 PyTorch 基础
-- 熟悉 CUDA 内核概念
-- 理解模型执行流程
-
----
+同一模型先冷启动，再用相同形状重复运行。将图生成、编译缓存命中及预热后的单步执行分别计时，才能判断端到端延迟变化的原因。PyTorch 编译缓存和 CUDA Graph 重放保存的是不同对象。 [0.5.23 编译缓存说明](https://github.com/sgl-project/sglang/blob/v0.5.23/docs/docs/references/torch_compile_cache.mdx)
 
 ## torch.compile 简介
 
@@ -48,71 +37,35 @@ graph LR
 
 ---
 
-## SGLang 集成
+## 哪些解码批次进入编译
 
-### 编译配置
-
-**关键文件**：`python/sglang/srt/model_executor/model_runner.py`
-
-```python
-def _apply_torch_compile(self):
-    """应用 torch.compile 优化"""
-    if not self.server_args.enable_torch_compile:
-        return
-
-    # 编译模式
-    compile_mode = self.server_args.torch_compile_mode
-
-    # 编译模型
-    self.model = torch.compile(
-        self.model,
-        mode=compile_mode,
-        fullgraph=False,
-        dynamic=True,
-    )
-```
-
-### 编译模式
-
-```python
-# 可用模式
-compile_modes = {
-    "default": "平衡性能和编译时间",
-    "reduce-overhead": "最小化运行时开销",
-    "max-autotune": "最大优化，编译时间长",
-}
-```
-
----
+0.5.23 的 CUDA 解码运行器先由 `get_batch_sizes_to_capture` 得到两组批大小：`capture_bs` 用于图捕获，`compile_bs` 是其中参与编译的批大小。开启 `--enable-torch-compile` 并指定 `--torch-compile-max-bs 8` 后，捕获列表中超过 8 的批大小仍可以有 CUDA Graph，编译覆盖哪些批要看 `compile_bs`。判断某次请求有没有用到编译结果，先找它匹配的解码批大小，再查捕获阶段走了哪条分支。[批大小选择](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/model_executor/runner/base_cuda_graph_runner.py) · [解码图捕获](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/model_executor/runner/decode_cuda_graph_runner.py)
 
 ## 内核融合
 
-### 融合前
+### 观察中间张量的读写
 
-```mermaid
-graph LR
-    subgraph before["融合前"]
-        A["Linear"]
-        B["LayerNorm"]
-        C["GELU"]
-        D["Dropout"]
-
-        A --> B --> C --> D
-    end
-
-    NOTE["4 次内核启动<br/>4 次内存访问"]
-```
-
-### 融合后
-
-```mermaid
-graph LR
-    subgraph after["融合后"]
-        FUSED["Fused Linear-LN-GELU-Dropout"]
-    end
-
-    NOTE["1 次内核启动<br/>1 次内存访问"]
-```
+{{< stateboard >}}
+title: 两个逐元素算子共用一份中间值
+rows: ["原始输入", "中间值", "最终输出"]
+steps:
+  - title: "给定 x=2"
+    detail: "计算 y=(x+1)×3，这里以单一元素显示一次读写。"
+    cells: [["2"], ["·"], ["·"]]
+    focus: [[0, 0]]
+  - title: "分成两个 kernel"
+    detail: "第一个操作算出 3，并将中间张量写回设备内存。"
+    cells: [["2"], ["3"], ["·"]]
+    focus: [[1, 0]]
+  - title: "第二个 kernel"
+    detail: "读取刚保存的中间值，再乘 3，得到 9。"
+    cells: [["2"], ["3"], ["9"]]
+    focus: [[2, 0]]
+  - title: "若融合成功"
+    detail: "同一 kernel 将中间值保留在寄存器，直接写 9，省去中间张量的显存往返。"
+    cells: [["2"], ["寄存器"], ["9"]]
+    focus: [[1, 0], [2, 0]]
+{{< /stateboard >}}
 
 ### 融合示例
 
@@ -204,60 +157,30 @@ class Model(nn.Module):
 
 ---
 
-## 性能分析
+## 分开测量编译和推理
 
-### 编译时间
-
-```
-首次编译:
-- 小模型 (1B): ~30s
-- 中模型 (7B): ~2min
-- 大模型 (70B): ~10min
-
-重新编译 (形状变化):
-- 增量编译: ~5s
-```
-
-### 运行时性能
-
-| 场景 | 无编译 | 有编译 | 提升 |
-|------|--------|--------|------|
-| MLP 前向 | 1.0x | 1.3x | 30% |
-| 注意力 | 1.0x | 1.1x | 10% |
-| 端到端 | 1.0x | 1.2x | 20% |
-
----
+单独记录首次启动的编译耗时、第二次使用相同缓存的启动耗时，以及预热后的设备步时。更换批形状、后端或编译选项可能需要生成新的代码，混在一组汇总延迟里会掩盖差别。指定同一模型与提示长度，开启编译和关闭编译各保留一条时间线，比较融合内核的数量与内存访问，再验证端到端变化。
 
 ## 配置参数
 
-### 服务器参数
-
-```python
-@dataclass
-class ServerArgs:
-    # 启用 torch.compile
-    enable_torch_compile: bool = False
-
-    # 编译模式
-    torch_compile_mode: str = "reduce-overhead"
-
-    # 最大自动调优
-    torch_compile_max_autotune: bool = False
-```
+| 参数 | 作用 |
+|---|---|
+| `--enable-torch-compile` | 对支持的执行路径开启 torch.compile。 |
+| `--torch-compile-max-bs` | 限制参与编译的批大小，便于比较编译开销与覆盖范围。 |
 
 ### 启动命令
 
 ```bash
 # 启用 torch.compile
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --enable-torch-compile
 
-# 指定编译模式
+# 限制参与编译的 batch size
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --enable-torch-compile \
-    --torch-compile-mode max-autotune
+    --torch-compile-max-bs 8
 ```
 
 ---
@@ -377,27 +300,3 @@ torch._dynamo.config.cache_size_limit = 256  # 增加缓存
 ```
 
 ---
-
-## 小结
-
-### 要点回顾
-
-1. **原理**：将 Python 代码编译为优化的机器码
-2. **优化**：内核融合、算子选择、内存优化
-3. **配合**：与 CUDA Graph 组合使用效果更好
-4. **权衡**：编译时间 vs 运行时性能
-
-### 使用建议
-
-| 场景 | 建议 |
-|------|------|
-| 生产环境 | 启用，使用 reduce-overhead |
-| 开发调试 | 禁用，便于调试 |
-| 性能调优 | 启用 max-autotune |
-
-### 下一章预告
-
-在下一章《量化支持》中，我们将：
-- 了解 FP8/INT4/AWQ 等量化方法
-- 学习量化对内存和性能的影响
-- 掌握量化配置

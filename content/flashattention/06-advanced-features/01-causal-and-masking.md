@@ -119,15 +119,9 @@ if constexpr (Is_local) {
 
 对于因果遮蔽，KV 块可分为三类：
 
-```mermaid
-graph LR
-    subgraph classification["KV 块分类（对于给定 Q 块）"]
-        A["完全保留块<br/>所有元素有效<br/>n < n_block_min_causal"]
-        B["部分遮蔽块<br/>需要元素级 mask<br/>对角线经过的块"]
-        C["完全跳过块<br/>所有元素无效<br/>n >= n_block_max"]
-    end
-    A --> B --> C
-```
+固定 Q 行 2、3，沿 K 方向扫描三块。每格是一个 Q/K 位置，只有满足 j≤i 的格子才能贡献权重。
+
+{{< mechanism "fa-causal-tiles" >}}
 
 ---
 
@@ -342,6 +336,8 @@ if (col_idx >= col_limit_right ||
 
 `sink_token_length` 参数定义了保留的 token 数。当 `col_idx < col_limit_sink` 时，即使超出滑动窗口左边界，也不会被遮蔽。
 
+`sink_token_length` 在所读版本中是 Hopper 内部 mask 结构的字段，FA2 的公开 `flash_attn_func` 没有这一参数。FA4 的 `learnable_sink` 则是参与归一化的每头 sink logit，与保留开头若干真实 token 的窗口语义不同。[Hopper mask](https://github.com/Dao-AILab/flash-attention/blob/fa4-v4.0.0.beta39/hopper/mask.h) · [FA4 接口](https://github.com/Dao-AILab/flash-attention/blob/fa4-v4.0.0.beta39/flash_attn/cute/interface.py)
+
 ### 7.3 使用场景
 
 ```
@@ -358,6 +354,6 @@ Q 位置 i=1000 的有效 K 范围:
 
 ## 导航
 
-- 上一篇：[调试指南](../05-code-walkthrough/03-debug-guide.md)
-- 下一篇：[KV Cache 与推理优化](02-kv-cache-inference.md)
-- [返回目录](../README.md)
+- 上一篇：[调试指南](/flashattention/05-code-walkthrough/03-debug-guide/)
+- 下一篇：[KV Cache 与推理优化](/flashattention/06-advanced-features/02-kv-cache-inference/)
+- [返回目录](/flashattention/00-overview/overview/)

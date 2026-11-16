@@ -3,7 +3,7 @@ title: "Guard 保护机制"
 weight: 6
 ---
 
-> 编译一次，守护无数次 -- Guard 是 Dynamo 决定"已编译代码是否仍然有效"的核心判定系统。
+输入形状从 4 变成 8 后，Dynamo 会先检查已有图的 guard。记录失败的条件，能说明下一次编译是怎样触发的。
 
 ---
 
@@ -18,7 +18,7 @@ PyTorch Dynamo 通过拦截 Python 字节码并将其编译为优化后的计算
 每当一个函数被 `torch.compile` 编译后，Dynamo 会为该次编译生成一组 guard 条件。在后续每次调用时，Dynamo 首先检查这些 guard：
 
 - **全部通过** -- 复用已编译的代码（快速路径）
-- **任一失败** -- 触发重编译（recompilation），生成新的编译结果和新的 guard
+- **某条目有条件失败** -- 继续检查其他缓存条目。全部未命中且仍允许编译时才重编译；达到限制时按配置处理。
 
 Guard 机制的设计目标是在**正确性**和**性能**之间取得平衡：guard 太松会导致错误结果，guard 太紧则会导致过多的重编译。
 
@@ -262,7 +262,7 @@ def ID_MATCH(self, guard: Guard, recompile_hint=None) -> None:
 - 全局对象引用（如 `torch.float32`、函数对象等）
 - 闭包变量引用
 
-**重要特性**：`ID_MATCH` 会追踪被匹配对象的弱引用。当同一个参数位置传入不同的 `nn.Module` 实例时，Dynamo 能够识别出这不是真正的"重编译"，而是不同对象各自的第一次编译。这影响缓存大小的计算逻辑。
+`ID_MATCH` 为需要匹配身份的对象记录弱引用。在同一个参数位置换入另一个模块实例时，旧条目上的身份检查会失败。分析缓存增长时，可以按对象身份查看哪些条目服务于同一实例。
 
 ---
 
@@ -401,26 +401,25 @@ sequenceDiagram
 
 ### 7.2 运行时 Guard 检查流程
 
-当用户再次调用被编译的函数时，Dynamo 在 C++ 层（`_eval_frame.c`）拦截 frame，然后遍历缓存链表：
+当用户再次调用被编译的函数时，Dynamo 在 C++ 层（`torch/csrc/dynamo/eval_frame.c`）拦截 frame，然后遍历缓存链表：
 
-```mermaid
-flowchart TB
-    A["函数调用"] --> B["Dynamo 拦截 Frame"]
-    B --> C["获取缓存链表头部"]
-    C --> D{"缓存条目存在?"}
-
-    D -->|"否"| E["首次编译"]
-    D -->|"是"| F["运行 guard_manager.check(f_locals)"]
-
-    F --> G{"Guard 通过?"}
-    G -->|"是"| H["返回该条目的编译代码"]
-    G -->|"否"| I["移动到下一个缓存条目"]
-    I --> D
-
-    E --> J["Dynamo 追踪 + 编译"]
-    J --> K["生成 Guard 并存入缓存"]
-    K --> H
-```
+{{< stateboard >}}
+title: "输入条件怎样命中已有专门化"
+rows: ["本次输入", "已有条目", "执行"]
+steps:
+  - title: "固定尺寸 4"
+    detail: "示例关闭动态形状。当前函数按长度 4 首次编译为条目 A。"
+    cells: [["[4]"], ["A"], ["执行 A"]]
+    focus: [[1, 0]]
+  - title: "改成长度 8"
+    detail: "A 的尺寸 guard 不满足，且仍允许重编译，于是记录新条目 B。"
+    cells: [["[8]"], ["A、B"], ["执行 B"]]
+    focus: [[1, 0], [2, 0]]
+  - title: "再次输入长度 4"
+    detail: "已有条目 A 的条件仍匹配，复用 A，无需创建第三份结果。"
+    cells: [["[4]"], ["A、B"], ["复用 A"]]
+    focus: [[2, 0]]
+{{< /stateboard >}}
 
 Guard 检查在 C++ 层执行，核心是 `RootGuardManager.check_nopybind` 方法，它直接操作 Python 的 `f_locals` 字典，避免了 Python 层面的函数调用开销。
 
@@ -721,7 +720,7 @@ fn(x1)
 x2 = torch.randn(8, 16)
 fn(x2)
 
-# 此后任何 shape 都不会再触发重编译（只要满足基本约束）
+# 后续满足已有符号约束、dtype 和设备条件的输入可以复用缓存
 x3 = torch.randn(32, 64)
 fn(x3)  # 复用第二次的编译结果
 ```
@@ -838,7 +837,7 @@ if builder.shape_env_code:
 | **Mutation Guard** | 通过 monkey-patch `__setattr__` 检测 `nn.Module` 属性变更，使缓存失效 |
 | **性能优化** | Diff Guard Manager、Recursive Dict Tag、Guard 排序、C++ 实现 |
 
-Guard 机制是 Dynamo 能够在保证正确性的同时高效复用编译结果的基石。理解 guard 的工作原理，对于诊断重编译问题、优化模型编译性能、以及深入理解 `torch.compile` 的行为都至关重要。
+在 `TORCH_LOGS=recompiles` 的输出中找到第一次失败的 guard，再对照两次调用的形状、类型和对象身份。
 
 ---
 

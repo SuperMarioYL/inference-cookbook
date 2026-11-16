@@ -1,0 +1,180 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 472 265" role="img" aria-labelledby="fa-tile-scan-title">
+  <title id="fa-tile-scan-title">固定一个 Q 块，遍历 KV 块</title>
+  <desc>分数矩阵有 4 行、6 列，每个 tile 覆盖 2 行、2 列。</desc>
+<defs><marker id="fa-tile-scan-end" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 Z" class="arrowhead"/></marker></defs>
+<text x="14" y="28" class="diagram-title" text-anchor="start">固定一个 Q 块，遍历 KV 块</text>
+
+  <g data-frame="0">
+    <title>读取 KV0</title>
+    <desc>对 Q 的第 0、1 行处理第一个 2×2 分数块。</desc>
+    <text x="17" y="66" class="label" text-anchor="start">Q 行</text>
+    <text x="154" y="57" class="label" text-anchor="start">K / V 列</text>
+    <text x="341" y="87" class="subhead" text-anchor="start">当前块</text>
+    <text x="341" y="122" class="number" text-anchor="start">KV0</text>
+    <text x="98" y="82" class="note" text-anchor="middle">0</text>
+    <text x="137" y="82" class="note" text-anchor="middle">1</text>
+    <text x="176" y="82" class="note" text-anchor="middle">2</text>
+    <text x="215" y="82" class="note" text-anchor="middle">3</text>
+    <text x="254" y="82" class="note" text-anchor="middle">4</text>
+    <text x="293" y="82" class="note" text-anchor="middle">5</text>
+    <text x="48" y="109" class="note" text-anchor="middle">0</text>
+    <rect x="80" y="89" width="35" height="25" rx="4" class="fresh"/><text x="97.5" y="106.5" class="label" text-anchor="middle">•</text>
+    <rect x="119" y="89" width="35" height="25" rx="4" class="fresh"/><text x="136.5" y="106.5" class="label" text-anchor="middle">•</text>
+    <rect x="158" y="89" width="35" height="25" rx="4" class="idle"/>
+    <rect x="197" y="89" width="35" height="25" rx="4" class="idle"/>
+    <rect x="236" y="89" width="35" height="25" rx="4" class="idle"/>
+    <rect x="275" y="89" width="35" height="25" rx="4" class="idle"/>
+    <text x="48" y="138" class="note" text-anchor="middle">1</text>
+    <rect x="80" y="118" width="35" height="25" rx="4" class="fresh"/><text x="97.5" y="135.5" class="label" text-anchor="middle">•</text>
+    <rect x="119" y="118" width="35" height="25" rx="4" class="fresh"/><text x="136.5" y="135.5" class="label" text-anchor="middle">•</text>
+    <rect x="158" y="118" width="35" height="25" rx="4" class="idle"/>
+    <rect x="197" y="118" width="35" height="25" rx="4" class="idle"/>
+    <rect x="236" y="118" width="35" height="25" rx="4" class="idle"/>
+    <rect x="275" y="118" width="35" height="25" rx="4" class="idle"/>
+    <text x="48" y="167" class="note" text-anchor="middle">2</text>
+    <rect x="80" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="119" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="158" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="197" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="236" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="275" y="147" width="35" height="25" rx="4" class="idle"/>
+    <text x="48" y="196" class="note" text-anchor="middle">3</text>
+    <rect x="80" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="119" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="158" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="197" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="236" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="275" y="176" width="35" height="25" rx="4" class="idle"/>
+    <text x="17" y="239" class="note" text-anchor="start">Q0、Q1 与 K0、K1 打分</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>移至 KV1</title>
+    <desc>行最大值、归一化和与输出累加器接续上一块。</desc>
+    <text x="17" y="66" class="label" text-anchor="start">Q 行</text>
+    <text x="154" y="57" class="label" text-anchor="start">K / V 列</text>
+    <text x="341" y="87" class="subhead" text-anchor="start">当前块</text>
+    <text x="341" y="122" class="number" text-anchor="start">KV1</text>
+    <text x="98" y="82" class="note" text-anchor="middle">0</text>
+    <text x="137" y="82" class="note" text-anchor="middle">1</text>
+    <text x="176" y="82" class="note" text-anchor="middle">2</text>
+    <text x="215" y="82" class="note" text-anchor="middle">3</text>
+    <text x="254" y="82" class="note" text-anchor="middle">4</text>
+    <text x="293" y="82" class="note" text-anchor="middle">5</text>
+    <text x="48" y="109" class="note" text-anchor="middle">0</text>
+    <rect x="80" y="89" width="35" height="25" rx="4" class="stored"/><text x="97.5" y="106.5" class="label" text-anchor="middle">✓</text>
+    <rect x="119" y="89" width="35" height="25" rx="4" class="stored"/><text x="136.5" y="106.5" class="label" text-anchor="middle">✓</text>
+    <rect x="158" y="89" width="35" height="25" rx="4" class="fresh"/><text x="175.5" y="106.5" class="label" text-anchor="middle">•</text>
+    <rect x="197" y="89" width="35" height="25" rx="4" class="fresh"/><text x="214.5" y="106.5" class="label" text-anchor="middle">•</text>
+    <rect x="236" y="89" width="35" height="25" rx="4" class="idle"/>
+    <rect x="275" y="89" width="35" height="25" rx="4" class="idle"/>
+    <text x="48" y="138" class="note" text-anchor="middle">1</text>
+    <rect x="80" y="118" width="35" height="25" rx="4" class="stored"/><text x="97.5" y="135.5" class="label" text-anchor="middle">✓</text>
+    <rect x="119" y="118" width="35" height="25" rx="4" class="stored"/><text x="136.5" y="135.5" class="label" text-anchor="middle">✓</text>
+    <rect x="158" y="118" width="35" height="25" rx="4" class="fresh"/><text x="175.5" y="135.5" class="label" text-anchor="middle">•</text>
+    <rect x="197" y="118" width="35" height="25" rx="4" class="fresh"/><text x="214.5" y="135.5" class="label" text-anchor="middle">•</text>
+    <rect x="236" y="118" width="35" height="25" rx="4" class="idle"/>
+    <rect x="275" y="118" width="35" height="25" rx="4" class="idle"/>
+    <text x="48" y="167" class="note" text-anchor="middle">2</text>
+    <rect x="80" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="119" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="158" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="197" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="236" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="275" y="147" width="35" height="25" rx="4" class="idle"/>
+    <text x="48" y="196" class="note" text-anchor="middle">3</text>
+    <rect x="80" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="119" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="158" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="197" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="236" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="275" y="176" width="35" height="25" rx="4" class="idle"/>
+    <text x="17" y="239" class="note" text-anchor="start">同一对 Q 行继续处理 K2、K3</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>移至 KV2</title>
+    <desc>消费最后两列，不需要把整张分数矩阵写回 HBM。</desc>
+    <text x="17" y="66" class="label" text-anchor="start">Q 行</text>
+    <text x="154" y="57" class="label" text-anchor="start">K / V 列</text>
+    <text x="341" y="87" class="subhead" text-anchor="start">当前块</text>
+    <text x="341" y="122" class="number" text-anchor="start">KV2</text>
+    <text x="98" y="82" class="note" text-anchor="middle">0</text>
+    <text x="137" y="82" class="note" text-anchor="middle">1</text>
+    <text x="176" y="82" class="note" text-anchor="middle">2</text>
+    <text x="215" y="82" class="note" text-anchor="middle">3</text>
+    <text x="254" y="82" class="note" text-anchor="middle">4</text>
+    <text x="293" y="82" class="note" text-anchor="middle">5</text>
+    <text x="48" y="109" class="note" text-anchor="middle">0</text>
+    <rect x="80" y="89" width="35" height="25" rx="4" class="stored"/><text x="97.5" y="106.5" class="label" text-anchor="middle">✓</text>
+    <rect x="119" y="89" width="35" height="25" rx="4" class="stored"/><text x="136.5" y="106.5" class="label" text-anchor="middle">✓</text>
+    <rect x="158" y="89" width="35" height="25" rx="4" class="stored"/><text x="175.5" y="106.5" class="label" text-anchor="middle">✓</text>
+    <rect x="197" y="89" width="35" height="25" rx="4" class="stored"/><text x="214.5" y="106.5" class="label" text-anchor="middle">✓</text>
+    <rect x="236" y="89" width="35" height="25" rx="4" class="fresh"/><text x="253.5" y="106.5" class="label" text-anchor="middle">•</text>
+    <rect x="275" y="89" width="35" height="25" rx="4" class="fresh"/><text x="292.5" y="106.5" class="label" text-anchor="middle">•</text>
+    <text x="48" y="138" class="note" text-anchor="middle">1</text>
+    <rect x="80" y="118" width="35" height="25" rx="4" class="stored"/><text x="97.5" y="135.5" class="label" text-anchor="middle">✓</text>
+    <rect x="119" y="118" width="35" height="25" rx="4" class="stored"/><text x="136.5" y="135.5" class="label" text-anchor="middle">✓</text>
+    <rect x="158" y="118" width="35" height="25" rx="4" class="stored"/><text x="175.5" y="135.5" class="label" text-anchor="middle">✓</text>
+    <rect x="197" y="118" width="35" height="25" rx="4" class="stored"/><text x="214.5" y="135.5" class="label" text-anchor="middle">✓</text>
+    <rect x="236" y="118" width="35" height="25" rx="4" class="fresh"/><text x="253.5" y="135.5" class="label" text-anchor="middle">•</text>
+    <rect x="275" y="118" width="35" height="25" rx="4" class="fresh"/><text x="292.5" y="135.5" class="label" text-anchor="middle">•</text>
+    <text x="48" y="167" class="note" text-anchor="middle">2</text>
+    <rect x="80" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="119" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="158" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="197" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="236" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="275" y="147" width="35" height="25" rx="4" class="idle"/>
+    <text x="48" y="196" class="note" text-anchor="middle">3</text>
+    <rect x="80" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="119" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="158" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="197" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="236" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="275" y="176" width="35" height="25" rx="4" class="idle"/>
+    <text x="17" y="239" class="note" text-anchor="start">最后处理 K4、K5</text>
+  </g>
+  <g data-frame="3" display="none">
+    <title>写回结果</title>
+    <desc>两行分别归一化并写回。下一组 Q 行同样遍历可见的 KV。</desc>
+    <text x="17" y="66" class="label" text-anchor="start">Q 行</text>
+    <text x="154" y="57" class="label" text-anchor="start">K / V 列</text>
+    <text x="341" y="87" class="subhead" text-anchor="start">当前输出</text>
+    <text x="341" y="122" class="number" text-anchor="start">第 0、1 行</text>
+    <text x="98" y="82" class="note" text-anchor="middle">0</text>
+    <text x="137" y="82" class="note" text-anchor="middle">1</text>
+    <text x="176" y="82" class="note" text-anchor="middle">2</text>
+    <text x="215" y="82" class="note" text-anchor="middle">3</text>
+    <text x="254" y="82" class="note" text-anchor="middle">4</text>
+    <text x="293" y="82" class="note" text-anchor="middle">5</text>
+    <text x="48" y="109" class="note" text-anchor="middle">0</text>
+    <rect x="80" y="89" width="35" height="25" rx="4" class="stored"/><text x="97.5" y="106.5" class="label" text-anchor="middle">✓</text>
+    <rect x="119" y="89" width="35" height="25" rx="4" class="stored"/><text x="136.5" y="106.5" class="label" text-anchor="middle">✓</text>
+    <rect x="158" y="89" width="35" height="25" rx="4" class="stored"/><text x="175.5" y="106.5" class="label" text-anchor="middle">✓</text>
+    <rect x="197" y="89" width="35" height="25" rx="4" class="stored"/><text x="214.5" y="106.5" class="label" text-anchor="middle">✓</text>
+    <rect x="236" y="89" width="35" height="25" rx="4" class="stored"/><text x="253.5" y="106.5" class="label" text-anchor="middle">✓</text>
+    <rect x="275" y="89" width="35" height="25" rx="4" class="stored"/><text x="292.5" y="106.5" class="label" text-anchor="middle">✓</text>
+    <text x="48" y="138" class="note" text-anchor="middle">1</text>
+    <rect x="80" y="118" width="35" height="25" rx="4" class="stored"/><text x="97.5" y="135.5" class="label" text-anchor="middle">✓</text>
+    <rect x="119" y="118" width="35" height="25" rx="4" class="stored"/><text x="136.5" y="135.5" class="label" text-anchor="middle">✓</text>
+    <rect x="158" y="118" width="35" height="25" rx="4" class="stored"/><text x="175.5" y="135.5" class="label" text-anchor="middle">✓</text>
+    <rect x="197" y="118" width="35" height="25" rx="4" class="stored"/><text x="214.5" y="135.5" class="label" text-anchor="middle">✓</text>
+    <rect x="236" y="118" width="35" height="25" rx="4" class="stored"/><text x="253.5" y="135.5" class="label" text-anchor="middle">✓</text>
+    <rect x="275" y="118" width="35" height="25" rx="4" class="stored"/><text x="292.5" y="135.5" class="label" text-anchor="middle">✓</text>
+    <text x="48" y="167" class="note" text-anchor="middle">2</text>
+    <rect x="80" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="119" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="158" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="197" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="236" y="147" width="35" height="25" rx="4" class="idle"/>
+    <rect x="275" y="147" width="35" height="25" rx="4" class="idle"/>
+    <text x="48" y="196" class="note" text-anchor="middle">3</text>
+    <rect x="80" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="119" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="158" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="197" y="176" width="35" height="25" rx="4" class="idle"/>
+    <rect x="236" y="176" width="35" height="25" rx="4" class="idle"/>
+    <text x="341" y="155" class="number" text-anchor="start">O0、O1</text>
+    <rect x="275" y="176" width="35" height="25" rx="4" class="idle"/>
+    <text x="17" y="239" class="note" text-anchor="start">这两行的所有列已计入输出</text>
+  </g>
+</svg>

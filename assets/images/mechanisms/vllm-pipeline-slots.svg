@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 472 248" role="img" aria-labelledby="vllm-pipeline-slots-title">
+  <title id="vllm-pipeline-slots-title">三个微批穿过三段模型</title>
+  <desc>横向是等长时隙，纵向是模型分段，同一字母表示同一个微批。</desc>
+  <text x="16" y="29" class="diagram-title" text-anchor="start">三个微批穿过三段模型</text>
+  <text x="25" y="113" class="label" text-anchor="start">GPU 0</text>
+  <text x="25" y="164" class="label" text-anchor="start">GPU 1</text>
+  <text x="25" y="215" class="label" text-anchor="start">GPU 2</text>
+  <text x="122" y="74" class="label" text-anchor="middle">t1</text>
+  <text x="192" y="74" class="label" text-anchor="middle">t2</text>
+  <text x="262" y="74" class="label" text-anchor="middle">t3</text>
+  <text x="332" y="74" class="label" text-anchor="middle">t4</text>
+  <text x="402" y="74" class="label" text-anchor="middle">t5</text>
+  <g data-frame="0">
+    <title>A 进入第一段</title>
+    <desc>三个微批 A、B、C 按相同顺序穿过三个模型分段。t1 只有 GPU 0 处理 A。</desc>
+    <rect x="94" y="90" width="57" height="34" rx="5" class="fresh"/><text x="122.5" y="112.0" class="label" text-anchor="middle">A</text>
+    <rect x="164" y="90" width="57" height="34" rx="5" class="idle"/><text x="192.5" y="112.0" class="label" text-anchor="middle">·</text>
+    <rect x="234" y="90" width="57" height="34" rx="5" class="idle"/><text x="262.5" y="112.0" class="label" text-anchor="middle">·</text>
+    <rect x="304" y="90" width="57" height="34" rx="5" class="idle"/><text x="332.5" y="112.0" class="label" text-anchor="middle">·</text>
+    <rect x="374" y="90" width="57" height="34" rx="5" class="idle"/><text x="402.5" y="112.0" class="label" text-anchor="middle">·</text>
+    <rect x="94" y="141" width="57" height="34" rx="5" class="idle"/><text x="122.5" y="163.0" class="label" text-anchor="middle">·</text>
+    <rect x="164" y="141" width="57" height="34" rx="5" class="idle"/><text x="192.5" y="163.0" class="label" text-anchor="middle">·</text>
+    <rect x="234" y="141" width="57" height="34" rx="5" class="idle"/><text x="262.5" y="163.0" class="label" text-anchor="middle">·</text>
+    <rect x="304" y="141" width="57" height="34" rx="5" class="idle"/><text x="332.5" y="163.0" class="label" text-anchor="middle">·</text>
+    <rect x="374" y="141" width="57" height="34" rx="5" class="idle"/><text x="402.5" y="163.0" class="label" text-anchor="middle">·</text>
+    <rect x="94" y="192" width="57" height="34" rx="5" class="idle"/><text x="122.5" y="214.0" class="label" text-anchor="middle">·</text>
+    <rect x="164" y="192" width="57" height="34" rx="5" class="idle"/><text x="192.5" y="214.0" class="label" text-anchor="middle">·</text>
+    <rect x="234" y="192" width="57" height="34" rx="5" class="idle"/><text x="262.5" y="214.0" class="label" text-anchor="middle">·</text>
+    <rect x="304" y="192" width="57" height="34" rx="5" class="idle"/><text x="332.5" y="214.0" class="label" text-anchor="middle">·</text>
+    <rect x="374" y="192" width="57" height="34" rx="5" class="idle"/><text x="402.5" y="214.0" class="label" text-anchor="middle">·</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>B 接在 A 后面</title>
+    <desc>t2 GPU 0 接收 B，GPU 1 处理 A。</desc>
+    <rect x="94" y="90" width="57" height="34" rx="5" class="stored"/><text x="122.5" y="112.0" class="label" text-anchor="middle">A</text>
+    <rect x="164" y="90" width="57" height="34" rx="5" class="fresh"/><text x="192.5" y="112.0" class="label" text-anchor="middle">B</text>
+    <rect x="234" y="90" width="57" height="34" rx="5" class="idle"/><text x="262.5" y="112.0" class="label" text-anchor="middle">·</text>
+    <rect x="304" y="90" width="57" height="34" rx="5" class="idle"/><text x="332.5" y="112.0" class="label" text-anchor="middle">·</text>
+    <rect x="374" y="90" width="57" height="34" rx="5" class="idle"/><text x="402.5" y="112.0" class="label" text-anchor="middle">·</text>
+    <rect x="94" y="141" width="57" height="34" rx="5" class="idle"/><text x="122.5" y="163.0" class="label" text-anchor="middle">·</text>
+    <rect x="164" y="141" width="57" height="34" rx="5" class="fresh"/><text x="192.5" y="163.0" class="label" text-anchor="middle">A</text>
+    <rect x="234" y="141" width="57" height="34" rx="5" class="idle"/><text x="262.5" y="163.0" class="label" text-anchor="middle">·</text>
+    <rect x="304" y="141" width="57" height="34" rx="5" class="idle"/><text x="332.5" y="163.0" class="label" text-anchor="middle">·</text>
+    <rect x="374" y="141" width="57" height="34" rx="5" class="idle"/><text x="402.5" y="163.0" class="label" text-anchor="middle">·</text>
+    <rect x="94" y="192" width="57" height="34" rx="5" class="idle"/><text x="122.5" y="214.0" class="label" text-anchor="middle">·</text>
+    <rect x="164" y="192" width="57" height="34" rx="5" class="idle"/><text x="192.5" y="214.0" class="label" text-anchor="middle">·</text>
+    <rect x="234" y="192" width="57" height="34" rx="5" class="idle"/><text x="262.5" y="214.0" class="label" text-anchor="middle">·</text>
+    <rect x="304" y="192" width="57" height="34" rx="5" class="idle"/><text x="332.5" y="214.0" class="label" text-anchor="middle">·</text>
+    <rect x="374" y="192" width="57" height="34" rx="5" class="idle"/><text x="402.5" y="214.0" class="label" text-anchor="middle">·</text>
+  </g>
+  <g data-frame="2" display="none">
+    <title>三段同时工作</title>
+    <desc>t3 GPU 0 处理 C、GPU 1 处理 B、GPU 2 处理 A。</desc>
+    <rect x="94" y="90" width="57" height="34" rx="5" class="stored"/><text x="122.5" y="112.0" class="label" text-anchor="middle">A</text>
+    <rect x="164" y="90" width="57" height="34" rx="5" class="stored"/><text x="192.5" y="112.0" class="label" text-anchor="middle">B</text>
+    <rect x="234" y="90" width="57" height="34" rx="5" class="fresh"/><text x="262.5" y="112.0" class="label" text-anchor="middle">C</text>
+    <rect x="304" y="90" width="57" height="34" rx="5" class="idle"/><text x="332.5" y="112.0" class="label" text-anchor="middle">·</text>
+    <rect x="374" y="90" width="57" height="34" rx="5" class="idle"/><text x="402.5" y="112.0" class="label" text-anchor="middle">·</text>
+    <rect x="94" y="141" width="57" height="34" rx="5" class="idle"/><text x="122.5" y="163.0" class="label" text-anchor="middle">·</text>
+    <rect x="164" y="141" width="57" height="34" rx="5" class="stored"/><text x="192.5" y="163.0" class="label" text-anchor="middle">A</text>
+    <rect x="234" y="141" width="57" height="34" rx="5" class="fresh"/><text x="262.5" y="163.0" class="label" text-anchor="middle">B</text>
+    <rect x="304" y="141" width="57" height="34" rx="5" class="idle"/><text x="332.5" y="163.0" class="label" text-anchor="middle">·</text>
+    <rect x="374" y="141" width="57" height="34" rx="5" class="idle"/><text x="402.5" y="163.0" class="label" text-anchor="middle">·</text>
+    <rect x="94" y="192" width="57" height="34" rx="5" class="idle"/><text x="122.5" y="214.0" class="label" text-anchor="middle">·</text>
+    <rect x="164" y="192" width="57" height="34" rx="5" class="idle"/><text x="192.5" y="214.0" class="label" text-anchor="middle">·</text>
+    <rect x="234" y="192" width="57" height="34" rx="5" class="fresh"/><text x="262.5" y="214.0" class="label" text-anchor="middle">A</text>
+    <rect x="304" y="192" width="57" height="34" rx="5" class="idle"/><text x="332.5" y="214.0" class="label" text-anchor="middle">·</text>
+    <rect x="374" y="192" width="57" height="34" rx="5" class="idle"/><text x="402.5" y="214.0" class="label" text-anchor="middle">·</text>
+  </g>
+  <g data-frame="3" display="none">
+    <title>最后两段仍在算</title>
+    <desc>t4 GPU 0 已无新微批，GPU 1 和 GPU 2 收尾。</desc>
+    <rect x="94" y="90" width="57" height="34" rx="5" class="stored"/><text x="122.5" y="112.0" class="label" text-anchor="middle">A</text>
+    <rect x="164" y="90" width="57" height="34" rx="5" class="stored"/><text x="192.5" y="112.0" class="label" text-anchor="middle">B</text>
+    <rect x="234" y="90" width="57" height="34" rx="5" class="stored"/><text x="262.5" y="112.0" class="label" text-anchor="middle">C</text>
+    <rect x="304" y="90" width="57" height="34" rx="5" class="idle"/><text x="332.5" y="112.0" class="label" text-anchor="middle">·</text>
+    <rect x="374" y="90" width="57" height="34" rx="5" class="idle"/><text x="402.5" y="112.0" class="label" text-anchor="middle">·</text>
+    <rect x="94" y="141" width="57" height="34" rx="5" class="idle"/><text x="122.5" y="163.0" class="label" text-anchor="middle">·</text>
+    <rect x="164" y="141" width="57" height="34" rx="5" class="stored"/><text x="192.5" y="163.0" class="label" text-anchor="middle">A</text>
+    <rect x="234" y="141" width="57" height="34" rx="5" class="stored"/><text x="262.5" y="163.0" class="label" text-anchor="middle">B</text>
+    <rect x="304" y="141" width="57" height="34" rx="5" class="fresh"/><text x="332.5" y="163.0" class="label" text-anchor="middle">C</text>
+    <rect x="374" y="141" width="57" height="34" rx="5" class="idle"/><text x="402.5" y="163.0" class="label" text-anchor="middle">·</text>
+    <rect x="94" y="192" width="57" height="34" rx="5" class="idle"/><text x="122.5" y="214.0" class="label" text-anchor="middle">·</text>
+    <rect x="164" y="192" width="57" height="34" rx="5" class="idle"/><text x="192.5" y="214.0" class="label" text-anchor="middle">·</text>
+    <rect x="234" y="192" width="57" height="34" rx="5" class="stored"/><text x="262.5" y="214.0" class="label" text-anchor="middle">A</text>
+    <rect x="304" y="192" width="57" height="34" rx="5" class="fresh"/><text x="332.5" y="214.0" class="label" text-anchor="middle">B</text>
+    <rect x="374" y="192" width="57" height="34" rx="5" class="idle"/><text x="402.5" y="214.0" class="label" text-anchor="middle">·</text>
+  </g>
+  <g data-frame="4" display="none">
+    <title>C 离开流水线</title>
+    <desc>最后一段在 t5 处理完 C。在各段等时、忽略传输的这个例子里，三批共用五个时隙。</desc>
+    <rect x="94" y="90" width="57" height="34" rx="5" class="stored"/><text x="122.5" y="112.0" class="label" text-anchor="middle">A</text>
+    <rect x="164" y="90" width="57" height="34" rx="5" class="stored"/><text x="192.5" y="112.0" class="label" text-anchor="middle">B</text>
+    <rect x="234" y="90" width="57" height="34" rx="5" class="stored"/><text x="262.5" y="112.0" class="label" text-anchor="middle">C</text>
+    <rect x="304" y="90" width="57" height="34" rx="5" class="idle"/><text x="332.5" y="112.0" class="label" text-anchor="middle">·</text>
+    <rect x="374" y="90" width="57" height="34" rx="5" class="idle"/><text x="402.5" y="112.0" class="label" text-anchor="middle">·</text>
+    <rect x="94" y="141" width="57" height="34" rx="5" class="idle"/><text x="122.5" y="163.0" class="label" text-anchor="middle">·</text>
+    <rect x="164" y="141" width="57" height="34" rx="5" class="stored"/><text x="192.5" y="163.0" class="label" text-anchor="middle">A</text>
+    <rect x="234" y="141" width="57" height="34" rx="5" class="stored"/><text x="262.5" y="163.0" class="label" text-anchor="middle">B</text>
+    <rect x="304" y="141" width="57" height="34" rx="5" class="stored"/><text x="332.5" y="163.0" class="label" text-anchor="middle">C</text>
+    <rect x="374" y="141" width="57" height="34" rx="5" class="idle"/><text x="402.5" y="163.0" class="label" text-anchor="middle">·</text>
+    <rect x="94" y="192" width="57" height="34" rx="5" class="idle"/><text x="122.5" y="214.0" class="label" text-anchor="middle">·</text>
+    <rect x="164" y="192" width="57" height="34" rx="5" class="idle"/><text x="192.5" y="214.0" class="label" text-anchor="middle">·</text>
+    <rect x="234" y="192" width="57" height="34" rx="5" class="stored"/><text x="262.5" y="214.0" class="label" text-anchor="middle">A</text>
+    <rect x="304" y="192" width="57" height="34" rx="5" class="stored"/><text x="332.5" y="214.0" class="label" text-anchor="middle">B</text>
+    <rect x="374" y="192" width="57" height="34" rx="5" class="fresh"/><text x="402.5" y="214.0" class="label" text-anchor="middle">C</text>
+  </g>
+</svg>

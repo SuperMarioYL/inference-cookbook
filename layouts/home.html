@@ -1,217 +1,29 @@
 {{ define "main" }}
-<section class="section container-fluid mt-n3 pb-3">
-  <div class="row justify-content-center">
-    <div class="col-lg-12 text-center">
-      <h1 class="display-3 fw-bold mt-5">{{ .Title }}</h1>
-    </div>
-    <div class="col-lg-9 col-xl-8 text-center">
-      <p class="lead fs-4 text-muted my-4">{{ .Params.lead | safeHTML }}</p>
-      <div class="my-5">
-        <div class="d-flex flex-wrap justify-content-center gap-3 mb-3">
-          <a class="btn btn-primary btn-lg px-4" href="/pytorch/00-overview/01-architecture-overview/" role="button">PyTorch</a>
-          <a class="btn btn-primary btn-lg px-4" href="/vllm/00-overview/overview/" role="button">vLLM</a>
-          <a class="btn btn-primary btn-lg px-4" href="/sglang/00-overview/overview/" role="button">SGLang</a>
-          <a class="btn btn-primary btn-lg px-4" href="/ucm/01-overview/01-introduction/" role="button">UCM</a>
-          <a class="btn btn-primary btn-lg px-4" href="/dynamo/00-overview/overview/" role="button">Dynamo</a>
-          <a class="btn btn-primary btn-lg px-4" href="/cacheblend/00-overview/overview/" role="button">CacheBlend</a>
-          <a class="btn btn-primary btn-lg px-4" href="/mooncake/00-beginner-guide/01-what-is-mooncake/" role="button">Mooncake</a>
-          <a class="btn btn-primary btn-lg px-4" href="/flashattention/00-overview/overview/" role="button">Flash Attention</a>
-        </div>
-        <div class="d-flex justify-content-center">
-          <a class="btn btn-outline-secondary px-4" href="https://github.com/SuperMarioYL/inference-cookbook" role="button">GitHub</a>
-        </div>
+<main class="container-xl cookbook-home">
+  <header class="mb-5">
+    <h1 class="display-3 fw-bold">{{ .Title }}</h1>
+    <p class="lead">{{ .Params.lead }}</p>
+  </header>
+  {{ range .Params.routes }}
+    <section class="mb-5">
+      <h2 class="h3 mb-3">{{ .title }}</h2>
+      <div class="framework-grid">
+        {{ range .projects }}
+          {{ $project := . }}
+          {{ with site.GetPage .page }}
+            <a class="framework-card" href="{{ .RelPermalink }}">
+              <h3>{{ $project.name }}</h3>
+              <p>{{ $project.detail }}</p>
+            </a>
+          {{ else }}
+            {{ errorf "Missing homepage destination %s" $project.page }}
+          {{ end }}
+        {{ end }}
       </div>
-    </div>
-  </div>
-</section>
-
-<section class="section section-md bg-light">
-  <div class="container-xl">
-    <div class="row justify-content-center text-center g-5">
-      <div class="col-lg-4">
-        <div class="px-5 py-3">
-          <div class="mb-3 illustration-wrapper">
-            {{ with resources.Get "images/illustrations/thought-process.svg" }}
-              {{ .Content | safeHTML }}
-            {{ end }}
-          </div>
-          <h3 class="h5">理解核心原理</h3>
-          <p class="text-muted">深入讲解 PagedAttention、Radix Attention、KV Cache 等核心技术</p>
-        </div>
-      </div>
-      <div class="col-lg-4">
-        <div class="px-5 py-3">
-          <div class="mb-3 illustration-wrapper">
-            {{ with resources.Get "images/illustrations/source-code.svg" }}
-              {{ .Content | safeHTML }}
-            {{ end }}
-          </div>
-          <h3 class="h5">源码级分析</h3>
-          <p class="text-muted">跟踪 vLLM、SGLang、Dynamo 等框架的代码执行路径</p>
-        </div>
-      </div>
-      <div class="col-lg-4">
-        <div class="px-5 py-3">
-          <div class="mb-3 illustration-wrapper">
-            {{ with resources.Get "images/illustrations/stepping-up.svg" }}
-              {{ .Content | safeHTML }}
-            {{ end }}
-          </div>
-          <h3 class="h5">循序渐进</h3>
-          <p class="text-muted">从基础概念到分布式部署，提供完整的学习路径</p>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="section section-md">
-  <div class="container-xl">
-    <div class="text-center mb-5">
-      <h2 class="mb-2">推理框架深度解析</h2>
-      <p class="text-muted">从入门到精通，掌握主流 LLM 推理技术</p>
-    </div>
-    <div class="framework-grid">
-      <a href="/pytorch/00-overview/01-architecture-overview/" class="framework-card">
-        <span class="framework-badge">基础框架</span>
-        <h3>PyTorch</h3>
-        <p>深度学习框架源码解析，涵盖 Tensor、Autograd、NN Module、编译器栈等 11 个核心模块</p>
-        <div class="framework-tags">
-          <span>Tensor/Storage</span>
-          <span>Autograd</span>
-          <span>TorchDynamo</span>
-        </div>
-      </a>
-      <a href="/vllm/00-overview/overview/" class="framework-card">
-        <span class="framework-badge">入门推荐</span>
-        <h3>vLLM</h3>
-        <p>深入讲解 PagedAttention、连续批处理、调度器等核心模块，33 篇文章带你从原理到源码</p>
-        <div class="framework-tags">
-          <span>PagedAttention</span>
-          <span>KV Cache</span>
-          <span>连续批处理</span>
-        </div>
-      </a>
-      <a href="/sglang/00-overview/overview/" class="framework-card">
-        <span class="framework-badge">高性能</span>
-        <h3>SGLang</h3>
-        <p>高性能 LLM 推理框架，支持 Radix Attention、CUDA Graph 优化和结构化输出</p>
-        <div class="framework-tags">
-          <span>Radix Attention</span>
-          <span>CUDA Graph</span>
-          <span>结构化输出</span>
-        </div>
-      </a>
-      <a href="/ucm/01-overview/01-introduction/" class="framework-card">
-        <span class="framework-badge">缓存管理</span>
-        <h3>UCM</h3>
-        <p>统一缓存管理框架，通过持久化 KV Cache 和稀疏注意力算法，实现 3-10 倍推理延迟降低</p>
-        <div class="framework-tags">
-          <span>KV Cache 持久化</span>
-          <span>稀疏注意力</span>
-          <span>多级存储</span>
-        </div>
-      </a>
-      <a href="/dynamo/00-overview/overview/" class="framework-card">
-        <span class="framework-badge">分布式</span>
-        <h3>NVIDIA Dynamo</h3>
-        <p>分布式推理框架，专为多节点环境设计，支持 KV 感知路由和多引擎抽象</p>
-        <div class="framework-tags">
-          <span>分布式</span>
-          <span>KV 感知路由</span>
-          <span>多引擎</span>
-        </div>
-      </a>
-      <a href="/cacheblend/00-overview/overview/" class="framework-card">
-        <span class="framework-badge">RAG 优化</span>
-        <h3>CacheBlend</h3>
-        <p>基于 KV Cache 融合的 RAG 推理加速技术，解决检索增强生成的性能瓶颈</p>
-        <div class="framework-tags">
-          <span>RAG 加速</span>
-          <span>KV 融合</span>
-          <span>RoPE 恢复</span>
-        </div>
-      </a>
-      <a href="/mooncake/00-beginner-guide/01-what-is-mooncake/" class="framework-card">
-        <span class="framework-badge">FAST'25 最佳论文</span>
-        <h3>Mooncake</h3>
-        <p>KVCache-centric 分离式 LLM 推理系统，生产环境实现 +498% 请求容量提升</p>
-        <div class="framework-tags">
-          <span>分离式架构</span>
-          <span>分布式存储</span>
-          <span>RDMA</span>
-        </div>
-      </a>
-      <a href="/flashattention/00-overview/overview/" class="framework-card">
-        <span class="framework-badge">底层加速</span>
-        <h3>Flash Attention</h3>
-        <p>IO 感知的精确注意力算法，通过 Tiling 和 Online Softmax 实现 2-4 倍训练加速，大幅降低显存占用</p>
-        <div class="framework-tags">
-          <span>Online Softmax</span>
-          <span>CUDA Kernel</span>
-          <span>IO-Awareness</span>
-        </div>
-      </a>
-    </div>
-  </div>
-</section>
-
-<section class="section section-md bg-light">
-  <div class="container-xl">
-    <div class="row justify-content-center">
-      <div class="col-lg-8 text-center">
-        <h2 class="mb-4">适用读者</h2>
-      </div>
-    </div>
-    <div class="row justify-content-center g-3">
-      <div class="col-lg-6">
-        <div class="d-flex align-items-start p-3">
-          <span class="me-3">{{ partial "inline-svg" (dict "src" "svgs/tabler-icons/outline/school.svg" "class" "icon-reader") }}</span>
-          <div>
-            <strong>深度学习初学者</strong>
-            <p class="text-muted mb-0">了解基本的 Python 编程，对机器学习有初步认识</p>
-          </div>
-        </div>
-      </div>
-      <div class="col-lg-6">
-        <div class="d-flex align-items-start p-3">
-          <span class="me-3">{{ partial "inline-svg" (dict "src" "svgs/tabler-icons/outline/rocket.svg" "class" "icon-reader") }}</span>
-          <div>
-            <strong>LLM 应用开发者</strong>
-            <p class="text-muted mb-0">希望了解推理框架底层原理</p>
-          </div>
-        </div>
-      </div>
-      <div class="col-lg-6">
-        <div class="d-flex align-items-start p-3">
-          <span class="me-3">{{ partial "inline-svg" (dict "src" "svgs/tabler-icons/outline/server.svg" "class" "icon-reader") }}</span>
-          <div>
-            <strong>系统工程师</strong>
-            <p class="text-muted mb-0">负责部署和优化 LLM 服务</p>
-          </div>
-        </div>
-      </div>
-      <div class="col-lg-6">
-        <div class="d-flex align-items-start p-3">
-          <span class="me-3">{{ partial "inline-svg" (dict "src" "svgs/tabler-icons/outline/microscope.svg" "class" "icon-reader") }}</span>
-          <div>
-            <strong>研究人员</strong>
-            <p class="text-muted mb-0">研究 LLM 推理优化技术</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
+    </section>
+  {{ end }}
+  <section class="mb-5">{{ .Content }}</section>
+</main>
 {{ end }}
-
-{{ define "sidebar-prefooter" }}
-{{ if site.Params.doks.backgroundDots -}}
-<div class="d-flex justify-content-start">
-  <div class="bg-dots"></div>
-</div>
-{{ end -}}
-{{ end }}
-
-{{ define "sidebar-footer" }}
-{{ end }}
+{{ define "sidebar-prefooter" }}{{ end }}
+{{ define "sidebar-footer" }}{{ end }}

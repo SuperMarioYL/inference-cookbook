@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 452 250" role="img" aria-labelledby="mooncake-transfer-title">
+  <title id="mooncake-transfer-title">同一批 KV 块的两条传输路径</title>
+  <desc>上方画预填充与解码之间的交接，下方画将块写入 Store 后供请求读取。</desc>
+  <defs><marker id="mooncake-transfer-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" class="arrowhead"/></marker></defs>
+  <text x="15" y="28" class="diagram-title" text-anchor="start">同一批 KV 块的两条传输路径</text>
+
+  <g data-frame="0">
+    <title>生成完整块</title>
+    <desc>两种场景都从写端的一批已算好的 KV 开始。</desc>
+    <text x="15" y="69" class="subhead" text-anchor="start">P/D 直传</text>
+    <rect x="15" y="79" width="86" height="36" rx="5" class="stored"/>
+    <text x="58.0" y="102.0" class="label" text-anchor="middle">P</text>
+
+    <rect x="355" y="79" width="81" height="36" rx="5" class="idle"/>
+    <text x="395.5" y="102.0" class="label" text-anchor="middle">D</text>
+    <text x="15" y="155" class="subhead" text-anchor="start">经 Store 读取</text>
+    <rect x="15" y="166" width="86" height="36" rx="5" class="stored"/>
+    <text x="58.0" y="189.0" class="label" text-anchor="middle">写端</text>
+
+    <rect x="169" y="166" width="112" height="36" rx="5" class="idle"/>
+    <text x="225.0" y="189.0" class="label" text-anchor="middle">Store</text>
+
+    <rect x="355" y="166" width="81" height="36" rx="5" class="idle"/>
+    <text x="395.5" y="189.0" class="label" text-anchor="middle">读端</text>
+  </g>
+  <g data-frame="1" display="none">
+    <title>直传与写入</title>
+    <desc>上方直接把块交给 D。下方先写入 Store，读端此时还没有收到 KV。</desc>
+    <text x="15" y="69" class="subhead" text-anchor="start">P/D 直传</text>
+    <rect x="15" y="79" width="86" height="36" rx="5" class="stored"/>
+    <text x="58.0" y="102.0" class="label" text-anchor="middle">P</text>
+    <path d="M 104 97 L 350 97" class="edge" marker-end="url(#mooncake-transfer-arrow)"/>
+    <rect x="355" y="79" width="81" height="36" rx="5" class="stored"/>
+    <text x="395.5" y="102.0" class="label" text-anchor="middle">D</text>
+    <text x="15" y="155" class="subhead" text-anchor="start">经 Store 读取</text>
+    <rect x="15" y="166" width="86" height="36" rx="5" class="stored"/>
+    <text x="58.0" y="189.0" class="label" text-anchor="middle">写端</text>
+    <path d="M 106 184 L 164 184" class="edge" marker-end="url(#mooncake-transfer-arrow)"/>
+    <rect x="169" y="166" width="112" height="36" rx="5" class="stored"/>
+    <text x="225.0" y="189.0" class="label" text-anchor="middle">Store</text>
+
+    <rect x="355" y="166" width="81" height="36" rx="5" class="idle"/>
+    <text x="395.5" y="189.0" class="label" text-anchor="middle">读端</text>
+    <rect x="341" y="92" width="10" height="10" rx="2" class="packet" data-dx="-238" data-dy="0"/>
+    <rect x="156" y="179" width="10" height="10" rx="2" class="packet" data-dx="-53" data-dy="0"/>
+  </g>
+  <g data-frame="2" display="none">
+    <title>从 Store 加载</title>
+    <desc>读端查询并取回这些块，加载完成后才能使用。Store 也可以服务之后到达的请求。</desc>
+    <text x="15" y="69" class="subhead" text-anchor="start">P/D 直传</text>
+    <rect x="15" y="79" width="86" height="36" rx="5" class="stored"/>
+    <text x="58.0" y="102.0" class="label" text-anchor="middle">P</text>
+    <path d="M 104 97 L 350 97" class="edge" marker-end="url(#mooncake-transfer-arrow)"/>
+    <rect x="355" y="79" width="81" height="36" rx="5" class="stored"/>
+    <text x="395.5" y="102.0" class="label" text-anchor="middle">D</text>
+    <text x="15" y="155" class="subhead" text-anchor="start">经 Store 读取</text>
+    <rect x="15" y="166" width="86" height="36" rx="5" class="stored"/>
+    <text x="58.0" y="189.0" class="label" text-anchor="middle">写端</text>
+    <path d="M 106 184 L 164 184" class="edge" marker-end="url(#mooncake-transfer-arrow)"/>
+    <rect x="169" y="166" width="112" height="36" rx="5" class="stored"/>
+    <text x="225.0" y="189.0" class="label" text-anchor="middle">Store</text>
+    <path d="M 286 184 L 350 184" class="edge" marker-end="url(#mooncake-transfer-arrow)"/>
+    <rect x="355" y="166" width="81" height="36" rx="5" class="stored"/>
+    <text x="395.5" y="189.0" class="label" text-anchor="middle">读端</text>
+    <rect x="343" y="179" width="10" height="10" rx="2" class="packet" data-dx="-62" data-dy="0"/>
+  </g>
+</svg>

@@ -3,20 +3,9 @@ title: "量化"
 weight: 3
 ---
 
-## 概述
+## 先辨别权重、激活与 KV 的格式
 
-### 本章学习目标
-- 理解量化的原理和类型
-- 掌握 SGLang 支持的量化方法
-- 了解量化对内存和性能的影响
-- 学习量化配置和使用
-
-### 前置知识要求
-- 了解浮点数表示
-- 熟悉模型权重结构
-- 理解内存与计算的权衡
-
----
+量化模型文件描述权重与 scale 的编码，模型执行后端决定支持的 kernel，KV 精度则另外配置。复现实验时同时记录三者，避免把权重压缩率直接换算成请求吞吐或质量变化。 [0.5.23 支持格式](https://github.com/sgl-project/sglang/blob/v0.5.23/docs/docs/advanced_features/quantization.mdx)
 
 ## 量化原理
 
@@ -96,17 +85,23 @@ FP8 E5M2: 1 符号 + 5 指数 + 2 尾数
 
 ### AWQ (Activation-aware Weight Quantization)
 
-```mermaid
-graph TB
-    subgraph awq["AWQ 原理"]
-        WEIGHT["原始权重"]
-        ANALYZE["分析激活分布"]
-        SCALE["计算缩放因子"]
-        QUANT["量化权重"]
-
-        WEIGHT --> ANALYZE --> SCALE --> QUANT
-    end
-```
+{{< stateboard >}}
+title: 通道缩放怎样保留点积
+rows: ["输入 x", "权重 w", "乘积"]
+steps:
+  - title: "原始点积"
+    detail: "两维输入 x=[4,1]、权重 w=[0.5,1]，点积是 2+1=3。"
+    cells: [["4", "1"], ["0.5", "1"], ["2", "1"]]
+    focus: [[2, 0], [2, 1]]
+  - title: "按通道缩放"
+    detail: "令首通道的缩放系数为 2，把它的权重乘 2、输入除 2。"
+    cells: [["2", "1"], ["1", "1"], ["2", "1"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "再量化权重"
+    detail: "浮点点积仍为 3。AWQ 用校准激活选择通道缩放，再用实际低比特权重评估量化误差。"
+    cells: [["2", "1"], ["量化", "量化"], ["待评估", "待评估"]]
+    focus: [[1, 0], [1, 1]]
+{{< /stateboard >}}
 
 特点：
 - 基于激活分布优化
@@ -134,17 +129,17 @@ graph TB
 ```bash
 # FP8 量化
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --quantization fp8
 
 # AWQ 量化
 python -m sglang.launch_server \
-    --model TheBloke/Llama-2-7B-AWQ \
+    --model-path TheBloke/Llama-2-7B-AWQ \
     --quantization awq
 
 # GPTQ 量化
 python -m sglang.launch_server \
-    --model TheBloke/Llama-2-7B-GPTQ \
+    --model-path TheBloke/Llama-2-7B-GPTQ \
     --quantization gptq
 ```
 
@@ -153,7 +148,7 @@ python -m sglang.launch_server \
 ```bash
 # FP8 KV Cache
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --kv-cache-dtype fp8_e5m2
 
 # 可用 KV Cache 类型
@@ -224,7 +219,7 @@ class QuantizedKVCache:
 
 ## 性能影响
 
-### 内存节省
+### 权重张量的理论存储量
 
 | 模型 | FP16 | FP8 | INT4 |
 |------|------|-----|------|
@@ -232,30 +227,9 @@ class QuantizedKVCache:
 | 13B | 26GB | 13GB | 6.5GB |
 | 70B | 140GB | 70GB | 35GB |
 
-### 吞吐量变化
+### 在你的模型上验证速度与质量
 
-```
-FP8 vs FP16:
-- 内存带宽提升: ~2x
-- 计算吞吐: ~1.5x
-- 端到端: ~1.3-1.5x
-
-INT4 vs FP16:
-- 内存带宽提升: ~4x
-- 计算吞吐: ~2x (需要反量化)
-- 端到端: ~1.5-2x
-```
-
-### 精度影响
-
-| 量化方法 | 困惑度增加 | 任务精度下降 |
-|---------|-----------|-------------|
-| FP8 | <1% | <1% |
-| INT8 | 1-2% | 1-2% |
-| AWQ INT4 | 2-3% | 2-3% |
-| GPTQ INT4 | 3-5% | 3-5% |
-
----
+固定同一输入轨迹与采样参数，从权重加载显存、可分配的 KV 空间和相同并发下的吞吐三个角度比较。低精度能减少要读取的权重字节，但 kernel 是否利用了目标格式、反量化成本，以及模型受计算还是带宽限制，会改变结果。用同一套带正确答案的任务另测质量，分别记录模型检查点、校准方式与量化内核。
 
 ## 最佳实践
 
@@ -320,7 +294,7 @@ TheBloke/Llama-2-13B-GPTQ
 ```bash
 # 权重 FP8 + KV Cache FP8
 python -m sglang.launch_server \
-    --model meta-llama/Llama-3.1-8B-Instruct \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
     --quantization fp8 \
     --kv-cache-dtype fp8_e5m2
 ```
@@ -369,28 +343,3 @@ pip install auto-gptq
 ```
 
 ---
-
-## 小结
-
-### 要点回顾
-
-1. **类型**：FP8、INT8、INT4、AWQ、GPTQ
-2. **权衡**：内存 vs 精度 vs 速度
-3. **配置**：`--quantization` 和 `--kv-cache-dtype`
-4. **选择**：根据场景选择合适的量化方法
-
-### 量化对比
-
-| 方法 | 内存节省 | 速度提升 | 精度损失 |
-|------|----------|----------|----------|
-| FP8 | 50% | 30% | <1% |
-| INT8 | 50% | 20% | 1-2% |
-| AWQ | 75% | 50% | 2-3% |
-| GPTQ | 75% | 50% | 3-5% |
-
-### 下一章预告
-
-在下一章《推测解码》中，我们将：
-- 了解推测解码原理
-- 学习 EAGLE/NGRAM 等方法
-- 掌握加速技术

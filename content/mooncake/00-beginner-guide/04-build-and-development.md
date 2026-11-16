@@ -3,13 +3,7 @@ title: "编译与开发指南"
 weight: 4
 ---
 
-# 编译与开发指南
-
-[上一篇: 快速上手教程](03-quick-start-tutorial.md) | [目录](../README.md)
-
----
-
-> 本篇详细介绍 Mooncake 的源码编译流程、CMake 构建选项以及开发工作流，帮助开发者快速参与到项目开发中。
+构建前先选要运行的部件。只在本机测试 TCP Store 与编译 RDMA、CUDA 后端，需要的工具链和系统库不同。
 
 ---
 
@@ -23,7 +17,7 @@ Mooncake 的依赖可以通过项目根目录下的 `dependencies.sh` 脚本一�
 |--------|---------|------|
 | GCC | 9.4+ | C/C++ 编译器 |
 | CMake | 3.20+ | 构建系统 |
-| Go | 1.23.8 | etcd 客户端、P2P Store 等 Go 组件编译 |
+| Go | 1.26.9 | etcd 客户端、P2P Store 等 Go 组件编译 |
 | YalantingLibs | 0.5.6 | 协程与序列化框架（阿里巴巴开源） |
 | libibverbs | 系统版本 | RDMA 用户态驱动库 |
 | libgoogle-glog | 系统版本 | 日志框架 |
@@ -62,7 +56,7 @@ sudo bash dependencies.sh -y
 1. 安装系统包（build-essential, cmake, libibverbs-dev 等）
 2. 下载并编译安装 YalantingLibs 0.5.6
 3. 初始化 Git 子模块（pybind11 等）
-4. 安装 Go 1.23.8
+4. 安装 Go 1.26.9
 
 ---
 
@@ -139,7 +133,7 @@ cmake .. -DUSE_CUDA=OFF
 
 ```bash
 # 1. 克隆仓库（包含子模块）
-git clone https://github.com/kvcache-ai/Mooncake.git
+git clone --branch v0.3.14 --depth 1 https://github.com/kvcache-ai/Mooncake.git
 cd Mooncake
 
 # 2. 安装依赖
@@ -436,7 +430,3 @@ pre-commit run --all-files
 | FAST'25 论文 | [https://www.usenix.org/conference/fast25/presentation/qin](https://www.usenix.org/conference/fast25/presentation/qin) |
 | Google C++ Style Guide | [https://google.github.io/styleguide/cppguide.html](https://google.github.io/styleguide/cppguide.html) |
 | Google Python Style Guide | [https://google.github.io/styleguide/pyguide.html](https://google.github.io/styleguide/pyguide.html) |
-
----
-
-> 恭喜你完成了初学者指南的全部内容。如需深入了解 Mooncake 的架构设计和核心模块实现，请继续阅读 [01-overview](../01-overview/) 模块。

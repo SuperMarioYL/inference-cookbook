@@ -3,20 +3,9 @@ title: "TokenizerManager"
 weight: 2
 ---
 
-## 概述
+## 以请求标识关联输入和响应
 
-### 本章学习目标
-- 理解 TokenizerManager 的完整职责
-- 掌握 ReqState 的生命周期管理
-- 了解异步处理和并发机制
-- 学习流式输出的实现细节
-
-### 前置知识要求
-- 了解请求生命周期
-- 熟悉 Python asyncio
-- 理解 ZMQ 通信机制
-
----
+两条 HTTP 请求可能出现在同一设备批次，却必须返回各自的流。在 0.5.23 的 TokenizerManager 中，先追踪请求进入、完成分词和投递的分支，再查它按请求标识如何等待输出。下文用简化流程解释这个边界，调试实际对象请以该版本定义为准。 [输入输出入口](https://github.com/sgl-project/sglang/blob/v0.5.23/python/sglang/srt/managers/tokenizer_manager.py)
 
 ## TokenizerManager 职责
 
@@ -237,25 +226,27 @@ class ReqState:
 
 ### 生命周期状态图
 
-```mermaid
-stateDiagram-v2
-    [*] --> Created: 创建请求
-    Created --> Sent: 发送到 Scheduler
-    Sent --> Waiting: 等待响应
-
-    state Waiting {
-        [*] --> WaitEvent
-        WaitEvent --> ProcessOutput: event.set()
-        ProcessOutput --> WaitEvent: 未完成
-        ProcessOutput --> [*]: 完成
-    }
-
-    Waiting --> Streaming: 流式输出
-    Streaming --> Waiting: 继续等待
-    Waiting --> Finished: 请求完成
-    Finished --> Cleaned: 清理状态
-    Cleaned --> [*]
-```
+{{< stateboard >}}
+title: 两个请求分别等待自己的结果
+rows: ["R7", "R8"]
+steps:
+  - title: "同时进入"
+    detail: "两个客户端各有一个独立的请求标识与等待状态。"
+    cells: [["已登记", "等待"], ["已登记", "等待"]]
+    focus: [[0, 0], [1, 0]]
+  - title: "先返回 R8"
+    detail: "收到的一批输出中只有 R8，前端只唤醒 R8 的等待者。"
+    cells: [["已登记", "等待"], ["已登记", "有增量"]]
+    focus: [[1, 1]]
+  - title: "R7 结束"
+    detail: "R7 的终止信息到达，前端完成 R7 的响应；R8 还会接收后续结果。"
+    cells: [["已完成", "终止"], ["已登记", "等待"]]
+    focus: [[0, 0], [0, 1]]
+  - title: "R8 也结束"
+    detail: "第二个连接读到完成标记，各自的请求状态得以清理。"
+    cells: [["已完成", "终止"], ["已完成", "终止"]]
+    focus: [[1, 0], [1, 1]]
+{{< /stateboard >}}
 
 ### 生命周期代码
 
@@ -669,18 +660,27 @@ async def update_weights(self, obj):
 
 ### 取消流程
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant TM as TokenizerManager
-    participant SCHED as Scheduler
-
-    Client->>TM: 断开连接
-    TM->>TM: 检测断开
-    TM->>SCHED: AbortReq
-    SCHED->>SCHED: 清理请求
-    TM->>TM: 清理状态
-```
+{{< trace >}}
+title: 断开的 R7 怎样退出
+actors: ["客户端", "分词管理器", "调度器"]
+steps:
+  - from: 0
+    to: 1
+    label: "关闭连接"
+    detail: "R7 的响应流中断，前端观察到调用已断开。"
+  - from: 1
+    to: 2
+    label: "发送取消"
+    detail: "分词管理器把 R7 的标识转给调度器。"
+  - from: 2
+    to: 2
+    label: "清理执行状态"
+    detail: "按 R7 当时所在的队列或批次结束后续工作并回收其资源。"
+  - from: 1
+    to: 1
+    label: "移除等待者"
+    detail: "前端释放与 R7 相关的响应状态，R8 等其他请求继续。"
+{{< /trace >}}
 
 ```python
 def abort_request(self, rid):
@@ -778,27 +778,3 @@ async def handle_loop(self):
 | `abort_request()` | 取消请求 | 1311 |
 
 ---
-
-## 小结
-
-### 要点回顾
-
-1. **Tokenization**：支持单个、批量、交叉编码器三种输入格式
-2. **ReqState**：完整生命周期管理（创建→等待→更新→清理）
-3. **异步处理**：asyncio Event 实现非阻塞等待
-4. **流式输出**：增量处理 + FIRST_COMPLETED 策略
-5. **同步机制**：RWLock 保护权重更新，Condition 实现暂停
-
-### 设计模式
-
-- **TypeBasedDispatcher**：根据消息类型自动路由
-- **Communicator**：封装请求-响应通信
-- **RWLock**：读写锁实现并发控制
-- **AsyncGenerator**：流式响应生成器
-
-### 下一章预告
-
-在下一章《Scheduler 深入解析》中，我们将：
-- 了解调度器事件循环
-- 学习批处理组装逻辑
-- 掌握调度策略选择

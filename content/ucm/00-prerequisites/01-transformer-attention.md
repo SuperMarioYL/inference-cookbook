@@ -4,14 +4,13 @@ weight: 1
 ---
 
 
-> **阅读时间**: 约 15 分钟
 > **前置要求**: 线性代数基础、神经网络基本概念
 
 ---
 
 ## 概述
 
-本文介绍 Transformer 架构中的注意力机制，这是理解 KV Cache 和 UCM 优化的基础。
+每生成一个新 token，注意力层用它的 Q 读取历史 K、V。UCM 关心的是这些历史状态存在哪里、需要多少字节，以及何时要从外部读回。
 
 ---
 
@@ -208,25 +207,32 @@ T4 [  1   1   1   1 ]
 ```
 这确保了模型在生成第 i 个 token 时，只使用前 i-1 个 token 的信息。
 ### 4.3 自回归生成过程
-```mermaid
-sequenceDiagram
-    participant User as 用户
-    participant Model as 模型
-    participant KV as KV Cache
-    User->>Model: 输入 "今天天气"
-    Note over Model: Prefill 阶段
-    Model->>Model: 并行处理所有输入 token
-    Model->>KV: 存储 K, V
-    Model->>User: 输出第一个 token "很"
-
-    Note over Model: Decode 阶段
-    loop 逐个生成
-        Model->>KV: 读取历史 K, V
-        Model->>Model: 处理新 token
-        Model->>KV: 追加新的 K, V
-        Model->>User: 输出下一个 token
-    end
-```
+{{< stateboard >}}
+title: "模型怎样逐个生成新词"
+rows: ["输入序列", "当前操作", "已存位置"]
+steps:
+  - title: "处理提示"
+    detail: "prefill 读完三个输入位置并留下 KV。"
+    cells:
+      - ["甲", "乙", "丙", "·"]
+      - ["读", "读", "读", "·"]
+      - ["甲", "乙", "丙", "·"]
+    focus: [[1, 0], [1, 1], [1, 2]]
+  - title: "生成新词"
+    detail: "末位置的输出分布用于选择下一个 token 丁。"
+    cells:
+      - ["甲", "乙", "丙", "丁"]
+      - ["·", "·", "采样", "·"]
+      - ["甲", "乙", "丙", "·"]
+    focus: [[0, 3]]
+  - title: "进入下一步"
+    detail: "模型将丁作为新输入，读取前面三个位置，并追加丁的 KV。"
+    cells:
+      - ["甲", "乙", "丙", "丁"]
+      - ["·", "·", "·", "计算"]
+      - ["甲", "乙", "丙", "丁"]
+    focus: [[1, 3], [2, 3]]
+{{< /stateboard >}}
 ---
 ## 5. 注意力的稀疏性
 

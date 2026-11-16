@@ -7,7 +7,7 @@ weight: 5
 
 PyTorch 的自动微分系统的核心是一个**有向无环图 (Directed Acyclic Graph, DAG)**。在前向传播过程中，每一个涉及 `requires_grad=True` 张量的运算都会在后台构建对应的计算图节点和边，形成一张记录了完整计算历史的 DAG。在反向传播时，引擎沿着这张图的逆序执行梯度计算。
 
-本文将深入 PyTorch C++ 源代码，详细分析计算图的两大核心数据结构 —— **Node** 和 **Edge**，以及它们如何协作构建出完整的自动微分计算图。
+一次反向运算对应一个 Node。沿 Node 的下一条 Edge，可以找到梯度还要送往哪个算子以及它的哪个输入。
 
 ## 2. DAG 结构总览
 
@@ -301,29 +301,25 @@ print(mul_back.next_functions)
 # ((AccumulateGrad, 0), (AccumulateGrad, 0))
 ```
 
-上面的输出揭示了完整的 grad_fn 链结构：
+从 loss 的求和反向节点开始，每次读取 `next_functions` 跟到上一层运算。
 
-```mermaid
-graph TB
-    subgraph chain["grad_fn 链 - 从输出追溯到叶子"]
-        loss["loss.grad_fn\nSumBackward0"]
-        add["AddBackward0"]
-        mul["MulBackward0"]
-        accX["AccumulateGrad(x)\n叶子节点"]
-        accW["AccumulateGrad(w)\n叶子节点"]
-        accB["AccumulateGrad(b)\n叶子节点"]
-
-        loss -->|"next_functions[0]\n(AddBackward0, 0)"| add
-        add -->|"next_functions[0]\n(MulBackward0, 0)"| mul
-        add -->|"next_functions[1]\n(AccumulateGrad, 0)"| accB
-        mul -->|"next_functions[0]\n(AccumulateGrad, 0)"| accX
-        mul -->|"next_functions[1]\n(AccumulateGrad, 0)"| accW
-    end
-
-    style accX fill:#c8e6c9,stroke:#43a047
-    style accW fill:#c8e6c9,stroke:#43a047
-    style accB fill:#c8e6c9,stroke:#43a047
-```
+{{< stateboard >}}
+title: "从 loss 的反向边追到三个叶子"
+rows: ["当前节点", "通向左分支", "通向右分支"]
+steps:
+  - title: "找到损失的 grad_fn"
+    detail: "对损失 sum(x*w+b) 读取 grad_fn，从求和节点追到加法。"
+    cells: [["SumBackward"], ["AddBackward"], ["·"]]
+    focus: [[1, 0]]
+  - title: "展开加法边"
+    detail: "加法的两个输入分别来自乘法结果和叶张量 b。"
+    cells: [["AddBackward"], ["MulBackward"], ["累加 b"]]
+    focus: [[1, 0], [2, 0]]
+  - title: "展开乘法边"
+    detail: "乘法指向 x、w 对应的 AccumulateGrad，反向按局部导数回传。"
+    cells: [["MulBackward"], ["累加 x"], ["累加 w"]]
+    focus: [[1, 0], [2, 0]]
+{{< /stateboard >}}
 
 ### Python 侧的 `next_functions`
 

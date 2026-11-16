@@ -3,14 +3,9 @@ title: "量化技术"
 weight: 2
 ---
 
+## 区分预量化权重、在线转换与 KV 精度
 
-## 概述
-
-量化（Quantization）是一种将模型权重和激活值从高精度（如 FP32、FP16）转换为低精度（如 INT8、INT4、FP8）的技术。通过量化，可以显著减少模型的显存占用和计算量，从而提高推理效率。
-
-本文将介绍量化的基本原理以及 vLLM 中支持的各种量化方法。
-
----
+检查点元数据决定权重怎样解包，GPU 决定能用哪些 kernel。0.33.0 在线 FP8 量化可选 `fp8_per_tensor` 或 `fp8_per_block`；KV 使用专门的缓存精度配置。 [0.33.0 在线量化](https://github.com/vllm-project/vllm/blob/v0.33.0/docs/features/quantization/online.md)
 
 ## 为什么需要量化
 
@@ -234,26 +229,27 @@ class Fp8Config(QuantizationConfig):
 
 ### 动态 vs 静态激活量化
 
-```mermaid
-flowchart TD
-    subgraph dynamic_quant["动态量化"]
-        A1[输入激活] --> B1[计算 min/max]
-        B1 --> C1[动态计算 scale]
-        C1 --> D1[量化为 FP8]
-        D1 --> E1[计算]
-    end
-
-    subgraph static_quant["静态量化"]
-        A2[校准数据集] --> B2[收集激活统计]
-        B2 --> C2[预计算 scale]
-        C2 --> D2[存储 scale]
-
-        A3[输入激活] --> E2[使用预存 scale]
-        D2 --> E2
-        E2 --> F2[量化为 FP8]
-        F2 --> G2[计算]
-    end
-```
+{{< trace >}}
+title: 激活 scale 在什么时候产生
+actors: ["校准数据", "缓存的 scale", "当前批", "量化算子"]
+steps:
+  - from: 0
+    to: 1
+    label: "静态方案 · 校准"
+    detail: "部署前收集一组激活的数值范围，生成并保存 scale。"
+  - from: 1
+    to: 3
+    label: "推理时取 scale"
+    detail: "当前批使用保存的值完成缩放与低精度计算。"
+  - from: 2
+    to: 2
+    label: "动态方案 · 读输入"
+    detail: "另一次运行改用动态缩放，根据当前输入统计本次需要的范围。"
+  - from: 2
+    to: 3
+    label: "提交本批 scale"
+    detail: "量化算子使用刚得到的缩放值，下一批可以采用不同的值。"
+{{< /trace >}}
 
 **动态量化**：
 - 运行时计算 scale
@@ -469,12 +465,12 @@ llm = LLM(
 在线量化是指在加载模型时动态进行量化，而不需要预先量化好的检查点：
 
 ```python
-# vllm/model_executor/model_loader/online_quantization.py
+# vllm/model_executor/layers/quantization/online/fp8.py
 
 llm = LLM(
     model="meta-llama/Llama-2-7B",
-    quantization="fp8",
-    # 将 FP16 权重动态转换为 FP8
+    quantization="fp8_per_tensor",
+    # 在受支持的设备上按张量缩放，加载时转换权重
 )
 ```
 
@@ -577,38 +573,12 @@ llm = LLM(
 
 ---
 
-## 总结
-
-```mermaid
-graph TD
-    A[量化技术核心] --> B[减少显存]
-    A --> C[加速计算]
-    A --> D[保持精度]
-
-    E[vLLM 支持] --> F[FP8 - 高精度]
-    E --> G[AWQ/GPTQ - 高压缩]
-    E --> H[Marlin - 高性能]
-    E --> I[KV Cache 量化]
-
-    J[选择建议] --> K[生产环境用 FP8]
-    J --> L[资源受限用 4-bit]
-    J --> M[使用 Marlin 加速]
-```
-
-关键要点：
-1. **量化原理**：用低精度表示权重，平衡精度与效率
-2. **多种方法**：FP8、AWQ、GPTQ、BitsAndBytes 等
-3. **Marlin 加速**：INT4/INT8 专用高效内核
-4. **实际选择**：根据硬件和精度需求选择合适方法
-
----
-
 ## 参考资料
 
 1. [AWQ 论文](https://arxiv.org/abs/2306.00978)
 2. [GPTQ 论文](https://arxiv.org/abs/2210.17323)
 3. [FP8 格式规范](https://arxiv.org/abs/2209.05433)
-4. [vLLM 量化文档](https://docs.vllm.ai/en/latest/quantization/)
+4. [vLLM 0.33.0 量化文档](https://docs.vllm.ai/en/v0.33.0/features/quantization/)
 5. [Marlin GitHub](https://github.com/IST-DASLab/marlin)
 
 ---

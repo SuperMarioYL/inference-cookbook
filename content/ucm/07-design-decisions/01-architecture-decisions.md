@@ -1,248 +1,28 @@
 ---
-title: "架构决策分析"
+title: "从代码看 UCM 的集成、缓存键和异步接口"
 weight: 1
 ---
 
+UCM 把外部缓存接入推理引擎时，有三个不同的责任边界：引擎决定本步如何调度，connector 计算缓存匹配并把工作交给 worker，存储后端操作块数据。下面的取舍都可以在 v0.9.1 的接口和测试中定位。
 
-> **阅读时间**: 约 15 分钟
-> **适用人群**: 架构师、高级开发者
+## 哪些行为通过接口接入，哪些需要版本适配
 
----
+vLLM V1 通过指定的 `UCMConnector` 调用匹配、分配后的状态更新、元数据构建与传输回调。`ENABLE_UCM_PATCH` 提供额外启动适配，使特定版本上的 scheduler、worker 或特殊布局走正确的钩子。其他引擎使用各自的入口，例如 SGLang 的 HiCache backend。升级后先确认发布组合，再核对该引擎实际采用的适配分支。[vLLM 调用顺序](../04-vllm-integration/01-connector-interface.md) · [按版本分派的补丁](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/integration/vllm/patch/apply_patch.py)
 
-## 概述
+## 相同文字要满足哪些条件才能共享 KV
 
-本文分析 UCM 项目中的关键架构决策，解释每个决策的背景、权衡和最终选择的原因。
+`build_kv_hash_meta` 包含模型路径末级名、TP 大小、模型 dtype、rank、推测解码参数、相应量化标记、DCP 大小以及布局实现摘要。`RequestHasher(meta)` 把这些命名空间字节纳入 MD5 摘要。普通请求为每个**完整块**计算下一段链值，输入包含上一块摘要、本块的 token 元组和引擎提供的额外语义键。末尾不够一块的 token 不产生普通前缀块键。[命名空间构造](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/integration/vllm/ucm_connector.py) · [请求哈希](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/integration/vllm/request_hasher.py)
 
----
+举例来说，两条请求起始文本一致，但第二块对应的图像不同。第一块之前的公共文本仍可匹配；图像所在块及其后的链应当分开。LoRA、cache salt、prompt embeddings 等也可能改变计算语义。上游 helper 不能表达所需语义时，UCM 会报告哈希错误。同名目录也不能替读者验证两套权重真的相同，部署时要管理模型身份和缓存生命周期。[跨请求和布局隔离测试](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/test/test_ucm_request_hasher.py)
 
-## 1. vLLM 集成方式
+## 一次成功查询为什么还要等待
 
-### 1.1 决策背景
+`lookup` 回答一批块是否存在，`lookup_on_prefix` 描述连续可用的前缀范围。`load` / `dump` 提交传输任务，`check` / `wait` 用于确认任务状态或完成。worker 要在目的数据可消费时才推进对应计算，写方也要在使用源缓冲的操作完成后才复用空间。把这些时刻分开，存储和计算才有重叠的余地。[Store V1 接口](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/store/ucmstore_v1.py)
 
-UCM 需要与 vLLM 深度集成，有三种可选方案：
+## Pipeline 后端如何装配
 
-```mermaid
-graph TB
-    subgraph options["可选方案"]
-        O1["方案 1<br/>Fork vLLM"]
-        O2["方案 2<br/>官方插件"]
-        O3["方案 3<br/>Monkey Patching"]
-    end
+`UcmPipelineStoreBuilder` 以完整组合名注册构造函数。`Cache|Posix` 和 `Mooncake|Posix` 都能提供查询与读取，但它们需要不同的网络、文件和缓冲资源。可用组合由注册表和 wheel 内的后端共同决定。[管线装配](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/store/pipeline/connector.py)
 
-    subgraph evaluation["评估维度"]
-        E1["维护成本"]
-        E2["灵活性"]
-        E3["升级难度"]
-        E4["功能覆盖"]
-    end
-```
+## 稀疏计算的额外约束
 
-### 1.2 方案对比
-
-| 方案 | 维护成本 | 灵活性 | 升级难度 | 功能覆盖 |
-|------|----------|--------|----------|----------|
-| Fork vLLM | 高 | 最高 | 困难 | 完全 |
-| 官方插件 | 低 | 有限 | 简单 | 有限 |
-| Monkey Patching | 中 | 高 | 中等 | 几乎完全 |
-
-### 1.3 最终选择: Monkey Patching
-
-**选择理由**:
-
-1. **非侵入式**: 不修改 vLLM 源码，保持独立性
-2. **灵活性**: 可以修改几乎任何代码路径
-3. **可升级**: vLLM 升级时只需调整补丁
-4. **可选择性**: 可以按需启用/禁用特定功能
-**权衡**:
-- 需要跟踪 vLLM 内部实现变化
-- 版本兼容性需要单独维护
-- 调试时可能不够直观
-
----
-
-## 2. Block 标识方案
-
-### 2.1 决策背景
-
-如何唯一标识 KV Cache Block，有两种主要思路：
-
-```mermaid
-graph TB
-    subgraph approaches["标识方案"]
-        A1["位置寻址<br/>Request ID + Position"]
-        A2["内容寻址<br/>Hash(Content)"]
-    end
-    subgraph considerations["考虑因素"]
-        C1["跨请求复用"]
-        C2["分布式共享"]
-        C3["计算开销"]
-    end
-```
-
-### 2.2 方案对比
-
-| 方案 | 跨请求复用 | 分布式共享 | 计算开销 | 碰撞风险 |
-|------|------------|------------|----------|----------|
-| 位置寻址 | 不支持 | 不支持 | 极低 | 无 |
-| 内容寻址 | 支持 | 支持 | 低 | 极低 |
-### 2.3 最终选择: MD5 内容寻址
-**选择理由**:
-1. **复用能力**: 相同内容自动共享，无需显式管理
-2. **分布式友好**: 不依赖中心化 ID 分配
-3. **版本无关**: 不同版本的请求可以共享相同前缀
-**哈希算法选择: MD5**
-| 算法 | 速度 | 碰撞率 | 输出长度 |
-|------|------|--------|----------|
-| MD5 | 快 | 极低 | 128 bit |
-| SHA-256 | 中 | 更低 | 256 bit |
-| xxHash | 最快 | 可接受 | 64/128 bit |
-选择 MD5 因为:
-- 速度足够快
-- 128 bit 足以避免碰撞
-- 广泛支持，无需额外依赖
-
----
-
-## 3. 存储抽象设计
-
-### 3.1 决策背景
-
-如何设计存储接口以支持多种后端：
-
-```mermaid
-graph TB
-    subgraph design["设计选项"]
-        D1["单一接口<br/>所有操作一个接口"]
-        D2["分层接口<br/>V0 基础 + V1 增强"]
-        D3["能力接口<br/>按能力组合"]
-    end
-```
-### 3.2 最终选择: 分层接口 (V0/V1)
-**设计理由**:
-```python
-class UcmKVStoreBase:
-    def lookup(self, block_ids) -> List[bool]
-    def load(self, block_ids, offset, tensor) -> Task
-    def dump(self, block_ids, offset, tensor) -> Task
-# V1 接口 - 增强功能
-class UcmKVStoreBaseV1(UcmKVStoreBase):
-    def load_data(self, block_ids, shard_indices, ...) -> Task
-    def dump_data(self, block_ids, shard_indices, ...) -> Task
-```
-**优势**:
-1. **渐进增强**: 新功能不破坏旧实现
-2. **简化实现**: 简单后端只需实现 V0
-3. **清晰演进**: 版本化接口便于管理
-
----
-
-## 4. 异步任务模型
-
-### 4.1 决策背景
-
-存储操作应该同步还是异步：
-
-```mermaid
-graph TB
-    subgraph sync["同步模型"]
-        S1["阻塞等待完成"]
-        S2["简单但低效"]
-    end
-    subgraph async["异步模型"]
-        A1["立即返回 Task"]
-        A2["后续 wait/check"]
-        A3["支持重叠"]
-    end
-```
-
-### 4.2 最终选择: 基于 Task 的异步模型
-
-**设计理由**:
-
-```python
-# 异步操作返回 Task
-task = store.load(block_ids, offset, tensor)
-
-do_something_else()
-
-status = store.wait(task)
-```
-**优势**:
-1. **计算传输重叠**: 加载下一层的同时计算当前层
-2. **批量操作**: 可以发起多个操作再统一等待
-3. **非阻塞检查**: 可以轮询状态而不阻塞
-
----
-
-## 5. Pipeline 存储组合
-
-### 5.1 决策背景
-
-如何支持多级存储层级：
-
-```mermaid
-graph TB
-    subgraph approaches["方案"]
-        A1["硬编码层级"]
-        A2["配置化组合"]
-        A3["动态 Pipeline"]
-    end
-```
-### 5.2 最终选择: 可配置 Pipeline
-**设计理由**:
-```yaml
-store_pipeline: "Cache|Posix"    # 内存缓存 + 本地存储
-store_pipeline: "Cache|NFS"      # 内存缓存 + 网络存储
-store_pipeline: "Cache|DS3FS"    # 内存缓存 + S3 存储
-```
-**优势**:
-1. **灵活组合**: 用户可以按需选择
-2. **易于扩展**: 新后端只需实现接口
-3. **运行时配置**: 不需要重新编译
-
----
-
-## 6. 稀疏算法框架
-
-### 6.1 决策背景
-
-如何设计一个支持多种稀疏算法的框架：
-
-```mermaid
-graph TB
-    subgraph design["设计选项"]
-        D1["每种算法独立实现"]
-        D2["统一基类 + 钩子"]
-        D3["组合式设计"]
-    end
-```
-### 6.2 最终选择: 统一基类 + 生命周期钩子
-**设计理由**:
-```python
-class UcmSparseBase:
-    # Scheduler 侧钩子
-    def request_begin(self, request_id, prompt_token_ids): ...
-    def build_sparse_meta(self, scheduler_output): ...
-    # Worker 侧钩子
-    def attention_begin(self, layer_idx, q, k, v): ...
-    def attention_finished(self, layer_idx, output): ...
-```
-
-**优势**:
-1. **统一接口**: 所有算法实现相同接口
-2. **易于切换**: 运行时切换算法
-3. **可组合**: 可以组合多种策略
-4. **清晰边界**: 明确 Scheduler/Worker 职责
-
----
-
-## 7. 决策总结
-
-| 决策领域 | 选择 | 关键理由 |
-|----------|------|----------|
-| vLLM 集成 | Monkey Patching | 非侵入、灵活、可升级 |
-| Block 标识 | MD5 内容寻址 | 跨请求复用、分布式友好 |
-| 存储接口 | 分层 V0/V1 | 渐进增强、简化实现 |
-| 操作模型 | 异步 Task | 计算传输重叠、批量操作 |
-| 存储层级 | Pipeline 组合 | 灵活配置、易扩展 |
-| 稀疏框架 | 生命周期钩子 | 统一接口、可组合 |
+`UcmSparseBase` 提供请求、批次和注意力的生命周期钩子；工厂决定当前可创建哪些方法。它们与普通前缀缓存分别列入模型支持矩阵。启用某个后端后，需要通过匹配负载的输出质量对照评估选择性计算的影响。[稀疏工厂](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/ucm/sparse/factory.py) · [支持表](https://github.com/ModelEngine-Group/unified-cache-management/blob/v0.9.1/docs/source/user-guide/support-matrix/support_matrix.md)
